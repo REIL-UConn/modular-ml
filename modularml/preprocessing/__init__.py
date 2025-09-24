@@ -44,3 +44,7 @@ SCALER_REGISTRY = {
     "absolute": Absolute,
     "segmented": SegmentedScaler,
 }
+
+
+from .feature_importance import FeatureImportance
+
