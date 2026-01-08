@@ -17,6 +17,7 @@ from modularml.core.topology.node_shapes import NodeShapes
 from modularml.core.training.loss_record import LossCollection, LossRecord
 from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
 from modularml.utils.errors.exceptions import BackendMismatchError, BackendNotSupportedError, OptimizerNotSetError
+from modularml.utils.logging.warnings import catch_warnings, warn
 from modularml.utils.nn.backend import Backend
 from modularml.utils.representation.summary import safe_cast_to_summary_rows
 
@@ -65,18 +66,30 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
         """
         ref = None
         if isinstance(upstream_ref, FeatureSet):
-            dup_rep_warnings = None
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always", UserWarning)
-                ref = upstream_ref.reference()
-                dup_rep_warnings = [ww for ww in w if "Multiple representations selected" in str(ww.message)]
+            dup_rep_warnings = False
+            with catch_warnings() as cw:
+                upstream_ref.reference()
+                if cw.match("Multiple representations selected"):
+                    dup_rep_warnings = True
             if dup_rep_warnings:
                 msg = (
-                    "upstream_ref\nSetting a ModelNode `upstream_ref` with a FeatureSet will result in "
-                    "multiple representations of the same column being combined into input/target tensors. "
-                    "Use `FeatureSet(...).reference(...)` is this is not intentional."
+                    "Setting a ModelNode `upstream_ref` with a FeatureSet will result in multiple "
+                    "representations of the same column being combined into input/target tensors. "
                 )
-                warnings.warn(msg, category=UserWarning, stacklevel=2)
+                hint = "Use `FeatureSet(...).reference(...)` is this is not intentional."
+                warn(msg, category=UserWarning, stacklevel=2, hints=hint)
+
+            # with warnings.catch_warnings(record=True) as w:
+            #     warnings.simplefilter("always", UserWarning)
+            #     ref = upstream_ref.reference()
+            #     dup_rep_warnings = [ww for ww in w if "Multiple representations selected" in str(ww.message)]
+            # if dup_rep_warnings:
+            #     msg = (
+            #         "Setting a ModelNode `upstream_ref` with a FeatureSet will result in multiple "
+            #         "representations of the same column being combined into input/target tensors. "
+            #     )
+            #     hint = "Use `FeatureSet(...).reference(...)` is this is not intentional."
+            #     warn(msg, category=UserWarning, stacklevel=2, hints=hint)
         elif isinstance(upstream_ref, ExperimentNodeReference):
             ref = upstream_ref
         elif isinstance(upstream_ref, ExperimentNode):
@@ -206,7 +219,7 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
         msg = f"Cannot infer output shape for ModelNode `{self.label}`."
         raise ValueError(msg)
 
-    def _build_optimizer(self):
+    def _build_optimizer(self, *, force: bool = False):
         if self._optimizer is None:
             raise ValueError("Optimizer is None. Cannot build.")
         if not self.is_built:
@@ -216,9 +229,13 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
             self._optimizer.build(
                 parameters=self._model.parameters(),
                 backend=self.backend,
+                force_rebuild=force,
             )
         elif self.backend == Backend.TENSORFLOW:
-            self._optimizer.build(backend=self.backend)
+            self._optimizer.build(
+                backend=self.backend,
+                force_rebuild=force,
+            )
         elif self.backend == Backend.SCIKIT:
             # Scikit-learn optimizers are typically fit internally
             pass
@@ -230,74 +247,45 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
 
     def build(
         self,
-        input_shapes: dict[str, tuple[int, ...]] | None = None,
-        output_shapes: dict[str, tuple[int, ...]] | None = None,
+        input_shape: tuple[int, ...] | None = None,
+        output_shape: tuple[int, ...] | None = None,
         *,
         force: bool = False,
     ):
         """
         Build the ModelNode by initializing the underlying BaseModel and its optimizer.
 
-        Description:
-            This method performs several steps, including:
-            - Validating input shape constraints (only a single input supported).
-            - Delegating to the underlying BaseModel's `build()` method using the provided shapes.
-            - Constructing the optimizer if defined, based on the model backend.
-
         Args:
-            input_shapes (dict[str, tuple[int, ...]] | None):
-                Input shapes from upstream stages. Must contain exactly one element.
+            input_shape (tuple[int, ...] | None, optional):
+                Input shape to construct this model with.
+                Defaults to None.
 
-            output_shapes (dict[str, tuple[int, ...]] | None):
-                The expected output shapes of this stage. If provided, it must contain exactly
-                one element. If not provided, the BaseModel must be capable of inferring it
-                internally or during construction.
+            output_shape (tuple[int, ...] | None, optional):
+                Output shape to construct this model with. If not provided, the BaseModel
+                must be capable of inferring it internally or during construction.
+                Defaults to None.
 
-            force (bool):
+            force (bool, optional):
                 If model is already instantiated it will not be re-instantiated unless
                 `force=True`. Defaults to False.
-
-        Raises:
-            ValueError: If more than one input shape is provided (ModelNode supports a single input).
-            BackendNotSupportedError: If the backend is unrecognized during optimizer construction.
 
         Notes:
             - For PyTorch and TensorFlow, optimizers are built after the model is initialized.
             - Scikit-learn models typically do not require external optimizers.
             - This method assumes that shape inference and merge logic (if needed) has already
               been resolved upstream by the ModelGraph.
-
         """
-        # Get only input tuples (drop keys, but sort by them for reproducibility)
-        inp_shapes: list[tuple[int, ...]] = [v for k, v in sorted(input_shapes.items())]
-        if self.max_upstream_refs is not None and len(inp_shapes) > self.max_upstream_refs:
-            msg = f"ModelNode only support a single input. Received {len(inp_shapes)}: {input_shapes}"
-            raise ValueError(msg)
-        if len(input_shapes) == 0:
-            msg = f"ModelNode({self.label}) must be provided exactly one input_shape. Received {len(input_shapes)}: {input_shapes}"
-            raise ValueError(msg)
-        inp_shape: tuple[int, ...] = inp_shapes[0]
-
-        # Convert output to SampleShape if provided
-        out_shape: tuple[int, ...] | None = None
-        if output_shapes is not None:
-            out_shapes: list[tuple[int, ...]] = [v for k, v in sorted(output_shapes.items())]
-            if self.max_upstream_refs is not None and len(out_shapes) > 1:
-                msg = f"ModelNode only support a single output. Received {len(out_shapes)}: {output_shapes}"
-                raise ValueError(msg)
-            out_shape: tuple[int, ...] = out_shapes[0]
-
         # Build underlying BaseModel if not already built
         if (not self._model.is_built) or force:
             self._model.build(
-                input_shape=inp_shape,
-                output_shape=out_shape,
+                input_shape=input_shape,
+                output_shape=output_shape,
                 force=force,
             )
 
         # Build optimizer if defined
         if self._optimizer is not None:
-            self._build_optimizer()
+            self._build_optimizer(force=force)
 
     @overload
     def forward(self, batch: Batch, **kwargs) -> Batch: ...
