@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import overload
 
 import numpy as np
 from numpy.typing import NDArray
@@ -8,6 +9,8 @@ from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.featureset_view import FeatureSetView
 from modularml.core.data.sample_data import RoleData, SampleData, SampleShapes
 from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_SAMPLE_ID, DOMAIN_TAGS, DOMAIN_TARGETS
+from modularml.core.references.featureset_reference import FeatureSetReference
+from modularml.core.topology.model_node import ModelNode
 from modularml.utils.data.conversion import to_numpy
 from modularml.utils.data.data_format import DataFormat, format_is_tensorlike
 from modularml.utils.data.pyarrow_data import resolve_column_selectors
@@ -126,10 +129,31 @@ class BatchView(Summarizable):
             label=role,
         )
 
+    @overload
     def materialize_batch(
         self,
         fmt: DataFormat = DataFormat.NUMPY,
         *,
+        node: None = ...,
+        columns: str | list[str] | None = ...,
+        features: str | list[str] | None = ...,
+        targets: str | list[str] | None = ...,
+        tags: str | list[str] | None = ...,
+        rep: str | None = ...,
+    ) -> Batch: ...
+    @overload
+    def materialize_batch(
+        self,
+        fmt: DataFormat = DataFormat.NUMPY,
+        *,
+        node: ModelNode,
+    ) -> Batch: ...
+
+    def materialize_batch(
+        self,
+        fmt: DataFormat = DataFormat.NUMPY,
+        *,
+        node: ModelNode | None = None,
         columns: str | list[str] | None = None,
         features: str | list[str] | None = None,
         targets: str | list[str] | None = None,
@@ -155,6 +179,11 @@ class BatchView(Summarizable):
                 Desired output data format, typically one of
                 :attr:`DataFormat.NUMPY`, :attr:`DataFormat.TORCH`,
                 or :attr:`DataFormat.TENSORFLOW`. Defaults to `NUMPY`.
+
+            node (ModelNode | None):
+                Optional :class:`ModelNode` whose `upstream_ref` determines the
+                feature/target/tag selection. If provided, explicit selector args
+                (`columns/features/targets/tags/rep`) must be left as `None`.
 
             columns (str | list[str] | None):
                 Fully-qualified column names to include in the materialized tensor.
@@ -202,21 +231,48 @@ class BatchView(Summarizable):
             msg = f"DataFormat must be tensor-like. Received: {fmt}"
             raise TypeError(msg)
 
-        # Get column filters
-        # Each domain defaults to all columns, unless subset specified
-        all_cols = self.source.get_all_keys(include_domain_prefix=True, include_rep_suffix=True)
-        all_cols.remove(DOMAIN_SAMPLE_ID)
+        # Resolve selection source: ModelNode or selectors
+        if node is not None:
+            # Disallow mixing node-based selection with explicit selectors
+            if any(x is not None for x in (columns, features, targets, tags, rep)):
+                msg = (
+                    "When `node` is provided, do not pass columns/features/targets/tags/rep. "
+                    "Selection is taken from `node.upstream_ref`."
+                )
+                raise ValueError(msg)
 
-        # Fill any empty domain keys with all columns
-        selected: dict[str, set[str]] = resolve_column_selectors(
-            all_columns=all_cols,
-            columns=columns,
-            features=features,
-            targets=targets,
-            tags=tags,
-            rep=rep,
-            include_all_if_empty=True,
-        )
+            upstream_ref = getattr(node, "upstream_ref", None)
+            if upstream_ref is None:
+                msg = "ModelNode.upstream_ref is required when `node` is provided."
+                raise ValueError(msg)
+
+            # Validate type
+            if not isinstance(upstream_ref, FeatureSetReference):
+                msg = f"ModelNode.upstream_ref must be a FeatureSet. Received: {upstream_ref}."
+                raise TypeError(msg)
+
+            selected = {
+                DOMAIN_FEATURES: set(upstream_ref.features),
+                DOMAIN_TARGETS: set(upstream_ref.targets),
+                DOMAIN_TAGS: set(upstream_ref.tags),
+            }
+
+        # Use selector-based arguments
+        else:
+            # Each domain defaults to all columns, unless subset specified
+            all_cols = self.source.get_all_keys(include_domain_prefix=True, include_rep_suffix=True)
+            all_cols.remove(DOMAIN_SAMPLE_ID)
+
+            # Fill any empty domain keys with all columns
+            selected: dict[str, set[str]] = resolve_column_selectors(
+                all_columns=all_cols,
+                columns=columns,
+                features=features,
+                targets=targets,
+                tags=tags,
+                rep=rep,
+                include_all_if_empty=True,
+            )
 
         # Construct tensors for each role
         role_data: RoleData = {}
