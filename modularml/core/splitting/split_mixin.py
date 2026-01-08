@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
@@ -14,6 +13,7 @@ from modularml.core.splitting.splitter_record import SplitterRecord
 from modularml.utils.data.data_format import DataFormat
 from modularml.utils.data.pyarrow_data import resolve_column_selectors
 from modularml.utils.io.cloning import clone_via_serialization
+from modularml.utils.logging.warnings import warn
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -333,11 +333,8 @@ class SplitMixin:
             selected_indices = np.where(mask)[0]
 
         if len(selected_indices) == 0:
-            warnings.warn(
-                f"No samples match filter conditions: {list(conditions.keys())}",
-                UserWarning,
-                stacklevel=2,
-            )
+            msg = f"No samples match filter conditions: {list(conditions.keys())}"
+            warn(msg, UserWarning, stacklevel=2)
 
         # Build FeatureSetView using indices
         return FeatureSetView(

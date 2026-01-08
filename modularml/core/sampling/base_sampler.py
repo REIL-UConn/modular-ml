@@ -16,7 +16,7 @@ from modularml.core.io.protocols import Configurable, Stateful
 from modularml.core.sampling.batcher import Batcher
 from modularml.utils.data.comparators import deep_equal
 from modularml.utils.data.formatting import ensure_list
-from modularml.utils.environment.environment import running_in_notebook
+from modularml.utils.environment.environment import IN_NOTEBOOK
 from modularml.utils.representation.progress_bars import LazyProgress
 
 if TYPE_CHECKING:
@@ -212,7 +212,7 @@ class BaseSampler(Configurable, Stateful, ABC):
             total=None,
             description=f"Sampling ({type(self).__name__})",
             enabled=self._show_progress,
-            persist=running_in_notebook(),
+            persist=IN_NOTEBOOK,
         )
 
         try:

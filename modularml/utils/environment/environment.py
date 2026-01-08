@@ -4,8 +4,7 @@ import importlib
 from typing import Any
 
 
-def running_in_notebook() -> bool:
-    """Checks is the current enviromment is a Jupyter notebook."""
+def _detect_notebook() -> bool:
     try:
         from IPython import get_ipython
 
@@ -17,6 +16,7 @@ def running_in_notebook() -> bool:
         return ip.__class__.__name__ in {  # noqa: TRY300
             "ZMQInteractiveShell",
         }
+
     except Exception:  # noqa: BLE001
         return False
 
@@ -64,3 +64,7 @@ def import_from_path(path: str) -> Any:
         raise AttributeError(msg) from e
 
     return attr
+
+
+IN_NOTEBOOK: bool = _detect_notebook()
+"""Whether current environment is a Jupyter Notebook"""

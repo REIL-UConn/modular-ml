@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -11,6 +10,7 @@ from modularml.core.references.experiment_reference import ResolutionError
 from modularml.utils.data.formatting import ensure_list
 from modularml.utils.errors.error_handling import ErrorMode
 from modularml.utils.errors.exceptions import GraphNodeInputError, GraphNodeOutputError
+from modularml.utils.logging.warnings import warn
 
 if TYPE_CHECKING:
     from modularml.core.references.experiment_reference import ExperimentNodeReference
@@ -489,7 +489,7 @@ class GraphNode(ABC, ExperimentNode):
         if error_mode == ErrorMode.RAISE:
             raise exc_class(message)
         if error_mode == ErrorMode.WARN:
-            warnings.warn(message, stacklevel=2, category=UserWarning)
+            warn(message, UserWarning, stacklevel=2)
             return False
         if error_mode in (ErrorMode.COERCE, ErrorMode.IGNORE):
             return False

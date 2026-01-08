@@ -8,7 +8,7 @@ from weakref import ref
 
 from matplotlib.pylab import Enum
 
-from modularml.utils.environment.environment import running_in_notebook
+from modularml.utils.environment.environment import IN_NOTEBOOK
 
 if TYPE_CHECKING:
     from modularml.core.experiment.experiment import Experiment
@@ -117,7 +117,7 @@ class ExperimentContext:
             return RegistrationPolicy.from_value(env)
 
         # 2. If running in Jupyter Notebook -> default to OVERWRITE
-        if running_in_notebook():
+        if IN_NOTEBOOK:
             return RegistrationPolicy.OVERWRITE
 
         # 3. Else --> default to ERROR

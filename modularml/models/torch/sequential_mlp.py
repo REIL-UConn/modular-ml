@@ -1,10 +1,9 @@
-import warnings
-
 import numpy as np
 import torch
 
 from modularml.core.models.torch_base_model import TorchBaseModel
 from modularml.utils.data.shape_utils import ensure_tuple_shape
+from modularml.utils.logging.warnings import warn
 from modularml.utils.nn.activations import resolve_activation
 
 
@@ -161,11 +160,8 @@ class SequentialMLP(TorchBaseModel):
         if self._input_shape is None:
             raise ValueError("Input shape must be provided before building the model.")
         if self._output_shape is None:
-            warnings.warn(
-                "No output shape provided. Using default shape of (1, hidden_dim).",
-                stacklevel=2,
-                category=UserWarning,
-            )
+            msg = "No output shape provided. Using default shape of (1, hidden_dim)."
+            warn(msg, category=UserWarning, stacklevel=2)
             self._output_shape = (1, self.hidden_dim)
 
         flat_input = int(np.prod(self._input_shape))

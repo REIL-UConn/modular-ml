@@ -1,7 +1,6 @@
 import ast
 import fnmatch
 import hashlib
-import warnings
 from collections import defaultdict
 from typing import Literal
 
@@ -23,6 +22,7 @@ from modularml.core.data.schema_constants import (
 )
 from modularml.utils.data.formatting import ensure_list
 from modularml.utils.data.shape_utils import ensure_tuple_shape, get_shape
+from modularml.utils.logging.warnings import warn
 
 
 def resolve_column_selectors(
@@ -128,7 +128,7 @@ def resolve_column_selectors(
                     + ", ".join(f"{k} -> {reps}" for k, reps in multi_rep_keys.items())
                     + ". This may lead to unintended model inputs if not handled explicitly."
                 )
-                warnings.warn(msg, category=UserWarning, stacklevel=2)
+                warn(msg, category=UserWarning, stacklevel=2)
 
     return selected
 

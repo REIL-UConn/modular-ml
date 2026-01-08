@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import warnings
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from modularml.core.splitting.base_splitter import BaseSplitter
 from modularml.utils.errors.exceptions import SplitOverlapWarning
+from modularml.utils.logging.warnings import warn
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -103,18 +103,14 @@ class ConditionSplitter(BaseSplitter):
         overlapping = {i: subsets for i, subsets in sample_to_subsets.items() if len(subsets) > 1}
         if overlapping:
             examples_str = ", ".join(
-                f"Sample {k} → {v}" for k, v in list(overlapping.items())[: min(2, len(overlapping))]
+                f"Sample {k} is in {v}" for k, v in list(overlapping.items())[: min(2, len(overlapping))]
             )
             msg = (
                 f"\n{len(overlapping)} samples were assigned to multiple subsets. "
                 f"Overlap may affect downstream assumptions.\n"
                 f"Examples: {examples_str} ..."
             )
-            warnings.warn(
-                msg,
-                category=SplitOverlapWarning,
-                stacklevel=2,
-            )
+            warn(msg, category=SplitOverlapWarning, stacklevel=2)
 
         return self._return_splits(
             view=view,

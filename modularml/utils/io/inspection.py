@@ -1,12 +1,12 @@
 import inspect
 import json
 import pathlib
-import warnings
 import zipfile
 from typing import Any
 
 from modularml.core.io.artifacts import Artifact
 from modularml.core.io.conventions import MML_FILE_EXTENSION
+from modularml.utils.logging.warnings import warn
 
 
 def inspect_packaged_code(path: pathlib.Path) -> dict[str, str]:
@@ -206,13 +206,10 @@ def infer_kwargs_from_init(
             missing_required.append(name)
 
     if missing_required:
-        msg = (
-            f"Cannot fully infer constructor arguments for "
-            f"{obj.__class__.__qualname__}. "
-            f"Missing required parameters: {missing_required}"
-        )
+        msg = f"Cannot fully infer constructor arguments for {obj.__class__.__qualname__}. "
+        hint = f"Provide required parameters: {missing_required}"
         if strict:
             raise ValueError(msg)
-        warnings.warn(msg, RuntimeWarning, stacklevel=2)
+        warn(msg, RuntimeWarning, stacklevel=2, hints=hint)
 
     return kwargs

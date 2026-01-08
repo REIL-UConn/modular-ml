@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -37,6 +36,7 @@ from modularml.utils.data.pyarrow_data import (
 )
 from modularml.utils.errors.exceptions import SplitOverlapWarning
 from modularml.utils.io.cloning import clone_via_serialization
+from modularml.utils.logging.warnings import warn
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -472,13 +472,12 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
         for existing_split in self._splits.values():
             if not split.is_disjoint_with(existing_split):
                 overlap: list[int] = split.get_overlap_with(existing_split)
-                warnings.warn(
-                    f"\nSplit '{split.label}' has overlapping samples with existing split '{existing_split.label}'.\n"
-                    f"    (n_overlap = {len(overlap)})\n"
-                    f"    Consider checking for disjoint split or revising your conditions.",
-                    SplitOverlapWarning,
-                    stacklevel=2,
+                msg = (
+                    f"Split '{split.label}' has overlapping samples with existing split '{existing_split.label}' "
+                    f"(n_overlap = {len(overlap)}). "
                 )
+                hint = "Consider checking for disjoint splits or revising your conditions."
+                warn(msg, category=SplitOverlapWarning, stacklevel=2, hints=hint)
 
         # Register new split
         self._splits[split.label] = split

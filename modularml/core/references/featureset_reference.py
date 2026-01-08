@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, get_args
 
@@ -16,6 +15,7 @@ from modularml.core.data.schema_constants import (
 )
 from modularml.core.references.experiment_reference import ExperimentNodeReference, ExperimentReference, ResolutionError
 from modularml.utils.data.pyarrow_data import resolve_column_selectors
+from modularml.utils.logging.warnings import warn
 
 if TYPE_CHECKING:
     from modularml.context.experiment_context import ExperimentContext
@@ -393,8 +393,7 @@ class FeatureSetColumnReference(ExperimentReference):
 
             elif REP_RAW in avail_reps:
                 msg = f" Multiple possible `reps` for '{val}'. Selecting the default representation: '{REP_RAW}'."
-                warnings.warn(msg, category=UserWarning, stacklevel=2)
-
+                warn(msg, category=UserWarning, stacklevel=2)
                 parsed["rep"] = REP_RAW
 
             else:

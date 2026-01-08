@@ -1,4 +1,3 @@
-import warnings
 from typing import Any, Literal
 
 import numpy as np
@@ -7,6 +6,7 @@ import pandas as pd
 from modularml.utils.data.data_format import DataFormat, format_requires_compatible_shapes, normalize_format
 from modularml.utils.environment.optional_imports import check_tensorflow, check_torch, ensure_tensorflow, ensure_torch
 from modularml.utils.errors.error_handling import ErrorMode
+from modularml.utils.logging.warnings import warn
 from modularml.utils.nn.backend import Backend, infer_backend
 
 
@@ -389,7 +389,7 @@ def merge_dict_of_arrays_to_numpy(
             arr_shapes = [a.shape for a in arrs]
         except ValueError as e:
             msg = f"Failed to align ranks: {e}. Skipping."
-            warnings.warn(msg, UserWarning, stacklevel=2)
+            warn(msg, category=UserWarning, stacklevel=2)
 
     # 3. Determine how to combine
     if mode == "auto":

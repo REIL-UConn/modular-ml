@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import inspect
-import warnings
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -9,6 +8,7 @@ import torch
 from modularml.core.models.base_model import BaseModel
 from modularml.utils.data.shape_utils import ensure_tuple_shape
 from modularml.utils.io.inspection import infer_kwargs_from_init
+from modularml.utils.logging.warnings import warn
 from modularml.utils.nn.backend import Backend
 
 if TYPE_CHECKING:
@@ -80,15 +80,15 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
                 except RuntimeError:
                     msg = (
                         "Failed to infer `model_kwargs` from the wrapped model instance. "
-                        "This model cannot be serialized because its constructor arguments "
-                        "could not be fully reconstructed from the current object state.\n\n"
-                        "Resolution:\n"
-                        "  - Explicitly provide `model_kwargs` when constructing this wrapper, or\n"
-                        "  - Modify the model so all required `__init__` parameters are stored as "
-                        "instance attributes with the same names.\n\n"
-                        f"Model class: {self.model.__class__.__qualname__}"
+                        f"This model (`{self.model.__class__.__qualname__}`) cannot be serialized because its "
+                        "constructor arguments could not be fully reconstructed from the current object state."
                     )
-                    warnings.warn(msg, category=RuntimeWarning, stacklevel=2)
+                    hint = (
+                        "Explicitly provide `model_kwargs` when constructing this wrapper, or "
+                        "modify the model so all required `__init__` parameters are stored as "
+                        "instance attributes with the same names."
+                    )
+                    warn(msg, category=RuntimeWarning, stacklevel=2, hints=hint)
 
         # Pass all init args directly to BaseModel
         # This allows for automatic implementation of get_config/from_config
@@ -283,7 +283,8 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
                 )
                 if error == "raise":
                     raise ValueError(msg)
-                warnings.warn(msg, stacklevel=2, category=RuntimeWarning)
+                hint = "Revise keys given in `model_kwargs`."
+                warn(msg, category=RuntimeWarning, stacklevel=2, hints=hint)
 
         # Try to inject input shape
         # If user explicitly changed input key -> raise error if not accepted
