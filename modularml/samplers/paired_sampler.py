@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from modularml.core.data.schema_constants import ROLE_ANCHOR, ROLE_PAIR
 from modularml.samplers.n_sampler import NSampler
 
 if TYPE_CHECKING:
@@ -26,35 +27,35 @@ class PairedSampler(NSampler):
     def __init__(
         self,
         conditions: dict[str, SimilarityCondition],
-        source: FeatureSet | FeatureSetView | None = None,
         *,
         batch_size: int = 1,
         shuffle: bool = False,
         max_pairs_per_anchor: int | None = 3,
         choose_best_only: bool = False,
         group_by: list[str] | None = None,
-        group_by_role: str = "anchor",
+        group_by_role: str = ROLE_ANCHOR,
         stratify_by: list[str] | None = None,
-        stratify_by_role: str = "anchor",
+        stratify_by_role: str = ROLE_ANCHOR,
         strict_stratification: bool = True,
         drop_last: bool = False,
         seed: int | None = None,
         show_progress: bool = True,
+        source: FeatureSet | FeatureSetView | None = None,
     ):
         """
         Initialize a similarity-based anchor-pair sampler.
 
         Description:
-            ``PairedSampler`` selects, for each anchor sample, a set of
+            `PairedSampler` selects, for each anchor sample, a set of
             candidate pair samples that satisfy the provided similarity
-            conditions. All keys in ``conditions`` are resolved to concrete
-            (domain, key, variant) columns using ``DataReference`` and
+            conditions. All keys in `conditions` are resolved to concrete
+            (domain, key, variant) columns using `DataReference` and
             evaluated using their associated SimilarityCondition objects.
 
-            The sampler internally invokes ``NSampler`` with a single role
-            named ``"pair"``, meaning each batch will contain:
-                - aligned anchor indices under ``"anchor"``
-                - aligned partner indices under ``"pair"``
+            The sampler internally invokes `NSampler` with a single role
+            named `"pair"`, meaning each batch will contain:
+                - aligned anchor indices under `"anchor"`
+                - aligned partner indices under `"pair"`
                 - per-pair similarity weights
 
             This sampler is intended for contrastive, metric-learning, or
@@ -71,10 +72,6 @@ class PairedSampler(NSampler):
                     - "SOH_PCT"
                     - "features.voltage.raw"
                     - "targets.health_label.transformed"
-
-            source (FeatureSet | FeatureSetView | None, optional):
-                Data source to draw samples from. If provided, batches are built
-                immediately; otherwise, call :meth:`bind_source` later.
 
             batch_size (int, optional):
                 Number of (anchor, pair) pairs per batch. Defaults to 1.
@@ -125,10 +122,13 @@ class PairedSampler(NSampler):
                 Whether to show a progress bar during the batch building process.
                 Defaults to True.
 
+            source (FeatureSet | FeatureSetView):
+                The source data from samples are drawn. Note that batches are not
+                constructed until `materialize_batches` is called.
+
         """
         super().__init__(
-            condition_mapping={"pair": conditions},
-            sources=source,
+            condition_mapping={ROLE_PAIR: conditions},
             batch_size=batch_size,
             shuffle=shuffle,
             max_samples_per_anchor=max_pairs_per_anchor,
@@ -141,10 +141,13 @@ class PairedSampler(NSampler):
             drop_last=drop_last,
             seed=seed,
             show_progress=show_progress,
+            source=source,
         )
 
     def __repr__(self):
-        return f"PairedSampler(n_batches={self.num_batches}, batch_size={self.batcher.batch_size})"
+        if self.is_bound:
+            return f"PairedSampler(n_batches={self.num_batches}, batch_size={self.batcher.batch_size})"
+        return f"PairedSampler(batch_size={self.batcher.batch_size})"
 
     # ================================================
     # Configurable
@@ -176,11 +179,13 @@ class PairedSampler(NSampler):
             PairedSampler: Unfitted sampler instance.
 
         """
-        if ("sampler_name" not in config) or (config["sampler_name"] != "PairedSampler"):
+        if ("sampler_name" not in config) or (
+            config["sampler_name"] != "PairedSampler"
+        ):
             raise ValueError("Invalid config for PairedSampler.")
 
         return cls(
-            conditions=config["condition_mapping"]["pair"],
+            conditions=config["condition_mapping"][ROLE_PAIR],
             batch_size=config["batch_size"],
             shuffle=config["shuffle"],
             max_pairs_per_anchor=config["max_samples_per_anchor"],

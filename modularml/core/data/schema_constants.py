@@ -39,6 +39,16 @@ T_ALL_REPS = Literal[
     "transformed",
 ]
 
+# ======================================================
+# Sampler vocabulary
+# ======================================================
+STREAM_DEFAULT: Final[str] = "default"
+ROLE_DEFAULT: Final[str] = "default"
+ROLE_ANCHOR: Final[str] = "anchor"
+ROLE_PAIR: Final[str] = "pair"
+ROLE_POSITIVE: Final[str] = "positive"
+ROLE_NEGATIVE: Final[str] = "negative"
+
 
 # ======================================================
 # Label / naming rules

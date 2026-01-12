@@ -7,8 +7,13 @@ from numpy.typing import NDArray
 from modularml.core.data.batch import Batch
 from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.featureset_view import FeatureSetView
-from modularml.core.data.sample_data import RoleData, SampleData, SampleShapes
-from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_SAMPLE_ID, DOMAIN_TAGS, DOMAIN_TARGETS
+from modularml.core.data.sample_data import RoleData, SampleData
+from modularml.core.data.schema_constants import (
+    DOMAIN_FEATURES,
+    DOMAIN_SAMPLE_ID,
+    DOMAIN_TAGS,
+    DOMAIN_TARGETS,
+)
 from modularml.core.references.featureset_reference import FeatureSetReference
 from modularml.core.topology.model_node import ModelNode
 from modularml.utils.data.conversion import to_numpy
@@ -125,7 +130,10 @@ class BatchView(Summarizable):
         return FeatureSetView(
             source=self.source,
             indices=self.role_indices[role],
-            columns=self.source.get_all_keys(include_domain_prefix=True, include_rep_suffix=True),
+            columns=self.source.get_all_keys(
+                include_domain_prefix=True,
+                include_rep_suffix=True,
+            ),
             label=role,
         )
 
@@ -260,7 +268,10 @@ class BatchView(Summarizable):
         # Use selector-based arguments
         else:
             # Each domain defaults to all columns, unless subset specified
-            all_cols = self.source.get_all_keys(include_domain_prefix=True, include_rep_suffix=True)
+            all_cols = self.source.get_all_keys(
+                include_domain_prefix=True,
+                include_rep_suffix=True,
+            )
             all_cols.remove(DOMAIN_SAMPLE_ID)
 
             # Fill any empty domain keys with all columns
@@ -275,8 +286,7 @@ class BatchView(Summarizable):
             )
 
         # Construct tensors for each role
-        role_data: RoleData = {}
-        shapes: SampleShapes | None = None
+        role_data: dict[str, SampleData] = {}
         role_sample_weights: dict[str, np.ndarray] = {}
         for role in self.role_indices:
             # Get tensor-like data for each domain
@@ -330,8 +340,6 @@ class BatchView(Summarizable):
                         f"Expected: ({self.n_samples}, ...)."
                     )
                     raise ValueError(msg)
-            # Drop batch_size
-            shapes = SampleShapes(shapes={k: v[1:] for k, v in all_shapes.items()})
 
             # Add role_sample_weights (if defined)
             if self.role_indice_weights and role in self.role_indice_weights:
@@ -349,11 +357,12 @@ class BatchView(Summarizable):
                 role_sample_weights[role] = np.ones(shape=(self.n_samples))
 
         # Construct Batch
+        r_data: RoleData = RoleData(data=role_data)
         return Batch(
             batch_size=self.n_samples,
-            role_data=role_data,
+            role_data=r_data,
             role_masks=self.role_masks,
-            shapes=shapes,
+            shapes=r_data.shapes,
             role_weights=role_sample_weights,
         )
 

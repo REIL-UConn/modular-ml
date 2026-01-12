@@ -1,18 +1,23 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.featureset_view import FeatureSetView
-from modularml.core.sampling.base_sampler import BaseSampler, Samples
+from modularml.core.data.schema_constants import ROLE_DEFAULT, STREAM_DEFAULT
+from modularml.core.sampling.base_sampler import BaseSampler, SamplerStreamSpec, Samples
+
+if TYPE_CHECKING:
+    from modularml.core.data.featureset import FeatureSet
 
 
 class SimpleSampler(BaseSampler):
-    STREAM_NAME = "default"
+    __SPECS__ = SamplerStreamSpec(
+        stream_names=(STREAM_DEFAULT,),
+        roles=(ROLE_DEFAULT,),
+    )
 
     def __init__(
         self,
-        source: FeatureSet | FeatureSetView | None = None,
         *,
         batch_size: int = 1,
         shuffle: bool = False,
@@ -22,6 +27,7 @@ class SimpleSampler(BaseSampler):
         drop_last: bool = False,
         seed: int | None = None,
         show_progress: bool = True,
+        source: FeatureSet | FeatureSetView | None = None,
     ):
         """
         Initialize a sampler that splits a FeatureSet or view into batches.
@@ -50,12 +56,9 @@ class SimpleSampler(BaseSampler):
 
             The sampler always returns **zero-copy BatchView objects** that \
             reference the original FeatureSet. BatchViews do *not* materialize \
-            data; they only store role → row-index mappings.
+            data; they only store role to row-index mappings.
 
         Args:
-            source (FeatureSet | FeatureSetView):
-                If provided, batches are built immediately; otherwise, call \
-                `bind_source()` later.
             batch_size (int):
                 Number of samples in each batch.
             shuffle (bool, optional):
@@ -75,6 +78,9 @@ class SimpleSampler(BaseSampler):
             show_progress (bool, optional):
                 Whether to show a progress bar during the batch building process.
                 Defaults to True.
+            source (FeatureSet | FeatureSetView):
+                The source data from samples are drawn. Note that batches are not
+                constructed until `materialize_batches` is called.
 
         Raises:
             ValueError:
@@ -86,26 +92,14 @@ class SimpleSampler(BaseSampler):
             batch_size=batch_size,
             shuffle=shuffle,
             group_by=group_by,
-            group_by_role="default",
+            group_by_role=ROLE_DEFAULT,
             stratify_by=stratify_by,
-            stratify_by_role="default",
+            stratify_by_role=ROLE_DEFAULT,
             strict_stratification=strict_stratification,
             drop_last=drop_last,
             seed=seed,
             show_progress=show_progress,
         )
-
-    def bind_sources(self, source: FeatureSet | FeatureSetView):
-        """Instantiates batches via `build_sampled_view()`."""
-        if isinstance(source, FeatureSet):
-            view = source.to_view()
-        elif isinstance(source, FeatureSetView):
-            view = source
-        else:
-            raise TypeError("Sampler source must be a FeatureSet or FeatureSetView.")
-
-        self.sources: dict[str, FeatureSetView] = {view.source.label: view}
-        self._sampled = self.build_sampled_view()
 
     def build_samples(self) -> dict[tuple[str, str], Samples]:
         """
@@ -119,7 +113,9 @@ class SimpleSampler(BaseSampler):
 
         """
         if self.sources is None:
-            raise RuntimeError("`bind_source` must be called before sampling can occur.")
+            raise RuntimeError(
+                "`bind_source` must be called before sampling can occur.",
+            )
         src_lbl = next(iter(self.sources.keys()))
         src = self.sources[src_lbl]
         if not isinstance(src, FeatureSetView):
@@ -129,14 +125,16 @@ class SimpleSampler(BaseSampler):
         # dict key is 2-tuple of stream_label, source_label
         # For single-stream samplers like this one, we use a default label
         return {
-            (self.STREAM_NAME, src_lbl): Samples(
-                role_indices={"default": src.indices},
+            (STREAM_DEFAULT, src_lbl): Samples(
+                role_indices={ROLE_DEFAULT: src.indices},
                 role_weights=None,
             ),
         }
 
     def __repr__(self):
-        return f"SimpleSampler(n_batches={self.num_batches}, batch_size={self.batcher.batch_size})"
+        if self.is_bound:
+            return f"SimpleSampler(n_batches={self.num_batches}, batch_size={self.batcher.batch_size})"
+        return f"SimpleSampler(batch_size={self.batcher.batch_size})"
 
     # ================================================
     # Configurable
@@ -168,7 +166,9 @@ class SimpleSampler(BaseSampler):
             SimpleSampler: Unfitted sampler instance.
 
         """
-        if ("sampler_name" not in config) or (config["sampler_name"] != "SimpleSampler"):
+        if ("sampler_name" not in config) or (
+            config["sampler_name"] != "SimpleSampler"
+        ):
             raise ValueError("Invalid config for SimpleSampler.")
 
         return cls(

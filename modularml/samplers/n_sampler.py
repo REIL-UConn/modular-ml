@@ -7,22 +7,25 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from modularml.context.experiment_context import ExperimentContext
-from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.featureset_view import FeatureSetView
+from modularml.core.data.schema_constants import ROLE_ANCHOR, STREAM_DEFAULT
 from modularml.core.references.featureset_reference import FeatureSetColumnReference
-from modularml.core.sampling.base_sampler import BaseSampler, Samples
+from modularml.core.sampling.base_sampler import BaseSampler, SamplerStreamSpec, Samples
 from modularml.utils.data.data_format import DataFormat
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
+    from modularml.core.data.featureset import FeatureSet
     from modularml.core.sampling.similiarity_condition import SimilarityCondition
 
 
 @dataclass(frozen=True)
 class SortedColumn:
     values: np.ndarray  # Sorted values
-    original_to_sorted_idxs: np.ndarray  # relative indices used to sort the original array
+    original_to_sorted_idxs: (
+        np.ndarray
+    )  # relative indices used to sort the original array
 
 
 class NSampler(BaseSampler):
@@ -37,34 +40,37 @@ class NSampler(BaseSampler):
     across all roles, aligns indexing, and produces N-way batches.
     """
 
-    STREAM_NAME = "default"
+    __SPECS__ = SamplerStreamSpec(
+        stream_names=(STREAM_DEFAULT,),
+        roles=(ROLE_ANCHOR,),  # minimum guaranteed role
+    )
 
     def __init__(
         self,
         condition_mapping: dict[str, dict[str, SimilarityCondition]],
-        source: FeatureSet | FeatureSetView | None = None,
         *,
         batch_size: int = 1,
         shuffle: bool = False,
         max_samples_per_anchor: int | None = 3,
         choose_best_only: bool = False,
         group_by: list[str] | None = None,
-        group_by_role: str = "anchor",
+        group_by_role: str = ROLE_ANCHOR,
         stratify_by: list[str] | None = None,
-        stratify_by_role: str = "anchor",
+        stratify_by_role: str = ROLE_ANCHOR,
         strict_stratification: bool = True,
         drop_last: bool = False,
         seed: int | None = None,
         show_progress: bool = True,
+        source: FeatureSet | FeatureSetView | None = None,
     ):
         """
         Initialize an N-way similarity-based sampler.
 
         Description:
-            Each role in ``condition_mapping`` has its own set of
+            Each role in `condition_mapping` has its own set of
             SimilarityCondition objects. For each anchor sample, the
             sampler evaluates all candidates according to these conditions,
-            selects up to ``max_samples_per_anchor`` matches per role,
+            selects up to `max_samples_per_anchor` matches per role,
             computes per-role scores, and later intersects anchors across
             all roles to ensure that only anchors with valid matches for
             every role are retained.
@@ -73,9 +79,6 @@ class NSampler(BaseSampler):
             condition_mapping (dict[str, dict[str, SimilarityCondition]]):
                 Mapping from role name to {column_key to SimilarityCondition}.
                 E.g., `{"pair": {...}}` or `{"positive": {...}, "negative": {...}}`
-
-            source (FeatureSet | FeatureSetView | None):
-                Data source. If not provided, must call ``bind_source`` later.
 
             batch_size (int):
                 Number of N-way samples per batch.
@@ -119,15 +122,21 @@ class NSampler(BaseSampler):
                 Whether to show a progress bar during the batch building process.
                 Defaults to True.
 
+            source (FeatureSet | FeatureSetView):
+                The source data from samples are drawn. Note that batches are not
+                constructed until `materialize_batches` is called.
+
         """
-        self.condition_mapping = {role: dict(conds) for role, conds in condition_mapping.items()}
-        if "anchor" in self.condition_mapping:
-            raise ValueError("Condition mapping cannot contain a role named 'anchor'.")
+        self.condition_mapping = {
+            role: dict(conds) for role, conds in condition_mapping.items()
+        }
+        if ROLE_ANCHOR in self.condition_mapping:
+            msg = f"Condition mapping cannot contain a role named '{ROLE_ANCHOR}'."
+            raise ValueError(msg)
         self.max_samples_per_anchor = max_samples_per_anchor
         self.choose_best_only = choose_best_only
 
         super().__init__(
-            sources=source,
             batch_size=batch_size,
             shuffle=shuffle,
             group_by=group_by,
@@ -138,19 +147,8 @@ class NSampler(BaseSampler):
             drop_last=drop_last,
             seed=seed,
             show_progress=show_progress,
+            sources=source,
         )
-
-    def bind_sources(self, source: FeatureSet | FeatureSetView):
-        """Instantiates batches via `build_sampled_view()`."""
-        if isinstance(source, FeatureSet):
-            view = source.to_view()
-        elif isinstance(source, FeatureSetView):
-            view = source
-        else:
-            raise TypeError("Sampler source must be a FeatureSet or FeatureSetView.")
-
-        self.sources: dict[str, FeatureSetView] = {view.source.label: view}
-        self._sampled = self.build_sampled_view()
 
     def build_samples(self) -> dict[tuple[str, str], Samples]:
         """
@@ -191,7 +189,9 @@ class NSampler(BaseSampler):
 
         """
         if self.sources is None:
-            raise RuntimeError("`bind_source` must be called before sampling can occur.")
+            raise RuntimeError(
+                "`bind_source` must be called before sampling can occur.",
+            )
         src_lbl = next(iter(self.sources.keys()))
         src = self.sources[src_lbl]
         if not isinstance(src, FeatureSetView):
@@ -213,7 +213,8 @@ class NSampler(BaseSampler):
         if self._progress is not None:
             self._progress.set_total(len(src) * len(role_specs))
         role_results: dict[str, tuple[np.ndarray]] = {
-            role: self._generate_role_matches(view=src, specs=specs) for role, specs in role_specs.items()
+            role: self._generate_role_matches(view=src, specs=specs)
+            for role, specs in role_specs.items()
         }
         if self._progress is not None:
             self._progress.set_total(self._progress.completed)
@@ -225,14 +226,28 @@ class NSampler(BaseSampler):
         # dict key is 2-tuple of stream_label, source_label
         # For single-stream samplers like this one, we use a default label
         return {
-            (self.STREAM_NAME, src_lbl): Samples(
+            (STREAM_DEFAULT, src_lbl): Samples(
                 role_indices=role_idxs,
                 role_weights=role_weights,
             ),
         }
 
     def __repr__(self):
-        return f"NSampler(n_batches={self.num_batches}, batch_size={self.batcher.batch_size})"
+        if self.is_bound:
+            return f"NSampler(n_batches={self.num_batches}, batch_size={self.batcher.batch_size})"
+        return f"NSampler(batch_size={self.batcher.batch_size})"
+
+    # =====================================================
+    # Properties
+    # =====================================================
+    @property
+    def role_names(self) -> list[str]:
+        """
+        Names of roles produced by this sampler.
+
+        All output streams have the same set of roles.
+        """
+        return (ROLE_ANCHOR, *self.condition_mapping.keys())
 
     # =====================================================
     # Helpers
@@ -318,15 +333,15 @@ class NSampler(BaseSampler):
             perm = np.argsort(a2)
 
             # Apply this permutation to all arrays
-            if "anchor" not in all_role_idxs:
-                all_role_idxs["anchor"] = a2[perm]
-            elif not np.array_equal(all_role_idxs["anchor"], a2[perm]):
+            if ROLE_ANCHOR not in all_role_idxs:
+                all_role_idxs[ROLE_ANCHOR] = a2[perm]
+            elif not np.array_equal(all_role_idxs[ROLE_ANCHOR], a2[perm]):
                 raise ValueError("Failed to align anchor indices across roles.")
             all_role_idxs[role] = r2[perm]
 
             # Apply same perm for scores
-            if "anchor" not in all_role_scores:
-                all_role_scores["anchor"] = np.ones_like(s2, dtype=float)
+            if ROLE_ANCHOR not in all_role_scores:
+                all_role_scores[ROLE_ANCHOR] = np.ones_like(s2, dtype=float)
             all_role_scores[role] = s2[perm]
 
         return all_role_idxs, all_role_scores
@@ -513,7 +528,11 @@ class NSampler(BaseSampler):
         order = np.argsort(arr)
         return SortedColumn(values=arr[order], original_to_sorted_idxs=order)
 
-    def _resolve_columns_for_role(self, view: FeatureSetView, conds) -> list[dict[str, Any]]:
+    def _resolve_columns_for_role(
+        self,
+        view: FeatureSetView,
+        conds,
+    ) -> list[dict[str, Any]]:
         """
         Resolve and prepare column specifications for a single role.
 
@@ -659,9 +678,17 @@ class NSampler(BaseSampler):
 
                 # Find matches & non-matches bases on data type
                 if not spec["categorical"]:
-                    matches, non_matches = self._find_numeric_matches(anchor_val=anchor_val, cond=cond, spec=spec)
+                    matches, non_matches = self._find_numeric_matches(
+                        anchor_val=anchor_val,
+                        cond=cond,
+                        spec=spec,
+                    )
                 else:
-                    matches, non_matches = self._find_categorical_matches(anchor_val=anchor_val, cond=cond, spec=spec)
+                    matches, non_matches = self._find_categorical_matches(
+                        anchor_val=anchor_val,
+                        cond=cond,
+                        spec=spec,
+                    )
 
                 # Remove any blocked idxs and anchor
                 matches -= blocked_rel_idxs
@@ -676,14 +703,18 @@ class NSampler(BaseSampler):
 
             # Compute the set of indices that are globally allowed after
             # enforcing all strict (no-fallback) conditions.
-            allowed_idxs: set[int] = set(range(len(view))) - blocked_rel_idxs - {rel_idx}
+            allowed_idxs: set[int] = (
+                set(range(len(view))) - blocked_rel_idxs - {rel_idx}
+            )
             if not allowed_idxs:
                 # No valid candidates for this anchor
                 continue
 
             # Combine across all conditions
             full_matches: set[int] = set.intersection(*per_cond_matches) & allowed_idxs
-            partial_matches: set[int] = (set.union(*per_cond_matches) & allowed_idxs) - full_matches
+            partial_matches: set[int] = (
+                set.union(*per_cond_matches) & allowed_idxs
+            ) - full_matches
             non_matches: set[int] = allowed_idxs - full_matches - partial_matches
 
             # Determine number of pairing to select

@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from modularml.core.data.schema_constants import (
+    ROLE_ANCHOR,
+    ROLE_NEGATIVE,
+    ROLE_POSITIVE,
+)
 from modularml.samplers.n_sampler import NSampler
 
 if TYPE_CHECKING:
@@ -28,36 +33,36 @@ class TripletSampler(NSampler):
         self,
         pos_conditions: dict[str, SimilarityCondition],
         neg_conditions: dict[str, SimilarityCondition],
-        source: FeatureSet | FeatureSetView | None = None,
         *,
         batch_size: int = 1,
         shuffle: bool = False,
         max_samples_per_anchor: int | None = 3,
         choose_best_only: bool = False,
         group_by: list[str] | None = None,
-        group_by_role: str = "anchor",
+        group_by_role: str = ROLE_ANCHOR,
         stratify_by: list[str] | None = None,
-        stratify_by_role: str = "anchor",
+        stratify_by_role: str = ROLE_ANCHOR,
         strict_stratification: bool = True,
         drop_last: bool = False,
         seed: int | None = None,
         show_progress: bool = True,
+        source: FeatureSet | FeatureSetView | None = None,
     ):
         """
         Initialize a similarity-based sampler for anchor-positive-negative triplets.
 
         Description:
-            ``TripletSampler`` constructs training triplets by selecting, for
+            `TripletSampler` constructs training triplets by selecting, for
             each anchor sample, a positive sample that satisfies the provided
             positive similarity conditions and a negative sample that satisfies
             the negative conditions. Column identifiers in
-            ``pos_conditions`` and ``neg_conditions`` are resolved using
-            ``DataReference.from_string`` and can refer to FeatureSet features,
+            `pos_conditions` and `neg_conditions` are resolved using
+            `DataReference.from_string` and can refer to FeatureSet features,
             targets, or tags (e.g., "SOH_PCT", "features.voltage.raw").
 
-            Under the hood, the sampler invokes ``NSampler`` with two roles:
-                - "positive": candidates satisfying ``pos_conditions``
-                - "negative": candidates satisfying ``neg_conditions``
+            Under the hood, the sampler invokes `NSampler` with two roles:
+                - "positive": candidates satisfying `pos_conditions`
+                - "negative": candidates satisfying `neg_conditions`
 
             Only anchors that produce valid matches for *both* roles are kept.
             All triplet components are then sorted and aligned into consistent
@@ -77,10 +82,6 @@ class TripletSampler(NSampler):
                 Mapping from column specifiers to similarity rules for selecting
                 negative samples. These often mirror the positive rules but with
                 different tolerances or match modes.
-
-            source (FeatureSet | FeatureSetView | None, optional):
-                Data source from which samples are drawn. If None, a source must
-                be bound later via ``bind_source``. Defaults to None.
 
             batch_size (int, optional):
                 Number of triplets to return per batch. Defaults to 1.
@@ -128,13 +129,16 @@ class TripletSampler(NSampler):
                 Whether to show a progress bar during the batch building process.
                 Defaults to True.
 
+            source (FeatureSet | FeatureSetView):
+                The source data from samples are drawn. Note that batches are not
+                constructed until `materialize_batches` is called.
+
         """
         super().__init__(
             condition_mapping={
-                "positive": pos_conditions,
-                "negative": neg_conditions,
+                ROLE_POSITIVE: pos_conditions,
+                ROLE_NEGATIVE: neg_conditions,
             },
-            sources=source,
             batch_size=batch_size,
             shuffle=shuffle,
             max_samples_per_anchor=max_samples_per_anchor,
@@ -147,10 +151,13 @@ class TripletSampler(NSampler):
             drop_last=drop_last,
             seed=seed,
             show_progress=show_progress,
+            source=source,
         )
 
     def __repr__(self):
-        return f"TripletSampler(n_batches={self.num_batches}, batch_size={self.batcher.batch_size})"
+        if self.is_bound:
+            return f"TripletSampler(n_batches={self.num_batches}, batch_size={self.batcher.batch_size})"
+        return f"TripletSampler(batch_size={self.batcher.batch_size})"
 
     # ================================================
     # Configurable
@@ -182,12 +189,14 @@ class TripletSampler(NSampler):
             TripletSampler: Unfitted sampler instance.
 
         """
-        if ("sampler_name" not in config) or (config["sampler_name"] != "TripletSampler"):
+        if ("sampler_name" not in config) or (
+            config["sampler_name"] != "TripletSampler"
+        ):
             raise ValueError("Invalid config for TripletSampler.")
 
         return cls(
-            pos_conditions=config["condition_mapping"]["positive"],
-            neg_conditions=config["condition_mapping"]["negative"],
+            pos_conditions=config["condition_mapping"][ROLE_POSITIVE],
+            neg_conditions=config["condition_mapping"][ROLE_NEGATIVE],
             batch_size=config["batch_size"],
             shuffle=config["shuffle"],
             max_samples_per_anchor=config["max_samples_per_anchor"],
