@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from typing import TYPE_CHECKING, Any, overload
 
 from modularml.core.data.batch import Batch
@@ -11,12 +10,14 @@ from modularml.core.experiment.experiment_node import ExperimentNode
 from modularml.core.models import wrap_model
 from modularml.core.references.experiment_reference import ExperimentNodeReference
 from modularml.core.topology.compute_node import ComputeNode
-from modularml.core.topology.mixins.evaluable import EvaluableMixin
-from modularml.core.topology.mixins.trainable import TrainableMixin
 from modularml.core.topology.node_shapes import NodeShapes
 from modularml.core.training.loss_record import LossCollection, LossRecord
 from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
-from modularml.utils.errors.exceptions import BackendMismatchError, BackendNotSupportedError, OptimizerNotSetError
+from modularml.utils.errors.exceptions import (
+    BackendMismatchError,
+    BackendNotSupportedError,
+    OptimizerNotSetError,
+)
 from modularml.utils.logging.warnings import catch_warnings, warn
 from modularml.utils.nn.backend import Backend
 from modularml.utils.representation.summary import safe_cast_to_summary_rows
@@ -31,7 +32,7 @@ tf = check_tensorflow()
 torch = check_torch()
 
 
-class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
+class ModelNode(ComputeNode):
     """
     A ModelNode represents a single learnable or non-learnable transformation block in a ModelGraph.
 
@@ -76,28 +77,16 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
                     "Setting a ModelNode `upstream_ref` with a FeatureSet will result in multiple "
                     "representations of the same column being combined into input/target tensors. "
                 )
-                hint = "Use `FeatureSet(...).reference(...)` is this is not intentional."
+                hint = (
+                    "Use `FeatureSet(...).reference(...)` is this is not intentional."
+                )
                 warn(msg, category=UserWarning, stacklevel=2, hints=hint)
-
-            # with warnings.catch_warnings(record=True) as w:
-            #     warnings.simplefilter("always", UserWarning)
-            #     ref = upstream_ref.reference()
-            #     dup_rep_warnings = [ww for ww in w if "Multiple representations selected" in str(ww.message)]
-            # if dup_rep_warnings:
-            #     msg = (
-            #         "Setting a ModelNode `upstream_ref` with a FeatureSet will result in multiple "
-            #         "representations of the same column being combined into input/target tensors. "
-            #     )
-            #     hint = "Use `FeatureSet(...).reference(...)` is this is not intentional."
-            #     warn(msg, category=UserWarning, stacklevel=2, hints=hint)
         elif isinstance(upstream_ref, ExperimentNodeReference):
             ref = upstream_ref
         elif isinstance(upstream_ref, ExperimentNode):
             ref = upstream_ref.reference()
         else:
-            msg = (
-                f"`upstream_ref` must be of type ExperimentReference or ExperimentNode. Received: {type(upstream_ref)}."
-            )
+            msg = f"`upstream_ref` must be of type ExperimentReference or ExperimentNode. Received: {type(upstream_ref)}."
             raise TypeError(msg)
 
         super().__init__(label=label, upstream_refs=ref)
@@ -189,7 +178,10 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
         """
         # Get only input tuple (drop keys, but sort by them for reproducibility)
         inp_shapes: list[tuple[int, ...]] = [v for k, v in sorted(input_shapes.items())]
-        if self.max_upstream_refs is not None and len(inp_shapes) > self.max_upstream_refs:
+        if (
+            self.max_upstream_refs is not None
+            and len(inp_shapes) > self.max_upstream_refs
+        ):
             msg = f"ModelNode only support a single input. Received {len(inp_shapes)}: {input_shapes}"
             raise ValueError(msg)
         inp_shape: tuple[int, ...] = inp_shapes[0]
@@ -203,7 +195,11 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
             pass
 
         # Pass inferencing task to BaseModel (if supports it)
-        meth = getattr(self._model, "infer_output_shapes", None)  # returns list of shapes
+        meth = getattr(
+            self._model,
+            "infer_output_shapes",
+            None,
+        )  # returns list of shapes
         if callable(meth):
             out_shapes: dict[str, tuple[int, ...]] = dict(enumerate(meth(inp_shape)))
             if len(out_shapes) > 1:
@@ -274,6 +270,7 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
             - Scikit-learn models typically do not require external optimizers.
             - This method assumes that shape inference and merge logic (if needed) has already
               been resolved upstream by the ModelGraph.
+
         """
         # Build underlying BaseModel if not already built
         if (not self._model.is_built) or force:
@@ -338,7 +335,9 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
             return RoleData(data=out)
 
         if isinstance(x, Batch):
-            out = RoleData(data={k: _forward_sample_data(v) for k, v in x.role_data.items()})
+            out = RoleData(
+                data={k: _forward_sample_data(v) for k, v in x.role_data.items()},
+            )
 
             return Batch(
                 batch_size=x.batch_size,
@@ -364,9 +363,18 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
         return [
             ("label", self.label),
             ("upstream_ref", safe_cast_to_summary_rows(self.upstream_ref)),
-            ("downstream_refs", [safe_cast_to_summary_rows(r) for r in self._downstream_refs]),
-            ("input_shape", _reduce_dict(self.input_shapes) if self.is_built else "NOT BUILT YET"),
-            ("output_shapes", _reduce_dict(self.output_shapes) if self.is_built else "NOT BUILT YET"),
+            (
+                "downstream_refs",
+                [safe_cast_to_summary_rows(r) for r in self._downstream_refs],
+            ),
+            (
+                "input_shape",
+                _reduce_dict(self.input_shapes) if self.is_built else "NOT BUILT YET",
+            ),
+            (
+                "output_shapes",
+                _reduce_dict(self.output_shapes) if self.is_built else "NOT BUILT YET",
+            ),
             ("model", safe_cast_to_summary_rows(self._model)),
             ("optimizer", safe_cast_to_summary_rows(self._optimizer)),
             ("backend", safe_cast_to_summary_rows(self.backend)),
@@ -466,7 +474,9 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
         if isinstance(ups_node, (FeatureSet, FeatureSetView)):
             # This node must have direct inputs
             if self.node_id not in ctx.execution.input_batches:
-                msg = f"ExecutionContext missing input data for ModelNode '{self.label}'."
+                msg = (
+                    f"ExecutionContext missing input data for ModelNode '{self.label}'."
+                )
                 raise ValueError(msg)
         elif ups_node.node_id not in ctx.execution.model_outputs:
             msg = f"ExecutionContext missing output data from upstream node '{ups_node.label}'."

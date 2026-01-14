@@ -5,15 +5,25 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from modularml.context.experiment_context import ExperimentContext
 from modularml.context.resolution_context import ResolutionContext
+from modularml.core.data.schema_constants import STREAM_DEFAULT
 from modularml.core.experiment.experiment_node import ExperimentNode
-from modularml.core.references.experiment_reference import ResolutionError
+from modularml.core.experiment.phase import InputBinding
+from modularml.core.references.experiment_reference import (
+    ExperimentNodeReference,
+    GraphNodeReference,
+    ResolutionError,
+)
 from modularml.utils.data.formatting import ensure_list
 from modularml.utils.errors.error_handling import ErrorMode
 from modularml.utils.errors.exceptions import GraphNodeInputError, GraphNodeOutputError
 from modularml.utils.logging.warnings import warn
 
 if TYPE_CHECKING:
-    from modularml.core.references.experiment_reference import ExperimentNodeReference
+    from pathlib import Path
+
+    from modularml.core.data.featureset import FeatureSet
+    from modularml.core.data.featureset_view import FeatureSetView
+    from modularml.core.sampling.base_sampler import BaseSampler
 
 
 class GraphNode(ABC, ExperimentNode):
@@ -31,8 +41,8 @@ class GraphNode(ABC, ExperimentNode):
     def __init__(
         self,
         label: str,
-        upstream_refs: ExperimentNodeReference | list[ExperimentNodeReference] | None = None,
-        downstream_refs: ExperimentNodeReference | list[ExperimentNodeReference] | None = None,
+        upstream_refs: GraphNodeReference | list[GraphNodeReference] | None = None,
+        downstream_refs: GraphNodeReference | list[GraphNodeReference] | None = None,
         *,
         node_id: str | None = None,
         register: bool = True,
@@ -43,9 +53,9 @@ class GraphNode(ABC, ExperimentNode):
         Args:
             label (str):
                 Unique identifier for this node.
-            upstream_refs (ExperimentNodeReference | list[ExperimentNodeReference] | None):
+            upstream_refs (GraphNodeReference | list[GraphNodeReference] | None):
                 References of upstream connections.
-            downstream_refs (ExperimentNodeReference | list[ExperimentNodeReference] | None):
+            downstream_refs (GraphNodeReference | list[GraphNodeReference] | None):
                 References of downstream connections.
             node_id (str, optional):
                 Used only for de-serialization.
@@ -59,36 +69,61 @@ class GraphNode(ABC, ExperimentNode):
         super().__init__(label=label, node_id=node_id, register=register)
 
         # Normalize inputs as lists
-        self._upstream_refs: list[ExperimentNodeReference] = ensure_list(upstream_refs)
-        self._downstream_refs: list[ExperimentNodeReference] = ensure_list(downstream_refs)
+        self._upstream_refs: list[GraphNodeReference] = ensure_list(upstream_refs)
+        self._downstream_refs: list[GraphNodeReference] = ensure_list(downstream_refs)
 
         # Validate connections
         self._validate_connections()
 
     def _validate_connections(self):
         # Enforce max_upstream_refs
-        if self.max_upstream_refs is not None and len(self._upstream_refs) > self.max_upstream_refs:
-            msg = f"{len(self._upstream_refs)} upstream_refs provided, but max_upstream_refs = {self.max_upstream_refs}"
-            if self._handle_fatal_error(GraphNodeInputError, msg, ErrorMode.RAISE) is False:
+        if (
+            self.max_upstream_refs is not None
+            and len(self._upstream_refs) > self.max_upstream_refs
+        ):
+            msg = (
+                f"{len(self._upstream_refs)} upstream_refs provided, but "
+                f"max_upstream_refs = {self.max_upstream_refs}."
+            )
+            if (
+                self._handle_fatal_error(GraphNodeInputError, msg, ErrorMode.RAISE)
+                is False
+            ):
                 self._upstream_refs = self._upstream_refs[: self.max_upstream_refs]
 
         # Enforce max_downstream_refs
-        if self.max_downstream_refs is not None and len(self._downstream_refs) > self.max_downstream_refs:
-            msg = f"{len(self._downstream_refs)} downstream_refs provided, but max_downstream_refs = {self.max_downstream_refs}"
-            if self._handle_fatal_error(GraphNodeOutputError, msg, ErrorMode.RAISE) is False:
-                self._downstream_refs = self._downstream_refs[: self.max_downstream_refs]
+        if (
+            self.max_downstream_refs is not None
+            and len(self._downstream_refs) > self.max_downstream_refs
+        ):
+            msg = (
+                f"{len(self._downstream_refs)} downstream_refs provided, but "
+                f"max_downstream_refs = {self.max_downstream_refs}."
+            )
+            if (
+                self._handle_fatal_error(GraphNodeOutputError, msg, ErrorMode.RAISE)
+                is False
+            ):
+                self._downstream_refs = self._downstream_refs[
+                    : self.max_downstream_refs
+                ]
 
         # Ensure referenced connections exist in this ExperimentContext
-        def _val_ref_existence(refs: list[ExperimentNodeReference], direction: Literal["upstream", "downstream"]):
+        def _val_ref_existence(
+            refs: list[GraphNodeReference],
+            direction: Literal["upstream", "downstream"],
+        ):
             exp_ctx = ExperimentContext.get_active()
-            failed: list[ExperimentNodeReference] = []
+            failed: list[GraphNodeReference] = []
             for r in refs:
                 try:
                     _ = r.resolve(ctx=ResolutionContext(experiment=exp_ctx))
                 except ResolutionError:  # noqa: PERF203
                     failed.append(r)
             if failed:
-                details = "\n".join(f"  - {ref.__class__.__name__}: {ref!r}" for ref in failed)
+                details = "\n".join(
+                    f"  - {ref.__class__.__name__}: {ref!r}" for ref in failed
+                )
                 msg = (
                     f"The following {direction} reference(s) could not be resolved "
                     f"in the current ExperimentContext:\n{details}"
@@ -121,7 +156,7 @@ class GraphNode(ABC, ExperimentNode):
         return None
 
     @property
-    def upstream_ref(self) -> ExperimentNodeReference | None:
+    def upstream_ref(self) -> GraphNodeReference | ExperimentNodeReference | None:
         """
         Return the single upstream reference, if only one is allowed.
 
@@ -136,7 +171,7 @@ class GraphNode(ABC, ExperimentNode):
         )
 
     @property
-    def downstream_ref(self) -> ExperimentNodeReference | None:
+    def downstream_ref(self) -> GraphNodeReference | None:
         """
         Return the single downstream reference, if only one is allowed.
 
@@ -168,9 +203,21 @@ class GraphNode(ABC, ExperimentNode):
         return f"GraphNode('{self.label}')"
 
     # ================================================
+    # Referencing
+    # ================================================
+    def reference(self) -> GraphNodeReference:
+        return GraphNodeReference(
+            node_id=self.node_id,
+            node_label=self.label,
+        )
+
+    # ================================================
     # Connection Management
     # ================================================
-    def get_upstream_refs(self, error_mode: ErrorMode = ErrorMode.RAISE) -> list[ExperimentNodeReference]:
+    def get_upstream_refs(
+        self,
+        error_mode: ErrorMode = ErrorMode.RAISE,
+    ) -> list[GraphNodeReference | ExperimentNodeReference]:
         """
         Retrieve all upstream (input) references.
 
@@ -178,7 +225,7 @@ class GraphNode(ABC, ExperimentNode):
             error_mode (ErrorMode): Error handling strategy if input is invalid.
 
         Returns:
-            list[ExperimentNodeReference]: List of upstream connection references.
+            list[GraphNodeReference | ExperimentNodeReference]: List of upstream connection references.
 
         """
         if not self.allows_upstream_connections:
@@ -193,7 +240,7 @@ class GraphNode(ABC, ExperimentNode):
     def get_downstream_refs(
         self,
         error_mode: ErrorMode = ErrorMode.RAISE,
-    ) -> list[ExperimentNodeReference]:
+    ) -> list[GraphNodeReference]:
         """
         Retrieve all downstream (output) references.
 
@@ -201,7 +248,7 @@ class GraphNode(ABC, ExperimentNode):
             error_mode (ErrorMode): Error handling strategy if input is invalid.
 
         Returns:
-            list[ExperimentNodeReference]: List of downstream connection references.
+            list[GraphNodeReference]: List of downstream connection references.
 
         """
         if not self.allows_downstream_connections:
@@ -213,12 +260,16 @@ class GraphNode(ABC, ExperimentNode):
             return [] if handled is False else self._downstream_refs
         return self._downstream_refs
 
-    def add_upstream_ref(self, ref: ExperimentNodeReference, error_mode: ErrorMode = ErrorMode.RAISE):
+    def add_upstream_ref(
+        self,
+        ref: GraphNodeReference | ExperimentNodeReference,
+        error_mode: ErrorMode = ErrorMode.RAISE,
+    ):
         """
         Add a new upstream connection.
 
         Args:
-            ref (ExperimentNodeReference): Reference of upstream connection.
+            ref (GraphNodeReference | ExperimentNodeReference): Reference of upstream connection.
             error_mode (ErrorMode): Error handling mode for duplicates or limits.
 
         """
@@ -246,7 +297,7 @@ class GraphNode(ABC, ExperimentNode):
 
         if (
             self.max_upstream_refs is not None
-            and len(self._upstream_refs) > self.max_upstream_refs
+            and len(self._upstream_refs) >= self.max_upstream_refs
             and self._handle_fatal_error(
                 GraphNodeInputError,
                 f"Only {self.max_upstream_refs} upstream_refs allowed. Received: {self._upstream_refs}",
@@ -258,12 +309,16 @@ class GraphNode(ABC, ExperimentNode):
 
         self._upstream_refs.append(ref)
 
-    def remove_upstream_ref(self, ref: ExperimentNodeReference, error_mode: ErrorMode = ErrorMode.RAISE):
+    def remove_upstream_ref(
+        self,
+        ref: GraphNodeReference | ExperimentNodeReference,
+        error_mode: ErrorMode = ErrorMode.RAISE,
+    ):
         """
         Remove an upstream reference.
 
         Args:
-            ref (ExperimentNodeReference): Upstream reference to remove.
+            ref (GraphNodeReference | ExperimentNodeReference): Upstream reference to remove.
             error_mode (ErrorMode): Error handling mode if ref not found.
 
         """
@@ -313,14 +368,14 @@ class GraphNode(ABC, ExperimentNode):
 
     def set_upstream_refs(
         self,
-        upstream_refs: list[ExperimentNodeReference],
+        upstream_refs: list[GraphNodeReference | ExperimentNodeReference],
         error_mode: ErrorMode = ErrorMode.RAISE,
     ):
         """
         Replace all upstream connections with a new list of references.
 
         Args:
-            upstream_refs (list[ExperimentNodeReference]): List of new upstream references.
+            upstream_refs (list[GraphNodeReference | ExperimentNodeReference]): List of new upstream references.
             error_mode (ErrorMode): Error handling mode for violations.
 
         """
@@ -328,12 +383,16 @@ class GraphNode(ABC, ExperimentNode):
         for ref in upstream_refs:
             self.add_upstream_ref(ref, error_mode=error_mode)
 
-    def add_downstream_ref(self, ref: ExperimentNodeReference, error_mode: ErrorMode = ErrorMode.RAISE):
+    def add_downstream_ref(
+        self,
+        ref: GraphNodeReference,
+        error_mode: ErrorMode = ErrorMode.RAISE,
+    ):
         """
         Add a new downstream connection.
 
         Args:
-            ref (ExperimentNodeReference): Reference of downstream connection.
+            ref (GraphNodeReference): Reference of downstream connection.
             error_mode (ErrorMode): Error handling mode for duplicates or limits.
 
         """
@@ -361,7 +420,7 @@ class GraphNode(ABC, ExperimentNode):
 
         if (
             self.max_downstream_refs is not None
-            and len(self._downstream_refs) > self.max_downstream_refs
+            and len(self._downstream_refs) >= self.max_downstream_refs
             and self._handle_fatal_error(
                 GraphNodeOutputError,
                 f"Only {self.max_downstream_refs} downstream_refs allowed.",
@@ -375,14 +434,14 @@ class GraphNode(ABC, ExperimentNode):
 
     def remove_downstream_ref(
         self,
-        ref: ExperimentNodeReference,
+        ref: GraphNodeReference,
         error_mode: ErrorMode = ErrorMode.RAISE,
     ):
         """
         Remove a downstream reference.
 
         Args:
-            ref (ExperimentNodeReference): Downstream reference to remove.
+            ref (GraphNodeReference): Downstream reference to remove.
             error_mode (ErrorMode): Error handling mode if ref not found.
 
         """
@@ -439,7 +498,7 @@ class GraphNode(ABC, ExperimentNode):
         Replace all downstream connections with a new list of references.
 
         Args:
-            downstream_refs (list[ExperimentNodeReference]): List of new downstream references.
+            downstream_refs (list[GraphNodeReference]): List of new downstream references.
             error_mode (ErrorMode): Error handling mode for violations.
 
         """
@@ -497,6 +556,68 @@ class GraphNode(ABC, ExperimentNode):
         raise NotImplementedError(msg)
 
     # ================================================
+    # Input Binding
+    # ================================================
+    def create_input_binding(
+        self,
+        *,
+        sampler: BaseSampler | None = None,
+        upstream: FeatureSet | FeatureSetView | str | None = None,
+        split: str | None = None,
+        stream: str = STREAM_DEFAULT,
+    ) -> InputBinding:
+        """
+        Create an InputBinding for an input connection to this node.
+
+        Args:
+            sampler (BaseSampler):
+                A sampler to use to generate batches from the upstream FeatureSet
+                (e.g., random batches, contrastive roles, paired samples).
+                Required if this binding is for a TrainPhase.
+
+            upstream (FeatureSet | FeatureSetView | str | None):
+                Identifies which upstream FeatureSet connection of this node this
+                binding applies to.
+                Accepted values:
+                - FeatureSet instance
+                - FeatureSetView instance
+                - FeatureSet node ID or label (str)
+                - None, only if this node has exactly one upstream FeatureSet
+
+                If this node has multiple upstream FeatureSets, this argument is
+                required to disambiguate which input is being bound.
+
+            split (str, optional):
+                Optional split name of the upstream FeatureSet (e.g. "train", "val").
+                If provided, only rows from this split are sampled.
+                If None, the entire FeatureSet is used.
+
+            stream (str, optional):
+                Output stream name from the sampler to feed into this node.
+                Required only if the sampler produces multiple streams.
+                Defaults to STREAM_DEFAULT.
+
+        Returns:
+            InputBinding:
+                A fully specified training InputBinding that can be passed directly
+                to an ExperimentPhase.
+
+        """
+        if sampler is None:
+            return InputBinding.for_evaluation(
+                node=self,
+                upstream=upstream,
+                split=split,
+            )
+        return InputBinding.for_training(
+            node=self,
+            sampler=sampler,
+            upstream=upstream,
+            split=split,
+            stream=stream,
+        )
+
+    # ================================================
     # Configurable
     # ================================================
     def get_config(self) -> dict[str, Any]:
@@ -512,3 +633,52 @@ class GraphNode(ABC, ExperimentNode):
     @classmethod
     def from_config(cls, config: dict[str, Any], *, register: bool = True) -> GraphNode:
         return cls(register=register, **config)
+
+    # ================================================
+    # Serialization
+    # ================================================
+    def save(self, filepath: Path, *, overwrite: bool = False) -> Path:
+        """
+        Serializes this GraphNode to the specified filepath.
+
+        Args:
+            filepath (Path):
+                File location to save to. Note that the suffix may be overwritten
+                to enforce the ModularML file extension schema.
+            overwrite (bool, optional):
+                Whether to overwrite any existing file at the save location.
+                Defaults to False.
+
+        Returns:
+            Path: The actual filepath to write the FeatureSet is saved.
+
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def load(
+        cls,
+        filepath: Path,
+        *,
+        allow_packaged_code: bool = False,
+        overwrite: bool = True,
+    ) -> GraphNode:
+        """
+        Load a GraphNode from file.
+
+        Args:
+            filepath (Path):
+                File location of a previously saved GraphNode.
+            allow_packaged_code : bool
+                Whether bundled code execution is allowed.
+            overwrite (bool):
+                Whether to replace any colliding node registrations in ExperimentContext
+                If False, a new node_id is assigned to the reloaded GraphNode. Otherwise,
+                the existing GraphNode is removed from the ExperimentContext registry.
+                Defaults to True.
+
+        Returns:
+            GraphNode: The reloaded GraphNode.
+
+        """
+        raise NotImplementedError

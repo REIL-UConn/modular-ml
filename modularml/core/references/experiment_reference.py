@@ -10,6 +10,7 @@ from modularml.core.references.reference_like import ReferenceLike
 
 if TYPE_CHECKING:
     from modularml.core.experiment.experiment_node import ExperimentNode
+    from modularml.core.topology.graph_node import GraphNode
 
 
 class ResolutionError(RuntimeError):
@@ -23,9 +24,9 @@ class ExperimentReference(ReferenceLike, Configurable):
     def resolve(self, ctx: ResolutionContext | None = None):
         if ctx is None:
             ctx = ResolutionContext(experiment=ExperimentContext.get_active())
-        return self._resolve_experiment(ctx.experiment)
+        return self._resolve_experiment(ctx)
 
-    def _resolve_experiment(self, experiment: ExperimentContext):
+    def _resolve_experiment(self, ctx: ResolutionContext):
         raise NotImplementedError
 
     def to_string(
@@ -48,7 +49,8 @@ class ExperimentReference(ReferenceLike, Configurable):
         attrs = {
             f.name: getattr(self, f.name)
             for f in fields(self)
-            if getattr(self, f.name) is not None and (f.name != "node_id" or include_node_id)
+            if getattr(self, f.name) is not None
+            and (f.name != "node_id" or include_node_id)
         }
         return separator.join(v for v in attrs.values())
 
@@ -72,24 +74,51 @@ class ExperimentNodeReference(ExperimentReference):
     node_label: str | None = None
     node_id: str | None = None
 
-    def resolve(self, ctx: ResolutionContext | None = None) -> ExperimentNode:
+    def resolve(
+        self,
+        ctx: ResolutionContext | ExperimentContext | None = None,
+    ) -> ExperimentNode:
         """Resolves this reference to a ExperimentNode instance."""
+        if isinstance(ctx, ExperimentContext):
+            return super().resolve(ctx=ResolutionContext(experiment=ctx))
         return super().resolve(ctx=ctx)
 
-    def _resolve_experiment(self, experiment: ExperimentContext) -> ExperimentNode:
+    def _resolve_experiment(
+        self,
+        ctx: ResolutionContext | ExperimentContext,
+    ) -> ExperimentNode:
+        if isinstance(ctx, ResolutionContext):
+            experiment = ctx.experiment
+        elif isinstance(ctx, ExperimentContext):
+            experiment = ctx
+        else:
+            raise TypeError
+
         # Prefer node_id resolution if given
         if self.node_id is not None:
             if not experiment.has_node(node_id=self.node_id):
-                msg = f"No node exists with ID='{self.node_id}' in the given ExperimentContext."
+                msg = (
+                    f"No node exists with ID='{self.node_id}' in the given "
+                    "ExperimentContext."
+                )
                 raise ResolutionError(msg)
-            return experiment.get_node(node_id=self.node_id)
+            return experiment.get_node(
+                node_id=self.node_id,
+                enforce_type="ExperimentNode",
+            )
 
         # Fallback to node label
         if self.node_label is not None:
             if not experiment.has_node(label=self.node_label):
-                msg = f"No node exists with label='{self.node_label}' in the given ExperimentContext."
+                msg = (
+                    f"No node exists with label='{self.node_label}' in the given "
+                    "ExperimentContext."
+                )
                 raise ResolutionError(msg)
-            return experiment.get_node(label=self.node_label)
+            return experiment.get_node(
+                label=self.node_label,
+                enforce_type="ExperimentNode",
+            )
 
         raise ResolutionError("Both node_label and node_id cannot be None.")
 
@@ -106,4 +135,77 @@ class ExperimentNodeReference(ExperimentReference):
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> ExperimentReference:
         """Reconstructs the reference from config."""
+        return cls(**config)
+
+
+@dataclass(frozen=True)
+class GraphNodeReference(ExperimentNodeReference):
+    """Reference to an GraphNode by label or id."""
+
+    node_label: str | None = None
+    node_id: str | None = None
+
+    def resolve(
+        self,
+        ctx: ResolutionContext | ExperimentContext | None = None,
+    ) -> GraphNode:
+        """Resolves this reference to a GraphNode instance."""
+        if isinstance(ctx, ExperimentContext):
+            return super().resolve(ctx=ResolutionContext(experiment=ctx))
+        return super().resolve(ctx=ctx)
+
+    def _resolve_experiment(
+        self,
+        ctx: ResolutionContext | ExperimentContext,
+    ) -> GraphNode:
+        if isinstance(ctx, ResolutionContext):
+            experiment = ctx.experiment
+        elif isinstance(ctx, ExperimentContext):
+            experiment = ctx
+        else:
+            raise TypeError
+
+        # Prefer node_id resolution if given
+        if self.node_id is not None:
+            if not experiment.has_node(node_id=self.node_id):
+                msg = (
+                    f"No node exists with ID='{self.node_id}' in the given "
+                    "ExperimentContext."
+                )
+                raise ResolutionError(msg)
+            return experiment.get_node(node_id=self.node_id, enforce_type="GraphNode")
+
+        # Fallback to node label
+        if self.node_label is not None:
+            if not experiment.has_node(label=self.node_label):
+                msg = (
+                    f"No node exists with label='{self.node_label}' in the given "
+                    "ExperimentContext."
+                )
+                raise ResolutionError(msg)
+            return experiment.get_node(label=self.node_label, enforce_type="GraphNode")
+
+        raise ResolutionError("Both node_label and node_id cannot be None.")
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """Return a JSON-serializable configuration."""
+        return {
+            "exp_node_type": "GraphNode",
+            "node_id": self.node_id,
+            "node_label": self.node_label,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> GraphNodeReference:
+        """Reconstructs the reference from config."""
+        ref_type = config.pop("exp_node_type", None)
+        if ref_type is None:
+            msg = "Config must contain `exp_node_type`."
+            raise ValueError(msg)
+        if ref_type != "GraphNode":
+            msg = "Invalid config for a GraphNode."
+            raise ValueError(msg)
         return cls(**config)

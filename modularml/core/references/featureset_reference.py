@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, get_args
 
+from modularml.context.experiment_context import ExperimentContext
 from modularml.context.resolution_context import ResolutionContext
 from modularml.core.data.schema_constants import (
     DOMAIN_FEATURES,
@@ -13,12 +14,15 @@ from modularml.core.data.schema_constants import (
     T_ALL_DOMAINS,
     T_ALL_REPS,
 )
-from modularml.core.references.experiment_reference import ExperimentNodeReference, ExperimentReference, ResolutionError
+from modularml.core.references.experiment_reference import (
+    ExperimentNodeReference,
+    ExperimentReference,
+    ResolutionError,
+)
 from modularml.utils.data.pyarrow_data import resolve_column_selectors
 from modularml.utils.logging.warnings import warn
 
 if TYPE_CHECKING:
-    from modularml.context.experiment_context import ExperimentContext
     from modularml.core.data.featureset import FeatureSet
     from modularml.core.data.featureset_view import FeatureSetView
 
@@ -36,11 +40,17 @@ class FeatureSetReference(ExperimentNodeReference):
     targets: tuple[str, ...] | None = None
     tags: tuple[str, ...] | None = None
 
-    def resolve(self, ctx: ResolutionContext | None = None) -> FeatureSetView:
+    def resolve(
+        self,
+        ctx: ResolutionContext | ExperimentContext | None = None,
+    ) -> FeatureSetView:
         """Resolves this reference to a FeatureSetView instance."""
         return super().resolve(ctx=ctx)
 
-    def _resolve_experiment(self, experiment: ExperimentContext) -> FeatureSetView:
+    def _resolve_experiment(
+        self,
+        ctx: ResolutionContext | ExperimentContext,
+    ) -> FeatureSetView:
         from modularml.core.data.featureset import FeatureSet
 
         # Get FeatureSet node
@@ -48,7 +58,7 @@ class FeatureSetReference(ExperimentNodeReference):
             node_label=self.node_label,
             node_id=self.node_id,
         )
-        node = node_ref._resolve_experiment(experiment=experiment)
+        node = node_ref._resolve_experiment(ctx=ctx)
         if not isinstance(node, FeatureSet):
             msg = f"Resolved node is not a FeatureSet. Received: {type(node)}."
             raise ResolutionError(msg)
@@ -108,11 +118,19 @@ class FeatureSetSplitReference(ExperimentReference):
     node_label: str | None = None
     node_id: str | None = None
 
-    def resolve(self, ctx: ResolutionContext | None = None) -> FeatureSetView:
-        """Resolves this reference to a view of the reference FeatureSet split instance."""
+    def resolve(
+        self,
+        ctx: ResolutionContext | ExperimentContext | None = None,
+    ) -> FeatureSetView:
+        """Resolves reference to a view of the FeatureSet split instance."""
+        if isinstance(ctx, ExperimentContext):
+            return super().resolve(ctx=ResolutionContext(experiment=ctx))
         return super().resolve(ctx=ctx)
 
-    def _resolve_experiment(self, experiment: ExperimentContext) -> FeatureSetView:
+    def _resolve_experiment(
+        self,
+        ctx: ResolutionContext | ExperimentContext,
+    ) -> FeatureSetView:
         from modularml.core.data.featureset import FeatureSet
 
         # Get FeatureSet node
@@ -120,7 +138,7 @@ class FeatureSetSplitReference(ExperimentReference):
             node_label=self.node_label,
             node_id=self.node_id,
         )
-        node = node_ref._resolve_experiment(experiment=experiment)
+        node = node_ref._resolve_experiment(ctx=ctx)
         if not isinstance(node, FeatureSet):
             msg = f"Resolved node is not a FeatureSet. Received: {type(node)}."
             raise ResolutionError(msg)
@@ -128,8 +146,8 @@ class FeatureSetSplitReference(ExperimentReference):
         # Validate split exists
         if self.split_name not in node.available_splits:
             msg = (
-                f"Split '{self.split_name}' does not exist in FeatureSet '{node.label}'. "
-                f"Available splits: {node.available_splits}"
+                f"Split '{self.split_name}' does not exist in FeatureSet "
+                f"'{node.label}'. Available splits: {node.available_splits}"
             )
             raise ResolutionError(msg)
 
@@ -172,11 +190,19 @@ class FeatureSetColumnReference(ExperimentReference):
             msg = f"Domain must be one of: {valid_ds}. Received: {self.domain}."
             raise ValueError(msg)
 
-    def resolve(self, ctx: ResolutionContext | None = None) -> FeatureSetView:
+    def resolve(
+        self,
+        ctx: ResolutionContext | ExperimentContext | None = None,
+    ) -> FeatureSetView:
         """Resolves this single-column reference to a FeatureSetView instance."""
+        if isinstance(ctx, ExperimentContext):
+            return super().resolve(ctx=ResolutionContext(experiment=ctx))
         return super().resolve(ctx=ctx)
 
-    def _resolve_experiment(self, experiment: ExperimentContext) -> FeatureSetView:
+    def _resolve_experiment(
+        self,
+        ctx: ResolutionContext | ExperimentContext,
+    ) -> FeatureSetView:
         # Convert column attributes to fully-qualified column
         col = f"{self.domain}.{self.key}.{self.rep}"
 
@@ -186,7 +212,7 @@ class FeatureSetColumnReference(ExperimentReference):
             node_label=self.node_label,
             **{self.domain: col},  # attach domain = single column
         )
-        fsv = fs_ref._resolve_experiment(experiment=experiment)
+        fsv = fs_ref._resolve_experiment(ctx=ctx)
 
         return fsv
 
@@ -229,7 +255,7 @@ class FeatureSetColumnReference(ExperimentReference):
         parts = val.split(".")
 
         # Collect known FeatureSet labels
-        fs_nodes = experiment.available_featuresets
+        fs_nodes = [n.label for n in experiment.available_featuresets.values()]
 
         # Known context
         known_domains = set(get_args(T_ALL_DOMAINS))
@@ -323,7 +349,9 @@ class FeatureSetColumnReference(ExperimentReference):
                 raise ResolutionError(msg)
 
             else:
-                unmatched_cands = [(d, v) for k in unmatched if k in [a[1] for a in avail_parsed]]
+                unmatched_cands = [
+                    (d, v) for k in unmatched if k in [a[1] for a in avail_parsed]
+                ]
                 if len(unmatched_cands) != 1:
                     msg = f"Could not uniquely identify a domain in '{val}'. Possible candidates: {unmatched_cands}."
                     raise ResolutionError(msg)
@@ -358,7 +386,9 @@ class FeatureSetColumnReference(ExperimentReference):
                     d, col = k, None
                 avail_parsed.append((d, col))
 
-            candidates = [(d, k) for k in unmatched if k in [a[1] for a in avail_parsed]]
+            candidates = [
+                (d, k) for k in unmatched if k in [a[1] for a in avail_parsed]
+            ]
             if len(candidates) != 1:
                 msg = f"Could not uniquely identify column key in '{val}'. Possible candidates: {candidates}."
                 raise ResolutionError(msg)
