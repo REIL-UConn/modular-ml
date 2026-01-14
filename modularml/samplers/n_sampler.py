@@ -188,6 +188,7 @@ class NSampler(BaseSampler):
                 anchor samples.
 
         """
+        # Validate sources
         if self.sources is None:
             raise RuntimeError(
                 "`bind_source` must be called before sampling can occur.",
@@ -207,17 +208,16 @@ class NSampler(BaseSampler):
             for role, role_conds in self.condition_mapping.items()
         }
 
+        # Setup progress bar (only shows if `self.show_progress` is True)
+        self._progress_task.set_total(total=len(role_specs) * len(src))
+
         # Build role-specific matchings
         # Each role key contains a tuple of: anchor indices, role indices, and role scores
         # All returned indices are absolute indicies from the parent source
-        if self._progress is not None:
-            self._progress.set_total(len(src) * len(role_specs))
         role_results: dict[str, tuple[np.ndarray]] = {
             role: self._generate_role_matches(view=src, specs=specs)
             for role, specs in role_specs.items()
         }
-        if self._progress is not None:
-            self._progress.set_total(self._progress.completed)
 
         # Each role may return a different array of anchor indices
         # We need to get the intersection and ensure proper alignment
@@ -771,8 +771,7 @@ class NSampler(BaseSampler):
                 role_scores.append(score)
 
             # Update progress bar
-            if self._progress is not None:
-                self._progress.tick()
+            self._progress_task.tick(n=1)
 
         return anchor_abs_idxs, role_abs_idxs, role_scores
 

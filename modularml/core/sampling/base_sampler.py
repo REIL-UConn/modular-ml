@@ -18,7 +18,7 @@ from modularml.core.sampling.batcher import Batcher
 from modularml.utils.data.comparators import deep_equal
 from modularml.utils.data.formatting import ensure_list
 from modularml.utils.environment.environment import IN_NOTEBOOK
-from modularml.utils.representation.progress_bars import LazyProgress
+from modularml.utils.progress_bars.progress_task import ProgressTask
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -102,8 +102,13 @@ class BaseSampler(Configurable, Stateful, ABC):
         self._stream_to_source_label: dict[str, str] = {}
 
         # Optional progress bar
-        self._progress: LazyProgress | None = None
-        self._show_progress = show_progress
+        self._progress_task = ProgressTask(
+            style="sampling",
+            description=f"{type(self).__name__}",
+            total=None,
+            enabled=show_progress,
+            persist=IN_NOTEBOOK,
+        )
 
         # Define expected output streams
         self._stream_names: list[str] = [STREAM_DEFAULT]
@@ -247,9 +252,9 @@ class BaseSampler(Configurable, Stateful, ABC):
             stream = self.stream_names[0]
         return self.get_stream(name=stream)
 
-    # =====================================================
+    # ================================================
     # Source Binding (batch instantiation)
-    # =====================================================
+    # ================================================
     def _build_sampled_view(self) -> SampledView:
         """
         Construct and return a SampledView.
@@ -257,20 +262,15 @@ class BaseSampler(Configurable, Stateful, ABC):
         SampledView keyed multiple output streams, where each stream holds a
         list of BatchViews. Each BatchView groups row indices into roles.
         """
-        self._progress = LazyProgress(
-            total=None,
-            description=f"Sampling ({type(self).__name__})",
-            enabled=self._show_progress,
-            persist=IN_NOTEBOOK,
-        )
+        if self._progress_task is not None:
+            self._progress_task.reset()
+            self._progress_task.description = f"Sampling {list(self.sources)}"
 
         try:
             samples_by_stream: dict[tuple[str, str], Samples] = self.build_samples()
         finally:
             # Ensure cleanup even if never started
-            if self._progress is not None:
-                self._progress.close()
-                self._progress = None
+            self._progress_task.finish()
 
         # Construct SampledView
         streams: dict[str, list[BatchView]] = {}
@@ -326,11 +326,12 @@ class BaseSampler(Configurable, Stateful, ABC):
         if not self.is_bound:
             raise RuntimeError("Sampler has no bound source. Call bind_source() first.")
         self.show_progress = show_progress
-        self._sampled = self._build_sampled_view()
+        if not self.is_materialized:
+            self._sampled = self._build_sampled_view()
 
-    # =====================================================
+    # ================================================
     # Abstract Methods
-    # =====================================================
+    # ================================================
     @abstractmethod
     def build_samples(self) -> dict[tuple[str, str], Samples]:
         """
