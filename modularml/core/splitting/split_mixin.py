@@ -5,10 +5,17 @@ from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 
 from modularml.context.experiment_context import ExperimentContext
-from modularml.context.resolution_context import ResolutionContext
-from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_SAMPLE_ID, DOMAIN_TAGS, DOMAIN_TARGETS
+from modularml.core.data.schema_constants import (
+    DOMAIN_FEATURES,
+    DOMAIN_SAMPLE_ID,
+    DOMAIN_TAGS,
+    DOMAIN_TARGETS,
+)
 from modularml.core.references.experiment_reference import ResolutionError
-from modularml.core.references.featureset_reference import FeatureSetColumnReference, FeatureSetSplitReference
+from modularml.core.references.featureset_reference import (
+    FeatureSetColumnReference,
+    FeatureSetSplitReference,
+)
 from modularml.core.splitting.splitter_record import SplitterRecord
 from modularml.utils.data.data_format import DataFormat
 from modularml.utils.data.pyarrow_data import resolve_column_selectors
@@ -124,7 +131,8 @@ class SplitMixin:
         if rel_indices.ndim != 1:
             raise ValueError("rel_indices must be a 1D sequence of integer positions.")
         if np.any(rel_indices >= len(idxs)):
-            raise IndexError("Some relative indices exceed the size of the current view.")
+            msg = "Some relative indices exceed the size of the current view."
+            raise IndexError(msg)
         abs_indices = np.asarray(idxs)[rel_indices]
 
         # Preserve columns if already a view
@@ -138,7 +146,10 @@ class SplitMixin:
         return FeatureSetView(
             source=source,
             indices=abs_indices,
-            columns=source.get_all_keys(include_domain_prefix=True, include_rep_suffix=True),
+            columns=source.get_all_keys(
+                include_domain_prefix=True,
+                include_rep_suffix=True,
+            ),
             label=label or f"{self.label}_view",
         )
 
@@ -230,7 +241,11 @@ class SplitMixin:
                 first_val = col_data[0]
                 if isinstance(first_val, (np.ndarray, list, tuple)):
                     # Apply row-wise for arrays
-                    mask = np.fromiter((bool(cond(x)) for x in col_data), dtype=bool, count=len(col_data))
+                    mask = np.fromiter(
+                        (bool(cond(x)) for x in col_data),
+                        dtype=bool,
+                        count=len(col_data),
+                    )
                 else:
                     # Try applying directly to the vector
                     try:
@@ -259,7 +274,8 @@ class SplitMixin:
                 #     dtype=bool,
                 #     count=len(col_data),
                 # )
-                raise TypeError("Iterable condition can only be applied to 1-dimensional columns.")
+                msg = "Iterable condition can only be applied to 1-dimensional columns."
+                raise TypeError(msg)
 
             # 3. Scalar equality condition
             # For scalar columns -> vectorized equality
@@ -276,7 +292,10 @@ class SplitMixin:
             #     dtype=bool,
             #     count=len(col_data),
             # )
-            raise TypeError("Scalar-valued conditions can only be applied to 1-dimensional columns.")
+            msg = (
+                "Scalar-valued conditions can only be applied to 1-dimensional columns."
+            )
+            raise TypeError(msg)
 
         source, is_view = self._get_split_context()
         collection = source.collection
@@ -306,11 +325,7 @@ class SplitMixin:
 
             # Validate FeatureSetColumnReference values
             try:
-                _ = ref.resolve(
-                    ctx=ResolutionContext(
-                        experiment=ExperimentContext.get_active(),
-                    ),
-                )
+                _ = ref.resolve()
             except ResolutionError as e:
                 msg = f"Filter condition ({ref}) could not be resolved. {e}."
                 raise ValueError(msg) from e
@@ -340,7 +355,10 @@ class SplitMixin:
         return FeatureSetView(
             source=source,
             indices=selected_indices,
-            columns=source.get_all_keys(include_domain_prefix=True, include_rep_suffix=True),
+            columns=source.get_all_keys(
+                include_domain_prefix=True,
+                include_rep_suffix=True,
+            ),
             label=label or f"{self.label}_view",
         )
 
@@ -472,11 +490,15 @@ class SplitMixin:
 
         # Get indices of caller
         _, self_is_view = self._get_split_context()
-        self_idxs = self.indices if self_is_view else np.arange(self.collection.n_samples)
+        self_idxs = (
+            self.indices if self_is_view else np.arange(self.collection.n_samples)
+        )
 
         # Get indices of other
         _, other_is_view = other._get_split_context()
-        other_idxs = other.indices if other_is_view else np.arange(other.collection.n_samples)
+        other_idxs = (
+            other.indices if other_is_view else np.arange(other.collection.n_samples)
+        )
 
         # Map self idxs to ordering idx
         abs_to_rel = {abs_idx: rel_idx for rel_idx, abs_idx in enumerate(self_idxs)}
@@ -528,10 +550,14 @@ class SplitMixin:
         # Choose base view (use self if called on FeatureSetView, otherwise convert FeatureSet to a view)
         base_view = self if is_view else source.to_view()
         if ".fold_" in base_view.label:
-            raise NotImplementedError("Splitting of a fold (`base_view.label`) is not supported.")
+            msg = "Splitting of a fold (`base_view.label`) is not supported."
+            raise NotImplementedError(msg)
 
         # Perform the split (return splits as FeatureSetView instances)
-        results: dict[str, FeatureSetView] = splitter.split(base_view, return_views=True)
+        results: dict[str, FeatureSetView] = splitter.split(
+            base_view,
+            return_views=True,
+        )
 
         # Register splits if requested
         if register:

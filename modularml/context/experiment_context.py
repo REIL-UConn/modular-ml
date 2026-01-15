@@ -9,10 +9,14 @@ from weakref import ref
 from matplotlib.pylab import Enum
 
 from modularml.utils.environment.environment import IN_NOTEBOOK
+from modularml.utils.logging.warnings import warn
 
 if TYPE_CHECKING:
+    from modularml.core.data.featureset import FeatureSet
     from modularml.core.experiment.experiment import Experiment
     from modularml.core.experiment.experiment_node import ExperimentNode
+    from modularml.core.topology.compute_node import ComputeNode
+    from modularml.core.topology.model_graph import ModelGraph
 
 
 _ACTIVE_EXPERIMENT_CONTEXT: ContextVar[ExperimentContext | None] = ContextVar(
@@ -26,6 +30,7 @@ class RegistrationPolicy(Enum):
 
     ERROR = "error"
     OVERWRITE = "overwrite"
+    OVERWRITE_WARN = "overwrite_warn"
     NO_REGISTER = "no_register"
 
     @classmethod
@@ -56,6 +61,7 @@ class ExperimentContext:
         # Registries
         self._nodes_by_id: dict[str, ExperimentNode] = {}
         self._node_label_to_id: dict[str, str] = {}
+        self._mg: ModelGraph | None = None
 
         # Registration policy
         if registration_policy is None:
@@ -63,9 +69,9 @@ class ExperimentContext:
         else:
             self._policy = RegistrationPolicy.from_value(registration_policy)
 
-    # =====================================================
+    # ================================================
     # Active Context Helpers
-    # =====================================================
+    # ================================================
     @classmethod
     def _set_active(cls, ctx: ExperimentContext):
         _ACTIVE_EXPERIMENT_CONTEXT.set(ctx)
@@ -75,7 +81,7 @@ class ExperimentContext:
         """Returns the active ExperimentContext, if exists."""
         ctx = _ACTIVE_EXPERIMENT_CONTEXT.get()
         if ctx is None:
-            raise RuntimeError("No active ExperimentContext")
+            raise RuntimeError("There is no active ExperimentContext.")
         return ctx
 
     @contextmanager
@@ -99,9 +105,9 @@ class ExperimentContext:
         finally:
             _ACTIVE_EXPERIMENT_CONTEXT.reset(token)
 
-    # =====================================================
+    # ================================================
     # Policy Management
-    # =====================================================
+    # ================================================
     def _resolve_default_policy(self) -> RegistrationPolicy:
         """
         Determine the default registration policy based on environment.
@@ -116,9 +122,9 @@ class ExperimentContext:
         if env:
             return RegistrationPolicy.from_value(env)
 
-        # 2. If running in Jupyter Notebook -> default to OVERWRITE
+        # 2. If running in Jupyter Notebook -> default to OVERWRITE_WARN
         if IN_NOTEBOOK:
-            return RegistrationPolicy.OVERWRITE
+            return RegistrationPolicy.OVERWRITE_WARN
 
         # 3. Else --> default to ERROR
         return RegistrationPolicy.ERROR
@@ -159,21 +165,27 @@ class ExperimentContext:
         finally:
             self._policy = old
 
-    # =====================================================
+    # ================================================
     # Experiment Lifecycle
-    # =====================================================
-    def set_experiment(self, experiment: Experiment):
+    # ================================================
+    def set_experiment(
+        self,
+        experiment: Experiment,
+        *,
+        reset_registries: bool = False,
+    ):
         """Set the experiment reference for this context."""
         self._experiment_ref = ref(experiment)
-        self.clear_registries()
+        if reset_registries:
+            self.clear_registries()
 
     def get_experiment(self) -> Experiment | None:
         """Returns the Experimetn active in this context, if defined."""
         return None if self._experiment_ref is None else self._experiment_ref()
 
-    # =====================================================
+    # ================================================
     # Registry Helpers
-    # =====================================================
+    # ================================================
     def clear_registries(self):
         """Clear all registered items."""
         self._nodes_by_id.clear()
@@ -199,9 +211,15 @@ class ExperimentContext:
             if self._policy is RegistrationPolicy.ERROR:
                 msg = f"ExperimentNode with ID '{node_id}' is already registered."
                 raise ValueError(msg)
-            if self._policy is RegistrationPolicy.OVERWRITE:
+            if self._policy in (
+                RegistrationPolicy.OVERWRITE,
+                RegistrationPolicy.OVERWRITE_WARN,
+            ):
                 old = self._nodes_by_id[node_id]
                 self._node_label_to_id.pop(old.label, None)
+                if self._policy == RegistrationPolicy.OVERWRITE_WARN:
+                    msg = f"Overwriting existing node with ID '{old.node_id}'."
+                    warn(msg, category=UserWarning, stacklevel=2)
             else:
                 return
 
@@ -210,9 +228,15 @@ class ExperimentContext:
             if self._policy is RegistrationPolicy.ERROR:
                 msg = f"ExperimentNode label '{label}' already exists."
                 raise ValueError(msg)
-            if self._policy is RegistrationPolicy.OVERWRITE:
+            if self._policy in (
+                RegistrationPolicy.OVERWRITE,
+                RegistrationPolicy.OVERWRITE_WARN,
+            ):
                 old_id = self._node_label_to_id[label]
-                self._nodes_by_id.pop(old_id, None)
+                old = self._nodes_by_id.pop(old_id, None)
+                if self._policy == RegistrationPolicy.OVERWRITE_WARN:
+                    msg = f"Overwriting existing node with label '{old.label}'."
+                    warn(msg, category=UserWarning, stacklevel=2)
 
         # Register unique node UUID and string-based label
         self._nodes_by_id[node.node_id] = node
@@ -274,9 +298,34 @@ class ExperimentContext:
 
         return node
 
-    # =====================================================
+    def register_model_graph(self, graph: ModelGraph):
+        """Register a ModelGraph to this context."""
+        from modularml.core.topology.model_graph import ModelGraph
+
+        # Validate graph
+        if not isinstance(graph, ModelGraph):
+            msg = f"`graph` must be a ModelGraph instance. Received: {type(graph)}"
+            raise TypeError(msg)
+
+        if self._policy == RegistrationPolicy.NO_REGISTER:
+            return
+
+        # Check collisions
+        if self._mg is not None:
+            if self._policy == RegistrationPolicy.ERROR:
+                msg = "A ModelGraph has already been registered to this context."
+                raise ValueError(msg)
+
+            if self._policy == RegistrationPolicy.OVERWRITE_WARN:
+                msg = f"Overwriting existing ModelGraph '{self._mg.label}'."
+                warn(msg, category=UserWarning, stacklevel=2)
+
+        # Update internal reference
+        self._mg = graph
+
+    # ================================================
     # Node Lookup
-    # =====================================================
+    # ================================================
     def has_node(self, *, node_id: str | None = None, label: str | None = None) -> bool:
         """Check whether node is registered in this context."""
         if node_id is not None:
@@ -287,6 +336,7 @@ class ExperimentContext:
 
     def get_node(
         self,
+        val: str | None = None,
         *,
         node_id: str | None = None,
         label: str | None = None,
@@ -296,25 +346,51 @@ class ExperimentContext:
         Retrieve the specified node, as registered in this context.
 
         Args:
+            val (str, optional):
+                Either the ID or label of a node. ID is checked first.
+                If provided, `node_id` and `label` must be None.
+
             node_id (str, optional):
                 ID of node to retrieve.
+                If provided, `val` and `label` must be None.
+
             label (str, optional):
-                Label of node to retrieve. If both node_id and label are provided,
-                only node_id is used to resolve the node.
+                Label of node to retrieve.
+                If provided, `val` and `node_id` must be None.
+
             enforce_type (type, optional):
                 If specified, additional validation is performed to ensure the
                 reutrn node is of the specified type. Defaults to "ExperimentNode".
 
         """
         node = None
+
+        # If val, check ID then label
+        if val is not None:
+            if node_id is not None or label is not None:
+                msg = "`node_id` and `label` must be None if `val` is defined."
+                raise ValueError(msg)
+            if self.has_node(node_id=val):
+                return self.get_node(node_id=val, enforce_type=enforce_type)
+            if self.has_node(label=val):
+                return self.get_node(label=val, enforce_type=enforce_type)
+
+        # Get node from node_id
         if node_id is not None:
+            if val is not None or label is not None:
+                msg = "`val` and `label` must be None if `node_id` is defined."
+                raise ValueError(msg)
             try:
                 node = self._nodes_by_id[node_id]
             except KeyError as exc:
                 msg = f"No ExperimentNode with id '{node_id}'"
                 raise KeyError(msg) from exc
 
+        # Get node from label
         elif label is not None:
+            if val is not None or node_id is not None:
+                msg = "`val` and `node_id` must be None if `label` is defined."
+                raise ValueError(msg)
             try:
                 node = self._nodes_by_id[self._node_label_to_id[label]]
             except KeyError as exc:
@@ -324,6 +400,7 @@ class ExperimentContext:
         else:
             raise ValueError("Must provide node_id or label.")
 
+        # Enforce node type
         if enforce_type == "ExperimentNode":
             from modularml.core.experiment.experiment_node import ExperimentNode
 
@@ -376,28 +453,54 @@ class ExperimentContext:
         raise ValueError(msg)
 
     @property
-    def available_nodes(self) -> list[str]:
-        """List of registered ExperimentNode labels."""
-        return list(self._node_label_to_id.keys())
+    def available_nodes(self) -> dict[str, ExperimentNode]:
+        """
+        All registered ExperimentNodes.
+
+        Returns:
+            dict[str, ExperimentNode]:
+                Nodes keyed by node_id.
+
+        """
+        return self._nodes_by_id
 
     @property
-    def available_featuresets(self) -> list[str]:
-        """List of registered FeatureSet labels."""
+    def available_computenodes(self) -> dict[str, ComputeNode]:
+        """
+        All registered ComputeNode.
+
+        Returns:
+            dict[str, ComputeNode]:
+                Nodes keyed by node_id.
+
+        """
+        from modularml.core.topology.compute_node import ComputeNode
+
+        cnodes = {}
+        for n in self._nodes_by_id.values():
+            if isinstance(n, ComputeNode):
+                cnodes[n.node_id] = n
+        return cnodes
+
+    @property
+    def available_featuresets(self) -> dict[str, FeatureSet]:
+        """
+        All registered FeatureSets.
+
+        Returns:
+            dict[str, FeatureSet]:
+                Nodes keyed by node_id.
+
+        """
         from modularml.core.data.featureset import FeatureSet
 
-        avail_fs_labels = []
+        fnodes = {}
         for n in self._nodes_by_id.values():
             if isinstance(n, FeatureSet):
-                avail_fs_labels.append(n.label)
-        return avail_fs_labels
+                fnodes[n.node_id] = n
+        return fnodes
 
     @property
-    def available_modelnodes(self) -> list[str]:
-        """List of registered ModelNode labels."""
-        from modularml.core.topology.model_node import ModelNode
-
-        avail_mn_labels = []
-        for n in self._nodes_by_id.values():
-            if isinstance(n, ModelNode):
-                avail_mn_labels.append(n.label)
-        return avail_mn_labels
+    def model_graph(self) -> ModelGraph | None:
+        """The active ModelGraph instance in this context."""
+        return self._mg

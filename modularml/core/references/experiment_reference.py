@@ -4,7 +4,6 @@ from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Any
 
 from modularml.context.experiment_context import ExperimentContext
-from modularml.context.resolution_context import ResolutionContext
 from modularml.core.io.protocols import Configurable
 from modularml.core.references.reference_like import ReferenceLike
 
@@ -21,12 +20,12 @@ class ResolutionError(RuntimeError):
 class ExperimentReference(ReferenceLike, Configurable):
     """Base class for references resolvable at the Experiment scope."""
 
-    def resolve(self, ctx: ResolutionContext | None = None):
+    def resolve(self, ctx: ExperimentContext | None = None):
         if ctx is None:
-            ctx = ResolutionContext(experiment=ExperimentContext.get_active())
+            ctx = ExperimentContext.get_active()
         return self._resolve_experiment(ctx)
 
-    def _resolve_experiment(self, ctx: ResolutionContext):
+    def _resolve_experiment(self, ctx: ExperimentContext):
         raise NotImplementedError
 
     def to_string(
@@ -76,46 +75,44 @@ class ExperimentNodeReference(ExperimentReference):
 
     def resolve(
         self,
-        ctx: ResolutionContext | ExperimentContext | None = None,
+        ctx: ExperimentContext | None = None,
     ) -> ExperimentNode:
         """Resolves this reference to a ExperimentNode instance."""
-        if isinstance(ctx, ExperimentContext):
-            return super().resolve(ctx=ResolutionContext(experiment=ctx))
         return super().resolve(ctx=ctx)
 
     def _resolve_experiment(
         self,
-        ctx: ResolutionContext | ExperimentContext,
+        ctx: ExperimentContext,
     ) -> ExperimentNode:
-        if isinstance(ctx, ResolutionContext):
-            experiment = ctx.experiment
-        elif isinstance(ctx, ExperimentContext):
-            experiment = ctx
-        else:
-            raise TypeError
+        if not isinstance(ctx, ExperimentContext):
+            msg = (
+                "ExperimentNodeReference requires an ExperimentContext."
+                f"Received: {type(ctx)}."
+            )
+            raise TypeError(msg)
 
         # Prefer node_id resolution if given
         if self.node_id is not None:
-            if not experiment.has_node(node_id=self.node_id):
+            if not ctx.has_node(node_id=self.node_id):
                 msg = (
                     f"No node exists with ID='{self.node_id}' in the given "
                     "ExperimentContext."
                 )
                 raise ResolutionError(msg)
-            return experiment.get_node(
+            return ctx.get_node(
                 node_id=self.node_id,
                 enforce_type="ExperimentNode",
             )
 
         # Fallback to node label
         if self.node_label is not None:
-            if not experiment.has_node(label=self.node_label):
+            if not ctx.has_node(label=self.node_label):
                 msg = (
                     f"No node exists with label='{self.node_label}' in the given "
                     "ExperimentContext."
                 )
                 raise ResolutionError(msg)
-            return experiment.get_node(
+            return ctx.get_node(
                 label=self.node_label,
                 enforce_type="ExperimentNode",
             )
@@ -147,43 +144,41 @@ class GraphNodeReference(ExperimentNodeReference):
 
     def resolve(
         self,
-        ctx: ResolutionContext | ExperimentContext | None = None,
+        ctx: ExperimentContext | None = None,
     ) -> GraphNode:
         """Resolves this reference to a GraphNode instance."""
-        if isinstance(ctx, ExperimentContext):
-            return super().resolve(ctx=ResolutionContext(experiment=ctx))
         return super().resolve(ctx=ctx)
 
     def _resolve_experiment(
         self,
-        ctx: ResolutionContext | ExperimentContext,
+        ctx: ExperimentContext,
     ) -> GraphNode:
-        if isinstance(ctx, ResolutionContext):
-            experiment = ctx.experiment
-        elif isinstance(ctx, ExperimentContext):
-            experiment = ctx
-        else:
-            raise TypeError
+        if not isinstance(ctx, ExperimentContext):
+            msg = (
+                "GraphNodeReference requires an ExperimentContext."
+                f"Received: {type(ctx)}."
+            )
+            raise TypeError(msg)
 
         # Prefer node_id resolution if given
         if self.node_id is not None:
-            if not experiment.has_node(node_id=self.node_id):
+            if not ctx.has_node(node_id=self.node_id):
                 msg = (
                     f"No node exists with ID='{self.node_id}' in the given "
                     "ExperimentContext."
                 )
                 raise ResolutionError(msg)
-            return experiment.get_node(node_id=self.node_id, enforce_type="GraphNode")
+            return ctx.get_node(node_id=self.node_id, enforce_type="GraphNode")
 
         # Fallback to node label
         if self.node_label is not None:
-            if not experiment.has_node(label=self.node_label):
+            if not ctx.has_node(label=self.node_label):
                 msg = (
                     f"No node exists with label='{self.node_label}' in the given "
                     "ExperimentContext."
                 )
                 raise ResolutionError(msg)
-            return experiment.get_node(label=self.node_label, enforce_type="GraphNode")
+            return ctx.get_node(label=self.node_label, enforce_type="GraphNode")
 
         raise ResolutionError("Both node_label and node_id cannot be None.")
 

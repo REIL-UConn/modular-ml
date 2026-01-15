@@ -1,33 +1,57 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from modularml.core.data.batch import Batch
     from modularml.core.data.batch_view import BatchView
+    from modularml.core.references.featureset_reference import FeatureSetReference
     from modularml.core.training.loss_record import LossCollection
 
 
 @dataclass
 class ExecutionContext:
-    """Container for all data produced and consumed during a single ModelGraph execution step."""
+    """
+    Execution-time container for a single batch.
 
-    # Head node inputs data (keyed by the node that takes in the data)
-    # Multi heads may consume the same batch, therefore key can be a list of node_ids
-    # node_id(s) -> Batch
-    # We also record BatchView in case losses use non-materialized data
-    input_views: dict[str | Sequence[str], BatchView]
-    input_batches: dict[str | Sequence[str], Batch]
+    Description:
+        Stores all inputs, outputs, losses, and metrics produced during a
+        single forward/backward pass through the ModelGraph.
+    """
 
-    # ModelNode tensor outputs: node_id -> Batch
-    model_outputs: dict[str, Batch] | None = None
+    # Identity
+    phase_label: str
+    epoch_idx: int
+    batch_idx: int
 
-    # Loss outputs keyed by node_id
-    model_losses: dict[str, LossCollection] | None = None
+    # Inputs to head nodes (keyed by node ID + upstream ref)
+    inputs: dict[tuple[str, FeatureSetReference], BatchView] = field(
+        default_factory=dict,
+    )
 
-    # # Optional metadata
-    # step: int | None = None
-    # uuid: str = field(default_factory=lambda: str(uuid.uuid4()))
+    # Outputs of GraphNodes (keyed by node ID)
+    outputs: dict[str, Batch] = field(default_factory=dict)
+
+    # Losses computed in this batch (keyed by node ID)
+    losses: dict[str, LossCollection] = field(default_factory=dict)
+
+    # ================================================
+    # Attribute Updating
+    # ================================================
+    def set_input(
+        self,
+        *,
+        node_id: str,
+        upstream: FeatureSetReference,
+        batch_view: BatchView,
+    ):
+        if node_id not in self.inputs:
+            self.inputs[node_id] = {}
+        self.inputs[node_id][upstream] = batch_view
+
+    def set_output(self, *, node_id: str, batch: Batch):
+        self.outputs[node_id] = batch
+
+    def set_losses(self, *, node_id: str, loss: LossCollection):
+        self.losses[node_id] = loss

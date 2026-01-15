@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, get_args
 
 from modularml.context.experiment_context import ExperimentContext
-from modularml.context.resolution_context import ResolutionContext
 from modularml.core.data.schema_constants import (
     DOMAIN_FEATURES,
     DOMAIN_SAMPLE_ID,
@@ -42,16 +41,23 @@ class FeatureSetReference(ExperimentNodeReference):
 
     def resolve(
         self,
-        ctx: ResolutionContext | ExperimentContext | None = None,
+        ctx: ExperimentContext | None = None,
     ) -> FeatureSetView:
         """Resolves this reference to a FeatureSetView instance."""
         return super().resolve(ctx=ctx)
 
     def _resolve_experiment(
         self,
-        ctx: ResolutionContext | ExperimentContext,
+        ctx: ExperimentContext,
     ) -> FeatureSetView:
         from modularml.core.data.featureset import FeatureSet
+
+        if not isinstance(ctx, ExperimentContext):
+            msg = (
+                "FeatureSetReference requires an ExperimentContext."
+                f"Received: {type(ctx)}."
+            )
+            raise TypeError(msg)
 
         # Get FeatureSet node
         node_ref = ExperimentNodeReference(
@@ -120,18 +126,23 @@ class FeatureSetSplitReference(ExperimentReference):
 
     def resolve(
         self,
-        ctx: ResolutionContext | ExperimentContext | None = None,
+        ctx: ExperimentContext | None = None,
     ) -> FeatureSetView:
         """Resolves reference to a view of the FeatureSet split instance."""
-        if isinstance(ctx, ExperimentContext):
-            return super().resolve(ctx=ResolutionContext(experiment=ctx))
         return super().resolve(ctx=ctx)
 
     def _resolve_experiment(
         self,
-        ctx: ResolutionContext | ExperimentContext,
+        ctx: ExperimentContext,
     ) -> FeatureSetView:
         from modularml.core.data.featureset import FeatureSet
+
+        if not isinstance(ctx, ExperimentContext):
+            msg = (
+                "FeatureSetSplitReference requires an ExperimentContext."
+                f"Received: {type(ctx)}."
+            )
+            raise TypeError(msg)
 
         # Get FeatureSet node
         node_ref = ExperimentNodeReference(
@@ -192,17 +203,22 @@ class FeatureSetColumnReference(ExperimentReference):
 
     def resolve(
         self,
-        ctx: ResolutionContext | ExperimentContext | None = None,
+        ctx: ExperimentContext | None = None,
     ) -> FeatureSetView:
         """Resolves this single-column reference to a FeatureSetView instance."""
-        if isinstance(ctx, ExperimentContext):
-            return super().resolve(ctx=ResolutionContext(experiment=ctx))
         return super().resolve(ctx=ctx)
 
     def _resolve_experiment(
         self,
-        ctx: ResolutionContext | ExperimentContext,
+        ctx: ExperimentContext,
     ) -> FeatureSetView:
+        if not isinstance(ctx, ExperimentContext):
+            msg = (
+                "FeatureSetColumnReference requires an ExperimentContext."
+                f"Received: {type(ctx)}."
+            )
+            raise TypeError(msg)
+
         # Convert column attributes to fully-qualified column
         col = f"{self.domain}.{self.key}.{self.rep}"
 
@@ -319,9 +335,7 @@ class FeatureSetColumnReference(ExperimentReference):
             node_id=parsed["node_id"],
             node_label=parsed["node_label"],
         )
-        fs: FeatureSet = fs_ref.resolve(
-            ctx=ResolutionContext(experiment=experiment),
-        ).source
+        fs: FeatureSet = fs_ref.resolve(ctx=experiment).source
 
         # Resolve domain and column
         if parsed["domain"] is None and parsed["key"] is not None:
