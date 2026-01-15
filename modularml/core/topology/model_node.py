@@ -4,14 +4,15 @@ from typing import TYPE_CHECKING, Any, overload
 
 from modularml.core.data.batch import Batch
 from modularml.core.data.featureset import FeatureSet
-from modularml.core.data.featureset_view import FeatureSetView
 from modularml.core.data.sample_data import RoleData, SampleData
 from modularml.core.experiment.experiment_node import ExperimentNode
 from modularml.core.models import wrap_model
 from modularml.core.references.experiment_reference import ExperimentNodeReference
+from modularml.core.references.featureset_reference import FeatureSetReference
 from modularml.core.topology.compute_node import ComputeNode
 from modularml.core.topology.node_shapes import NodeShapes
 from modularml.core.training.loss_record import LossCollection, LossRecord
+from modularml.utils.data.data_format import get_data_format_for_backend
 from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
 from modularml.utils.errors.exceptions import (
     BackendMismatchError,
@@ -23,7 +24,7 @@ from modularml.utils.nn.backend import Backend
 from modularml.utils.representation.summary import safe_cast_to_summary_rows
 
 if TYPE_CHECKING:
-    from modularml.context.resolution_context import ResolutionContext
+    from modularml.context.execution_context import ExecutionContext
     from modularml.core.models.base_model import BaseModel
     from modularml.core.training.applied_loss import AppliedLoss
     from modularml.core.training.optimizer import Optimizer
@@ -451,35 +452,30 @@ class ModelNode(ComputeNode):
                     message=f"Optimizer backend does not match model backend: {self._optimizer.backend} != {self.backend}",
                 )
 
-    def _validate_source(
-        self,
-        ctx: ResolutionContext,
-        losses: list[AppliedLoss] | None = None,
-    ):
+    def _validate_ctx(self, ctx: ExecutionContext):
         """
-        Validates that the required sources for input and losses are present in `ctx`.
+        Validates that the context contains needed input data for this node.
 
         Args:
-            ctx (ResolutionContext):
+            ctx (ExecutionContext):
                 Execution context to validate losses on.
-            losses (list[AppliedLoss], optional):
-                List of applied losses.
 
         Raises:
             ValueError: If any expected input or loss role is missing.
 
         """
-        # Check that self.upstream_ref exists in batch
-        ups_node: ExperimentNode = self.upstream_ref.resolve(ctx=ctx)
-        if isinstance(ups_node, (FeatureSet, FeatureSetView)):
-            # This node must have direct inputs
-            if self.node_id not in ctx.execution.input_batches:
+        # If this node takes input from FeatureSet, ensure in ctx.inputs
+        if isinstance(self.upstream_ref, FeatureSetReference):
+            req_input_key = (self.node_id, self.upstream_ref)
+            if req_input_key not in ctx.inputs:
                 msg = (
                     f"ExecutionContext missing input data for ModelNode '{self.label}'."
                 )
                 raise ValueError(msg)
-        elif ups_node.node_id not in ctx.execution.model_outputs:
-            msg = f"ExecutionContext missing output data from upstream node '{ups_node.label}'."
+
+        # Otherwise, prior model outputs must be in ctx.outputs
+        elif self.upstream_ref.node_id not in ctx.outputs:
+            msg = f"ExecutionContext missing output data from upstream node '{self.upstream_ref.node_label}'."
             raise ValueError(msg)
 
     # ================================================
@@ -530,30 +526,25 @@ class ModelNode(ComputeNode):
 
     def get_input_data(
         self,
-        ctx: ResolutionContext,
+        ctx: ExecutionContext,
     ) -> Batch:
         """Retrieves Batch data for this ModelNode at the current execution step."""
-        # If head node, get input
-        if self.node_id in ctx.execution.input_batches:
-            return ctx.execution.input_batches[self.node_id]
-        # Otherwise, get output of upstream node
-        upstream_node: ExperimentNode = self.upstream_ref.resolve(ctx=ctx)
-        if upstream_node.node_id in ctx.execution.model_outputs:
-            return ctx.execution.model_outputs[upstream_node.node_id]
-
-        msg = f"Failed to get input data for ModelNode '{self.label}'."
-        raise RuntimeError(msg)
+        all_inp_data = super().get_input_data(
+            fmt=get_data_format_for_backend(backend=self.backend),
+            ctx=ctx,
+        )
+        return all_inp_data[self.upstream_ref]
 
     def _train_step_torch(
         self,
-        ctx: ResolutionContext,
+        ctx: ExecutionContext,
         losses: list[AppliedLoss],
     ):
         """
         Runs a training step using PyTorch: forward, loss, backward, optimizer.
 
         Args:
-            ctx (ResolutionContext):
+            ctx (ExecutionContext):
                 Context (input/output data) for the given execution step.
             losses (list[AppliedLoss]):
                 List of losses to be applied in this execution step.
@@ -567,9 +558,7 @@ class ModelNode(ComputeNode):
 
         # Forward pass (ctx.execution modified inplace)
         out_batch: Batch = self.forward(self.get_input_data(ctx=ctx))
-        if ctx.execution.model_outputs is None:
-            ctx.execution.model_outputs = {}
-        ctx.execution.model_outputs[self.node_id] = out_batch
+        ctx.set_output(node_id=self.node_id, batch=out_batch)
 
         # Compute losses
         if losses is not None:
@@ -587,20 +576,18 @@ class ModelNode(ComputeNode):
         lc.trainable.backward()
         self._optimizer.step()
 
-        if ctx.execution.model_losses is None:
-            ctx.execution.model_losses = {}
-        ctx.execution.model_losses[self.node_id] = lc
+        ctx.set_losses(node_id=self.node_id, loss=lc)
 
     def _train_step_tensorflow(
         self,
-        ctx: ResolutionContext,
+        ctx: ExecutionContext,
         losses: list[AppliedLoss],
     ):
         """
         Runs a training step using Tensorflow: forward, loss, backward, optimizer.
 
         Args:
-            ctx (ResolutionContext):
+            ctx (ExecutionContext):
                 Context (input/output data) for the given execution step.
             losses (list[AppliedLoss]):
                 List of losses to be applied in this execution step.
@@ -618,9 +605,7 @@ class ModelNode(ComputeNode):
                 self.get_input_data(ctx=ctx),
                 training=True,
             )
-            if ctx.execution.model_outputs is None:
-                ctx.execution.model_outputs = {}
-            ctx.execution.model_outputs[self.node_id] = out_batch
+            ctx.set_output(node_id=self.node_id, batch=out_batch)
 
         # Compute losses
         if losses is not None:
@@ -638,13 +623,11 @@ class ModelNode(ComputeNode):
         grads = tape.gradient(lc.total, self._model.trainable_variables)
         self._optimizer.step(grads=grads, variables=self._model.trainable_variables)
 
-        if ctx.execution.model_losses is None:
-            ctx.execution.model_losses = {}
-        ctx.execution.model_losses[self.node_id] = lc
+        ctx.set_losses(node_id=self.node_id, loss=lc)
 
     def _train_step_scikit(
         self,
-        ctx: ResolutionContext,
+        ctx: ExecutionContext,
         losses: list[AppliedLoss],
     ):
         # TODO:
@@ -652,7 +635,7 @@ class ModelNode(ComputeNode):
 
     def train_step(
         self,
-        ctx: ResolutionContext,
+        ctx: ExecutionContext,
         losses: list[AppliedLoss],
     ):
         """
@@ -662,7 +645,7 @@ class ModelNode(ComputeNode):
         must be delegated to `ModelGraph`.
 
         Args:
-            ctx (ResolutionContext):
+            ctx (ExecutionContext):
                 Context (input/output data) for the given execution step.
             losses (list[AppliedLoss]):
                 List of losses to be applied in this execution step.
@@ -673,24 +656,27 @@ class ModelNode(ComputeNode):
         """
         # If stage is frozen, raise error
         if self.freeze:
-            raise RuntimeError(
-                "`train_step` called with `freeze=True`. Use `eval_step` instead.",
-            )
+            msg = "`train_step` called with `freeze=True`. Use `eval_step` instead."
+            raise RuntimeError(msg)
 
-        # Ensure batch_input matches expected data in losses
-        self._validate_source(ctx=ctx, losses=losses)
+        # Ensure input data exists for this node
+        self._validate_ctx(ctx=ctx)
+        # Ensure losses only include those applied to this node
+        valid_losses = losses
+        if losses is not None:
+            valid_losses = [loss for loss in losses if loss.node_id == self.node_id]
 
         # Ensure optimizer is set and matches model backend
         self._check_valid_optimizer(required=True)
 
         if self.backend == Backend.TORCH:
-            return self._train_step_torch(ctx=ctx, losses=losses)
+            return self._train_step_torch(ctx=ctx, losses=valid_losses)
 
         if self.backend == Backend.TENSORFLOW:
-            return self._train_step_tensorflow(ctx=ctx, losses=losses)
+            return self._train_step_tensorflow(ctx=ctx, losses=valid_losses)
 
         if self.backend == Backend.SCIKIT:
-            return self._train_step_scikit(ctx=ctx, losses=losses)
+            return self._train_step_scikit(ctx=ctx, losses=valid_losses)
 
         msg = f"Unknown backend: {self.backend}"
         raise ValueError(msg)
@@ -700,14 +686,14 @@ class ModelNode(ComputeNode):
     # ================================================
     def _eval_step_torch(
         self,
-        ctx: ResolutionContext,
+        ctx: ExecutionContext,
         losses: list[AppliedLoss] | None = None,
     ):
         """
         Runs an evaluation step using PyTorch: forward + loss (no gradients).
 
         Args:
-            ctx (ResolutionContext):
+            ctx (ExecutionContext):
                 Context (input/output data) for the given execution step.
             losses (list[AppliedLoss]):
                 Optional list of losses to be applied in this execution step.
@@ -721,9 +707,7 @@ class ModelNode(ComputeNode):
         # Forward pass (ctx.execution modified inplace)
         with torch.no_grad():
             out_batch: Batch = self.forward(self.get_input_data(ctx=ctx))
-            if ctx.execution.model_outputs is None:
-                ctx.execution.model_outputs = {}
-            ctx.execution.model_outputs[self.node_id] = out_batch
+            ctx.set_output(node_id=self.node_id, batch=out_batch)
 
             # Compute losses
             if losses is not None:
@@ -738,20 +722,18 @@ class ModelNode(ComputeNode):
 
         # Record loss records
         lc = LossCollection(records=loss_records)
-        if ctx.execution.model_losses is None:
-            ctx.execution.model_losses = {}
-        ctx.execution.model_losses[self.node_id] = lc
+        ctx.set_losses(node_id=self.node_id, loss=lc)
 
     def _eval_step_tensorflow(
         self,
-        ctx: ResolutionContext,
+        ctx: ExecutionContext,
         losses: list[AppliedLoss] | None = None,
     ):
         """
         Runs an evaluation step using Tensorflow: forward + loss (no gradients).
 
         Args:
-            ctx (ResolutionContext):
+            ctx (ExecutionContext):
                 Context (input/output data) for the given execution step.
             losses (list[AppliedLoss]):
                 Optional list of losses to be applied in this execution step.
@@ -764,9 +746,7 @@ class ModelNode(ComputeNode):
             self.get_input_data(ctx=ctx),
             training=False,
         )
-        if ctx.execution.model_outputs is None:
-            ctx.execution.model_outputs = {}
-        ctx.execution.model_outputs[self.node_id] = out_batch
+        ctx.set_output(node_id=self.node_id, batch=out_batch)
 
         # Compute losses
         if losses is not None:
@@ -781,13 +761,11 @@ class ModelNode(ComputeNode):
 
         # Record loss records
         lc = LossCollection(records=loss_records)
-        if ctx.execution.model_losses is None:
-            ctx.execution.model_losses = {}
-        ctx.execution.model_losses[self.node_id] = lc
+        ctx.set_losses(node_id=self.node_id, loss=lc)
 
     def _eval_step_scikit(
         self,
-        ctx: ResolutionContext,
+        ctx: ExecutionContext,
         losses: list[AppliedLoss] | None = None,
     ):
         # TODO:
@@ -795,7 +773,7 @@ class ModelNode(ComputeNode):
 
     def eval_step(
         self,
-        ctx: ResolutionContext,
+        ctx: ExecutionContext,
         losses: list[AppliedLoss] | None = None,
     ):
         """
@@ -804,7 +782,7 @@ class ModelNode(ComputeNode):
         Only callable if this stage is frozen. No gradient tracking is performed.
 
         Args:
-            ctx (ResolutionContext):
+            ctx (ExecutionContext):
                 Context (input/output data) for the given execution step.
             losses (list[AppliedLoss]):
                 Optional list of losses to be applied in this execution step.
@@ -815,20 +793,26 @@ class ModelNode(ComputeNode):
         """
         # If stage is not frozen, raise error
         if not self.freeze:
-            raise RuntimeError(
-                "`eval_step` called with `freeze=False`. Use `train_step` for training.",
+            msg = (
+                "`eval_step` called with `freeze=False`. Use `train_step` for training."
             )
+            raise RuntimeError(msg)
 
-        self._validate_source(ctx=ctx, losses=losses)
+        # Ensure input data exists for this node
+        self._validate_ctx(ctx=ctx)
+        # Ensure losses only include those applied to this node
+        valid_losses = losses
+        if losses is not None:
+            valid_losses = [loss for loss in losses if loss.node_id == self.node_id]
 
         if self.backend == Backend.TORCH:
-            return self._eval_step_torch(ctx=ctx, losses=losses)
+            return self._eval_step_torch(ctx=ctx, losses=valid_losses)
 
         if self.backend == Backend.TENSORFLOW:
-            return self._eval_step_tensorflow(ctx=ctx, losses=losses)
+            return self._eval_step_tensorflow(ctx=ctx, losses=valid_losses)
 
         if self.backend == Backend.SCIKIT:
-            return self._eval_step_scikit(ctx=ctx, losses=losses)
+            return self._eval_step_scikit(ctx=ctx, losses=valid_losses)
 
         msg = f"Unknown backend: {self.backend}"
         raise ValueError(msg)

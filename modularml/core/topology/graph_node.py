@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Literal
 
 from modularml.context.experiment_context import ExperimentContext
-from modularml.context.resolution_context import ResolutionContext
 from modularml.core.data.schema_constants import STREAM_DEFAULT
 from modularml.core.experiment.experiment_node import ExperimentNode
 from modularml.core.experiment.phase import InputBinding
@@ -117,7 +116,7 @@ class GraphNode(ABC, ExperimentNode):
             failed: list[GraphNodeReference] = []
             for r in refs:
                 try:
-                    _ = r.resolve(ctx=ResolutionContext(experiment=exp_ctx))
+                    _ = r.resolve(ctx=exp_ctx)
                 except ResolutionError:  # noqa: PERF203
                     failed.append(r)
             if failed:

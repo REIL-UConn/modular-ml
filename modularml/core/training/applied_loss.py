@@ -3,7 +3,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from modularml.context.resolution_context import ResolutionContext
+from modularml.context.execution_context import ExecutionContext
+from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.batch_view import BatchView
 from modularml.core.data.sample_schema import DOMAIN_TARGETS
 from modularml.core.data.schema_constants import DOMAIN_OUTPUTS
@@ -47,7 +48,7 @@ class AppliedLoss(Summarizable):
 
             on (str | ModelNode):
                 The ModelNode on which the loss is applied. Can be a ModelNode
-                instance or its label.
+                instance, its ID, or its label.
 
             inputs (list[ReferenceLike] | dict[str, ReferenceLike]):
                 A list of ReferenceLike targets defining *positional* loss inputs,
@@ -69,9 +70,13 @@ class AppliedLoss(Summarizable):
 
         # Resolve ModelNode
         if isinstance(on, ModelNode):
-            self.node_label = on.label
+            self.node_id = on.node_id
         elif isinstance(on, str):
-            self.node_label = on
+            exp_ctx = ExperimentContext.get_active()
+            self.node_id = exp_ctx.get_node(
+                val=on,
+                enforce_type="ModelNode",
+            ).node_id
         else:
             msg = f"`on` must be a ModelNode or string. Received: {type(on)}."
             raise TypeError(msg)
@@ -97,11 +102,16 @@ class AppliedLoss(Summarizable):
     def _resolve_input(
         self,
         spec: str,
-        ctx: ResolutionContext,
+        ctx: ExecutionContext,
     ) -> tuple[TensorLike, TensorLike, TensorLike]:
         """Resolve a single loss input string to: (tensor data, weights, mask)."""
+        exp_ctx = ExperimentContext.get_active()
+
         # Validate node & backend
-        node: ModelNode = ctx.experiment.get_node(label=self.node_label, enforce_type="ModelNode")
+        node: ModelNode = exp_ctx.get_node(
+            node_id=self.node_id,
+            enforce_type="ModelNode",
+        )
         if self.loss.backend != node.backend:
             msg = (
                 f"ModelNode ('{node.label}') and Loss ('{self.loss.name}') "
@@ -123,7 +133,7 @@ class AppliedLoss(Summarizable):
         self,
         spec: str,
         node: ModelNode,
-        ctx: ResolutionContext,
+        ctx: ExecutionContext,
     ) -> tuple[TensorLike, TensorLike, TensorLike]:
         """Returns (tensor data, weights, mask)."""
         # Extract role key
@@ -135,16 +145,20 @@ class AppliedLoss(Summarizable):
             elif len(parts) == 2:
                 domain, role = parts
             else:
-                msg = f"AppliedLoss input '{spec}' could not resolved. Too many components: {parts}."
+                msg = (
+                    f"AppliedLoss input '{spec}' could not resolved. Too many "
+                    f"components: {parts}."
+                )
                 raise ResolutionError(msg)
 
-        output_batch = ctx.execution.model_outputs[node.node_id]
-
+        # Get model outputs
+        output_batch = ctx.outputs[node.node_id]
         if role is None:
             if len(output_batch.available_roles) != 1:
                 msg = (
                     f"Applied loss spec '{spec}' must specify a `role` when multiple "
-                    f"roles exist in the output data. Available roles: {output_batch.available_roles}."
+                    "roles exist in the output data. Available roles: "
+                    f"{output_batch.available_roles}."
                 )
                 raise ResolutionError(msg)
             role = output_batch.available_roles[0]
@@ -159,8 +173,8 @@ class AppliedLoss(Summarizable):
         tensor_like = ref.resolve(ctx=ctx)
 
         # Grab weights and mask from batch
-        weights = ctx.execution.model_outputs[node.node_id].role_weights[role]
-        mask = ctx.execution.model_outputs[node.node_id].role_masks[role]
+        weights = output_batch.role_weights[role]
+        mask = output_batch.role_masks[role]
 
         return tensor_like, weights, mask
 
@@ -168,13 +182,13 @@ class AppliedLoss(Summarizable):
         self,
         spec: str,
         node: ModelNode,
-        ctx: ResolutionContext,
+        ctx: ExecutionContext,
     ) -> tuple[TensorLike, TensorLike, TensorLike]:
         """Returns (tensor data, weights, mask)."""
         bv: BatchView = self._get_upstream_view(node=node, ctx=ctx)
         ref = FeatureSetColumnReference.from_string(
             val=spec,
-            experiment=ctx.experiment,
+            experiment=ExperimentContext.get_active(),
             known_attrs={
                 "node_id": bv.source.node_id,
                 "node_label": bv.source.label,
@@ -187,20 +201,21 @@ class AppliedLoss(Summarizable):
         )
         # Infer role
         role = None
-        if len(b.roles) == 1:
-            role = b.roles[0]
-        elif "default" in b.roles:
+        if len(b.available_roles) == 1:
+            role = b.available_roles[0]
+        elif "default" in b.available_roles:
             role = "default"
-        elif "anchor" in b.roles:
+        elif "anchor" in b.available_roles:
             role = "anchor"
         else:
             msg = (
-                f"AppliedLoss input '{spec}' could not resolved. Role must be specified when multiple exists: {b.roles}"
+                f"AppliedLoss input '{spec}' could not resolved. Role must be "
+                f"specified when multiple exists. Available: {b.available_roles}."
             )
             raise ResolutionError(msg)
 
         # Get domain data (tensor like)
-        tensor_like = getattr(b.role_data[role], ref.domain)
+        tensor_like = b.role_data.get_data(role=role, domain=ref.domain)
 
         # Create dummy weights (no masking available)
         weights = np.ones(shape=ensure_tuple_shape(tensor_like.shape))
@@ -211,7 +226,7 @@ class AppliedLoss(Summarizable):
     def _get_upstream_view(
         self,
         node: ModelNode,
-        ctx: ResolutionContext,
+        ctx: ExecutionContext,
     ) -> BatchView:
         """
         Determines the BatchView that feeds into the head node on `nodes` branch.
@@ -219,6 +234,9 @@ class AppliedLoss(Summarizable):
         Recursively find the head node of the branch that `node` is on.
         Then obtains the BatchView that feeds into it.
         """
+        # All head node IDs in this ExecutionContext
+        head_node_ids = [x[0] for x in ctx.inputs]
+
         # Get all upstream head nodes of `node`
         upstream_views: list[BatchView] = []
         visited: set[str] = set()
@@ -229,9 +247,12 @@ class AppliedLoss(Summarizable):
                 return
             visited.add(n.node_id)
 
-            # If this is a head node, append view and return
-            if n.node_id in ctx.execution.input_views:
-                upstream_views.append(ctx.execution.input_views[n.node_id])
+            # If this is a head node, add all inputs and return
+            if n.node_id in head_node_ids:
+                bvs: list[BatchView] = [
+                    bv for inp_key, bv in ctx.inputs.items() if inp_key[0] == n.node_id
+                ]
+                upstream_views.extend(bvs)
                 return
 
             # Otherwise, recurse on upstream node
@@ -243,8 +264,8 @@ class AppliedLoss(Summarizable):
 
         if len(upstream_views) != 1:
             msg = (
-                "FeatureSet column-based loss inputs require that the applied to node "
-                f"has exactly one upstead FeatureSet. Detected: {len(upstream_views)}."
+                "FeatureSet-column-based loss inputs require that the applied-to-node "
+                f"has exactly one upstream FeatureSet. Detected: {len(upstream_views)}."
             )
             raise ResolutionError(msg)
 
@@ -257,13 +278,15 @@ class AppliedLoss(Summarizable):
         # Apply sample weighting -> convert mean_weights to correct backend tensor
         if self.backend == Backend.TORCH:
             torch = ensure_torch()
-            raw_loss = raw_loss.view(-1)  # Ensure loss has shape (batch_size, )
+            # Ensure loss has shape (batch_size, )
+            raw_loss = raw_loss.view(-1)
             w = torch.as_tensor(weights, device=raw_loss.device)
             return torch.sum(raw_loss * w) * self.weight
 
         if self.backend == Backend.TENSORFLOW:
             tf = ensure_tensorflow()
-            raw_loss = tf.reshape(raw_loss, [-1])  # Ensure loss has shape (batch_size, )
+            # Ensure loss has shape (batch_size, )
+            raw_loss = tf.reshape(raw_loss, [-1])
             w = tf.convert_to_tensor(weights, dtype=raw_loss.dtype)
             return tf.reduce_sum(raw_loss * w) * self.weight
 
@@ -272,7 +295,7 @@ class AppliedLoss(Summarizable):
         w = np.reshape(weights, (-1,))
         return np.sum(raw_loss * w) * self.weight
 
-    def compute(self, ctx: ResolutionContext) -> Any:
+    def compute(self, ctx: ExecutionContext) -> Any:
         """Compute loss for a single execution step."""
         # Map self.inputs.keys() to batch tensor data
         kw_data: dict[str, Any] = {}
@@ -302,7 +325,10 @@ class AppliedLoss(Summarizable):
         combined_mask = np.logical_and.reduce(kw_masks)  # shape: (n_samples, )
 
         # Combine weights (mean across inputs, then apply mask)
-        mean_weights = np.mean(np.stack(kw_weights, axis=0), axis=0).reshape(-1)  # shape: (n_samples, )
+        mean_weights = np.mean(
+            np.stack(kw_weights, axis=0),
+            axis=0,
+        ).reshape(-1)  # shape: (n_samples, )
         mean_weights = mean_weights * combined_mask.astype(mean_weights.dtype)
 
         # Call loss function (convert to positional args if needed)
@@ -321,7 +347,12 @@ class AppliedLoss(Summarizable):
     def _summary_rows(self) -> list[tuple]:
         rows: list[tuple] = [
             ("label", str(self.label)),
-            ("loss", self.loss._summary_rows() if hasattr(self.loss, "_summary_rows") else f"{self.loss!r}"),
+            (
+                "loss",
+                self.loss._summary_rows()
+                if hasattr(self.loss, "_summary_rows")
+                else f"{self.loss!r}",
+            ),
             ("inputs", str(self.inputs)),
             ("weight", str(self.weight)),
         ]
@@ -329,5 +360,6 @@ class AppliedLoss(Summarizable):
 
     def __repr__(self):
         return (
-            f"AppliedLoss(label={self.label!r}, loss={self.loss.name!r}, inputs={self.inputs!r}, weight={self.weight})"
+            f"AppliedLoss(label={self.label!r}, loss={self.loss.name!r}, "
+            f"inputs={self.inputs!r}, weight={self.weight})"
         )

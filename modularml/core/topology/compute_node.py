@@ -3,13 +3,15 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Any
 
+from modularml.core.references.featureset_reference import FeatureSetReference
 from modularml.core.topology.graph_node import GraphNode
 
 if TYPE_CHECKING:
+    from modularml.context.execution_context import ExecutionContext
     from modularml.core.data.batch import Batch
-    from modularml.core.data.sample_data import RoleData
     from modularml.core.references.experiment_reference import ExperimentNodeReference
     from modularml.core.topology.node_shapes import NodeShapes
+    from modularml.utils.data.data_format import DataFormat
 
 
 class ComputeNode(GraphNode):
@@ -29,8 +31,12 @@ class ComputeNode(GraphNode):
     def __init__(
         self,
         label: str,
-        upstream_refs: ExperimentNodeReference | list[ExperimentNodeReference] | None = None,
-        downstream_refs: ExperimentNodeReference | list[ExperimentNodeReference] | None = None,
+        upstream_refs: ExperimentNodeReference
+        | list[ExperimentNodeReference]
+        | None = None,
+        downstream_refs: ExperimentNodeReference
+        | list[ExperimentNodeReference]
+        | None = None,
         *,
         node_id: str | None = None,
         register: bool = True,
@@ -130,20 +136,55 @@ class ComputeNode(GraphNode):
         """
         raise NotImplementedError
 
-    @abstractmethod
-    def get_input_data(self, batch: Batch) -> RoleData | list[RoleData]:
+    def get_input_data(
+        self,
+        fmt: DataFormat,
+        ctx: ExecutionContext,
+    ) -> dict[ExperimentNodeReference, Batch]:
         """
-        Retrieve and construct this node's input batch from all upstream batches.
-
-        Args:
-            batch (Batch):
-                All Batch data for the ModelGraph forward pass.
+        Retrieves Batch data for this ModelNode at the current execution step.
 
         Returns:
-            dict[str, SampleData] | list[dict[str, SampleData]]:
-                Only the subset of :attr:`Batch.outputs` required for this node.
+            dict[ExperimentNodeReference, Batch]:
+                Batches keyed by each upstream_ref of this node.
 
         """
+        input_data = {}
+        for ref in self.get_upstream_refs():
+            # Check if this reference pulls from FeatureSet
+            inp_key = (self.node_id, ref)
+            if inp_key in ctx.inputs:
+                if not isinstance(ref, FeatureSetReference):
+                    msg = "Invalid upstream reference in ExecutionContext.inputs."
+                    raise TypeError(msg)
+
+                # Get batch view from inputs
+                bv = ctx.inputs[inp_key]
+
+                # Materialize view to batch with specific columns
+                batch = bv.materialize_batch(
+                    fmt=fmt,
+                    features=ref.features,
+                    targets=ref.targets,
+                    tags=ref.tags,
+                )
+                input_data[ref] = batch
+                continue
+
+            # Otherwise, get output of upstream node, and cast to this backend
+            if ref.node_id in ctx.outputs:
+                batch = ctx.outputs[ref.node_id]
+                # Cast to format needed for this model (returns copy)
+                input_data[ref] = batch.to_format(fmt=fmt)
+                continue
+
+            msg = (
+                f"Failed to get input data for ComputeNode '{self.label}' upstream "
+                f"reference: {ref}."
+            )
+            raise RuntimeError(msg)
+
+        return input_data
 
     @abstractmethod
     def forward(self, inputs: Any) -> Any:
@@ -230,5 +271,10 @@ class ComputeNode(GraphNode):
         return cfg
 
     @classmethod
-    def from_config(cls, config: dict[str, Any], *, register: bool = True) -> ComputeNode:
+    def from_config(
+        cls,
+        config: dict[str, Any],
+        *,
+        register: bool = True,
+    ) -> ComputeNode:
         return cls(register=register, **config)
