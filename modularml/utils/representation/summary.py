@@ -110,7 +110,7 @@ def format_summary_box(
     # Clamp & pad rows
     content_width = min(
         max(len(r) for r in flat),
-        max_width,
+        max_width - 4,
     )
 
     def fmt_line(line: str) -> str:

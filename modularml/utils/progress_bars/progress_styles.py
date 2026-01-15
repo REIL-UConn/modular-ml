@@ -25,9 +25,9 @@ style_sampling = ProgressStyle(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         MofNCompleteColumn(),
-        TextColumn("•"),
+        TextColumn("|"),
         TimeElapsedColumn(),
-        TextColumn("•"),
+        TextColumn("|"),
         TimeRemainingColumn(),
     ),
 )
@@ -38,11 +38,10 @@ style_training = ProgressStyle(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         MofNCompleteColumn(),
-        TextColumn("•"),
+        TextColumn("|"),
         TimeElapsedColumn(),
-        TextColumn("•"),
+        TextColumn("|"),
         TimeRemainingColumn(),
-        # TextColumn("•"),
     ),
 )
 
@@ -52,7 +51,7 @@ style_training_loss = ProgressStyle(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         MofNCompleteColumn(),
-        TextColumn("•"),
+        TextColumn("|"),
         TextColumn(
             (
                 "loss={task.fields[loss_total]:.4f} "

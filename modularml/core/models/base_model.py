@@ -30,7 +30,9 @@ class BaseModel(Configurable, Stateful, ABC):
             # Replace class with qualname (str)
             if "model_class" in cfg:
                 cls_or_obj = cfg["model_class"]
-                cls = cls_or_obj if isinstance(cls_or_obj, type) else cls_or_obj.__class__
+                cls = (
+                    cls_or_obj if isinstance(cls_or_obj, type) else cls_or_obj.__class__
+                )
                 cfg["model_class"] = cls.__qualname__
 
         if not deep_equal(grab_clean_cfg(self), grab_clean_cfg(other)):
@@ -41,6 +43,9 @@ class BaseModel(Configurable, Stateful, ABC):
 
     def __hash__(self) -> int:
         return id(self)
+
+    def __repr__(self) -> str:
+        return f"<{self.backend.value} model>"
 
     # ================================================
     # Properties
@@ -73,7 +78,11 @@ class BaseModel(Configurable, Stateful, ABC):
 
     @property
     def is_built(self) -> bool:
-        return self._built and (self.input_shape is not None) and (self.output_shape is not None)
+        return (
+            self._built
+            and (self.input_shape is not None)
+            and (self.output_shape is not None)
+        )
 
     # ================================================
     # Methods

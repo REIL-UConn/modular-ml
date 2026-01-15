@@ -334,6 +334,8 @@ class TrainPhase(ExperimentPhase):
                 )
                 # Materialize batches once
                 binding.sampler.bind_sources(sources=[sampler_src])
+                binding.sampler.show_progress = self.show_sampler_progress
+                binding.sampler._progress_task.enabled = self.show_sampler_progress
                 binding.sampler.materialize_batches(
                     show_progress=self.show_sampler_progress,
                 )
@@ -445,7 +447,6 @@ class TrainPhase(ExperimentPhase):
                 - epoch index
                 - batch index (within the epoch)
                 - resolved input BatchViews for all bindings
-                - losses to be applied for this phase
 
         Notes:
             - ZIP scheduling policies always provide one batch per sampler per step.

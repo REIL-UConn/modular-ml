@@ -154,7 +154,11 @@ class SequentialCNN(TorchBaseModel):
                 max_len=None,
                 allow_null_shape=False,
             )
-            if (self._input_shape is not None) and (input_shape != self._input_shape) and (not force):
+            if (
+                (self._input_shape is not None)
+                and (input_shape != self._input_shape)
+                and (not force)
+            ):
                 msg = (
                     f"Build called with `input_shape={input_shape}` but input shape is already defined "
                     f"with value `{self._input_shape}`. To override the existing shape, set `force=True`."
@@ -170,7 +174,11 @@ class SequentialCNN(TorchBaseModel):
                 max_len=None,
                 allow_null_shape=False,
             )
-            if (self._output_shape is not None) and (output_shape != self._output_shape) and (not force):
+            if (
+                (self._output_shape is not None)
+                and (output_shape != self._output_shape)
+                and (not force)
+            ):
                 msg = (
                     f"Build called with `output_shape={output_shape}` but input shape is already defined "
                     f"with value `{self._output_shape}`. To override the existing shape, set `force=True`."
@@ -251,7 +259,7 @@ class SequentialCNN(TorchBaseModel):
             self.build(input_shape=tuple(x.shape[1:]))
 
         x = self.conv_layers(x)
-        if self.config["flatten_output"]:
+        if self.flatten_output:
             x = x.view(x.size(0), -1)
             x = self.fc(x)
             x = x.view(x.size(0), *self._output_shape)
