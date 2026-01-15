@@ -24,6 +24,14 @@ class Backend(str, Enum):
         return self.value
 
 
+def is_valid_backend(value: str | Backend):
+    try:
+        _ = normalize_backend(value=value)
+    except ValueError:
+        return False
+    return True
+
+
 def normalize_backend(value: str | Backend):
     if isinstance(value, Backend):
         return value
@@ -38,7 +46,11 @@ def normalize_backend(value: str | Backend):
         if value in ["numpy", "np"]:
             return Backend.SCIKIT
         return Backend(value)
-    msg = f"Unsupported Backend value: {value}"
+
+    msg = (
+        f"Unsupported Backend value: {value}. "
+        f"Expected one of: ['torch', 'tensorflow', 'scikit', 'numpy']."
+    )
     raise ValueError(msg)
 
 
@@ -86,8 +98,12 @@ def infer_backend(obj_or_cls: Any) -> Backend:
     try:
         import torch
 
-        if isinstance(obj_or_cls, (torch.Tensor, torch.nn.Module, torch.optim.Optimizer)) or (
-            isinstance(obj_or_cls, type) and _safe_issubclass(obj_or_cls, (torch.nn.Module, torch.optim.Optimizer))
+        if isinstance(
+            obj_or_cls,
+            (torch.Tensor, torch.nn.Module, torch.optim.Optimizer),
+        ) or (
+            isinstance(obj_or_cls, type)
+            and _safe_issubclass(obj_or_cls, (torch.nn.Module, torch.optim.Optimizer))
         ):
             return Backend.TORCH
     except ImportError:
@@ -99,9 +115,20 @@ def infer_backend(obj_or_cls: Any) -> Backend:
     try:
         import tensorflow as tf
 
-        if isinstance(obj_or_cls, (tf.Tensor, tf.keras.Model, tf.keras.losses.Loss, tf.keras.optimizers.Optimizer)) or (
+        if isinstance(
+            obj_or_cls,
+            (
+                tf.Tensor,
+                tf.keras.Model,
+                tf.keras.losses.Loss,
+                tf.keras.optimizers.Optimizer,
+            ),
+        ) or (
             isinstance(obj_or_cls, type)
-            and _safe_issubclass(obj_or_cls, (tf.keras.Model, tf.keras.losses.Loss, tf.keras.optimizers.Optimizer))
+            and _safe_issubclass(
+                obj_or_cls,
+                (tf.keras.Model, tf.keras.losses.Loss, tf.keras.optimizers.Optimizer),
+            )
         ):
             return Backend.TENSORFLOW
     except ImportError:

@@ -125,7 +125,8 @@ class SampleData(Summarizable):
     @property
     def outputs(self):
         if self._kind != "output":
-            raise AttributeError("`outputs` is only defined for SampleData produced by a model.")
+            msg = "`outputs` is only defined for SampleData produced by a model."
+            raise AttributeError(msg)
         return self.features
 
     def get_domain_data(self, domain: str) -> TensorLike:
@@ -278,6 +279,7 @@ class SampleData(Summarizable):
                 row_lbl = DOMAIN_OUTPUTS
             if d not in self.data:
                 rows.append((row_lbl, "None"))
+                continue
             v = self.data[d]
             rows.append(
                 (
@@ -515,17 +517,17 @@ class SampleShapes(Summarizable):
     Shape specification for all schema domains with tensor-like data.
 
     Description:
-        Defines the per-sample tensor shapes of all schema domains \
-        (features, targets, tags) for one node in the model graph. \
-        Shapes are stored without the batch dimension, since batch size \
+        Defines the per-sample tensor shapes of all schema domains
+        (features, targets, tags) for one node in the model graph.
+        Shapes are stored without the batch dimension, since batch size
         may vary at runtime and is not part of the static schema.
 
         The same shape applies to all roles associated with the node.
 
     Args:
         shapes (dict[str, tuple[int, ...]]):
-            Dictionary mapping each schema domain name \
-            (DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS) to a shape \
+            Dictionary mapping each schema domain name
+            (DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS) to a shape
             tuple (excluding batch dimension).
         features_shape (tuple[int, ...]]):
             Tuple of ints representing feature shape.
@@ -578,7 +580,10 @@ class SampleShapes(Summarizable):
     def outputs_shape(self) -> tuple[int, ...]:
         """Shape tuple for the DOMAIN_OUTPUTS."""
         if self._kind != "output":
-            raise AttributeError("`outputs_shape` is only defined for SampleShapes produced by a model.")
+            msg = (
+                "`outputs_shape` is only defined for SampleShapes produced by a model."
+            )
+            raise AttributeError(msg)
         return self.features_shape
 
     @property

@@ -4,7 +4,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from modularml.core.data.sample_data import RoleData, SampleShapes
-from modularml.utils.data.data_format import DataFormat, get_data_format_for_backend, infer_data_type
+from modularml.utils.data.data_format import (
+    DataFormat,
+    get_data_format_for_backend,
+    infer_data_type,
+)
 from modularml.utils.data.shape_utils import ensure_tuple_shape
 from modularml.utils.representation.summary import Summarizable
 
@@ -223,11 +227,27 @@ class Batch(Summarizable):
         ]
         rw_rows = []
         for k, v in self.role_weights.items():
-            rw_rows.append((k, [("shape", str(ensure_tuple_shape(v.shape))), ("dtype", str(infer_data_type(v)))]))
+            rw_rows.append(
+                (
+                    k,
+                    [
+                        ("shape", str(ensure_tuple_shape(v.shape))),
+                        ("dtype", str(infer_data_type(v))),
+                    ],
+                ),
+            )
 
         rm_rows = []
         for k, v in self.role_masks.items():
-            rm_rows.append((k, [("shape", str(ensure_tuple_shape(v.shape))), ("dtype", str(infer_data_type(v)))]))
+            rm_rows.append(
+                (
+                    k,
+                    [
+                        ("shape", str(ensure_tuple_shape(v.shape))),
+                        ("dtype", str(infer_data_type(v))),
+                    ],
+                ),
+            )
 
         rows.append(("role_weights", rw_rows))
         rows.append(("role_masks", rm_rows))

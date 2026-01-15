@@ -18,11 +18,14 @@ from modularml.core.data.schema_constants import (
     REP_RAW,
     REP_TRANSFORMED,
 )
+from modularml.core.experiment.experiment_node import ExperimentNode
 from modularml.core.io.protocols import Configurable, Stateful
 from modularml.core.references.experiment_reference import ResolutionError
-from modularml.core.references.featureset_reference import FeatureSetColumnReference, FeatureSetReference
+from modularml.core.references.featureset_reference import (
+    FeatureSetColumnReference,
+    FeatureSetReference,
+)
 from modularml.core.splitting.split_mixin import SplitMixin, SplitterRecord
-from modularml.core.topology.graph_node import GraphNode
 from modularml.core.transforms.scaler import Scaler
 from modularml.core.transforms.scaler_record import ScalerRecord
 from modularml.utils.data.comparators import deep_equal
@@ -47,7 +50,13 @@ if TYPE_CHECKING:
     from modularml.core.data.sample_schema import SampleSchema
 
 
-class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Stateful):
+class FeatureSet(
+    ExperimentNode,
+    SplitMixin,
+    SampleCollectionMixin,
+    Configurable,
+    Stateful,
+):
     """
     Unified FeatureSet backed by a single SampleCollection.
 
@@ -243,7 +252,9 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
                 target_data[c].append(vals if len(vals) > 1 else vals[0])
             for c in tag_cols:
                 unique_vals = df_gb[c].unique()
-                tag_data[c].append(unique_vals[0] if len(unique_vals) == 1 else unique_vals.tolist())
+                tag_data[c].append(
+                    unique_vals[0] if len(unique_vals) == 1 else unique_vals.tolist(),
+                )
 
         # 4. Ensure data is a np.ndarray for table construction
         feature_data = {k: to_numpy(v) for k, v in feature_data.items()}
@@ -295,25 +306,15 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
         s_scaler_recs = sorted(self._scaler_recs, key=lambda x: x.order)
         o_scaler_recs = sorted(other._scaler_recs, key=lambda x: x.order)
         for i in range(len(s_scaler_recs)):
-            if not deep_equal(s_scaler_recs[i].get_config(), o_scaler_recs[i].get_config()):
+            if not deep_equal(
+                s_scaler_recs[i].get_config(),
+                o_scaler_recs[i].get_config(),
+            ):
                 return False
 
         return True
 
     __hash__ = None
-
-    # ================================================
-    # GraphNode
-    # ================================================
-    @property
-    def allows_upstream_connections(self) -> bool:
-        """FeatureSets do not allow input (upstream) connections."""
-        return False
-
-    @property
-    def allows_downstream_connections(self) -> bool:
-        """FeatureSets do allow output (downstream) connections."""
-        return True
 
     # ================================================
     # SampleCollectionMixin
@@ -348,15 +349,30 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
                 [
                     (
                         DOMAIN_FEATURES,
-                        str(self.get_feature_keys(include_domain_prefix=False, include_rep_suffix=True)),
+                        str(
+                            self.get_feature_keys(
+                                include_domain_prefix=False,
+                                include_rep_suffix=True,
+                            ),
+                        ),
                     ),
                     (
                         DOMAIN_TARGETS,
-                        str(self.get_target_keys(include_domain_prefix=False, include_rep_suffix=True)),
+                        str(
+                            self.get_target_keys(
+                                include_domain_prefix=False,
+                                include_rep_suffix=True,
+                            ),
+                        ),
                     ),
                     (
                         DOMAIN_TAGS,
-                        str(self.get_tag_keys(include_domain_prefix=False, include_rep_suffix=True)),
+                        str(
+                            self.get_tag_keys(
+                                include_domain_prefix=False,
+                                include_rep_suffix=True,
+                            ),
+                        ),
                     ),
                 ],
             ),
@@ -381,7 +397,10 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
         return FeatureSetView(
             source=self,
             indices=np.arange(self.collection.n_samples),
-            columns=self.get_all_keys(include_domain_prefix=True, include_rep_suffix=True),
+            columns=self.get_all_keys(
+                include_domain_prefix=True,
+                include_rep_suffix=True,
+            ),
             label=f"{self.label}_view",
         )
 
@@ -429,7 +448,10 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
 
         # If columns differ, rebuild the view
         view = self._splits[split_name]
-        current_cols = self.get_all_keys(include_domain_prefix=True, include_rep_suffix=True)
+        current_cols = self.get_all_keys(
+            include_domain_prefix=True,
+            include_rep_suffix=True,
+        )
         if set(view.columns) != set(current_cols):
             from modularml.core.data.featureset_view import FeatureSetView
 
@@ -453,7 +475,9 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
         """
         # Check that split references this instance and collection exists
         if split.source is not self:
-            msg = f"New split `{split.label}` is not a view of this FeatureSet instance."
+            msg = (
+                f"New split `{split.label}` is not a view of this FeatureSet instance."
+            )
             raise ValueError(msg)
 
         # Check that split name is unique
@@ -476,7 +500,9 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
                     f"Split '{split.label}' has overlapping samples with existing split '{existing_split.label}' "
                     f"(n_overlap = {len(overlap)}). "
                 )
-                hint = "Consider checking for disjoint splits or revising your conditions."
+                hint = (
+                    "Consider checking for disjoint splits or revising your conditions."
+                )
                 warn(msg, category=SplitOverlapWarning, stacklevel=2, hints=hint)
 
         # Register new split
@@ -494,7 +520,10 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
         """Remove REP_TRANSFORMED from the SampleCollection for any columns with no scalers."""
         # Get columns that are not used in any scalers
         # They should not have a ".transformed" representation
-        all_cols = self.get_all_keys(include_domain_prefix=True, include_rep_suffix=False)
+        all_cols = self.get_all_keys(
+            include_domain_prefix=True,
+            include_rep_suffix=False,
+        )
         all_cols.remove(DOMAIN_SAMPLE_ID)
         used_cols: list[str] = []
         for rec in self._scaler_recs:
@@ -647,7 +676,11 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
         x_trans_flat = scaler.transform(x_all)
 
         # Unpack transformed data back to original shapes
-        x_trans = unflatten_from_2d(flat=x_trans_flat, meta=x_all_meta) if x_all_meta else x_trans_flat
+        x_trans = (
+            unflatten_from_2d(flat=x_trans_flat, meta=x_all_meta)
+            if x_all_meta
+            else x_trans_flat
+        )
 
         for k_idx, k in enumerate(keys):
             # x_trans has shape like (n_samples, n_f, f_shape) where n_f is number of keys
@@ -794,7 +827,11 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
 
         # Inverse data and reshape
         x_inv_flat = last_exact.scaler_obj.inverse_transform(x_flat)
-        x_inv = unflatten_from_2d(flat=x_inv_flat, meta=x_flat_meta) if x_flat_meta else x_inv_flat
+        x_inv = (
+            unflatten_from_2d(flat=x_inv_flat, meta=x_flat_meta)
+            if x_flat_meta
+            else x_inv_flat
+        )
 
         # Store this data back into collection table
         for k_idx, k in enumerate(last_exact.keys):
@@ -808,13 +845,17 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
 
         # Delete record from logs
         if self._scaler_recs[last_exact.order] != last_exact:
-            raise ValueError("The record to be deleted is out of order. Check `_scaler_recs`")
+            raise ValueError(
+                "The record to be deleted is out of order. Check `_scaler_recs`",
+            )
 
         # Update other records to their new positions
         new_recs = []
         for i in range(len(self._scaler_recs)):
             if i > last_exact.order:
-                new_recs.append(replace(self._scaler_recs[i], order=self._scaler_recs[i].order - 1))
+                new_recs.append(
+                    replace(self._scaler_recs[i], order=self._scaler_recs[i].order - 1),
+                )
             else:
                 new_recs.append(self._scaler_recs[i])
 
@@ -855,7 +896,11 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
                 - For any other underlying error encountered by `undo_last_transform()`.
 
         """
-        domains = [domain] if domain is not None else [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS]
+        domains = (
+            [domain]
+            if domain is not None
+            else [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS]
+        )
         for d in domains:
             try:
                 while True:
@@ -1053,7 +1098,12 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
         return config
 
     @classmethod
-    def from_config(cls, config: dict[str, Any], *, register: bool = True) -> FeatureSet:
+    def from_config(
+        cls,
+        config: dict[str, Any],
+        *,
+        register: bool = True,
+    ) -> FeatureSet:
         """Instantiates a empty FeatureSet."""
         empty_table = pa.table({})
         return cls(table=empty_table, register=register, **config)

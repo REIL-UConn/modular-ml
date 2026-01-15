@@ -310,20 +310,13 @@ class BatchView(Summarizable):
                 include_domain_prefix=True,
                 include_rep_suffix=True,
             )
-            tags = fsv.get_tags(
-                fmt=fmt,
-                rep=None,
-                include_domain_prefix=True,
-                include_rep_suffix=True,
-            )
-            uuids = fsv.get_sample_uuids(fmt=fmt)
+            uuids = fsv.get_sample_uuids()
 
             # Build SampleData for this role
             role_data[role] = SampleData(
                 sample_uuids=uuids,
                 features=features,
                 targets=targets,
-                tags=tags,
                 kind="input",
             )
 
@@ -331,13 +324,12 @@ class BatchView(Summarizable):
             all_shapes = {
                 DOMAIN_FEATURES: features.shape,
                 DOMAIN_TARGETS: targets.shape,
-                DOMAIN_TAGS: tags.shape,
             }
             for k, v in all_shapes.items():
                 if v[0] != self.n_samples:
                     msg = (
-                        f"{k}.shape data does not have batch_size as leading dimension: {v}. "
-                        f"Expected: ({self.n_samples}, ...)."
+                        f"{k}.shape data does not have batch_size as leading "
+                        f"dimension: {v}. Expected: ({self.n_samples}, ...)."
                     )
                     raise ValueError(msg)
 
@@ -347,8 +339,8 @@ class BatchView(Summarizable):
                 weights = to_numpy(self.role_indice_weights[role]).reshape(-1)
                 if weights.shape[0] != self.n_samples:
                     msg = (
-                        f"Shape of sample weights does not match batch_size: {weights.shape}. "
-                        f"Expected: ({self.n_samples},)."
+                        "Shape of sample weights does not match batch_size: "
+                        f"{weights.shape}. Expected: ({self.n_samples},)."
                     )
                     raise ValueError(msg)
                 role_sample_weights[role] = weights

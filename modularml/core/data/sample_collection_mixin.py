@@ -15,7 +15,11 @@ from modularml.core.data.schema_constants import (
     DOMAIN_TARGETS,
 )
 from modularml.utils.data.conversion import convert_dict_to_format, convert_to_format
-from modularml.utils.data.data_format import _TENSORLIKE_FORMATS, DataFormat, format_is_tensorlike
+from modularml.utils.data.data_format import (
+    _TENSORLIKE_FORMATS,
+    DataFormat,
+    format_is_tensorlike,
+)
 from modularml.utils.data.pyarrow_data import resolve_column_selectors
 
 if TYPE_CHECKING:
@@ -53,7 +57,9 @@ class SampleCollectionMixin:
             columns.append(DOMAIN_SAMPLE_ID)
 
         # Column filtering
-        sub_table = collection.table if columns is None else collection.table.select(columns)
+        sub_table = (
+            collection.table if columns is None else collection.table.select(columns)
+        )
 
         if indices is None:
             return SampleCollection(table=sub_table), None
@@ -127,7 +133,9 @@ class SampleCollectionMixin:
             out_shape = (len(mask), *sample_shape)
 
             # Resolve fill value
-            fv = fill_value if fill_value is not None else _default_fill_value(arr.dtype)
+            fv = (
+                fill_value if fill_value is not None else _default_fill_value(arr.dtype)
+            )
 
             # Allocate padded output using fill_value
             try:
@@ -267,7 +275,12 @@ class SampleCollectionMixin:
     # ================================================
     # Shape / dtype accessors
     # ================================================
-    def get_feature_shapes(self, *, include_rep_suffix=True, include_domain_prefix=True):
+    def get_feature_shapes(
+        self,
+        *,
+        include_rep_suffix=True,
+        include_domain_prefix=True,
+    ):
         """
         Mapping of feature columns to their array shapes.
 
@@ -351,7 +364,12 @@ class SampleCollectionMixin:
             include_domain_prefix=include_domain_prefix,
         )
 
-    def get_feature_dtypes(self, *, include_rep_suffix=True, include_domain_prefix=True):
+    def get_feature_dtypes(
+        self,
+        *,
+        include_rep_suffix=True,
+        include_domain_prefix=True,
+    ):
         """
         Mapping of feature columns to their data types.
 
