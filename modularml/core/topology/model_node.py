@@ -9,10 +9,9 @@ from modularml.core.experiment.experiment_node import ExperimentNode
 from modularml.core.models import wrap_model
 from modularml.core.references.experiment_reference import ExperimentNodeReference
 from modularml.core.references.featureset_reference import FeatureSetReference
-from modularml.core.topology.compute_node import ComputeNode
-from modularml.core.topology.node_shapes import NodeShapes
+from modularml.core.topology.compute_node import ComputeNode, TForward
 from modularml.core.training.loss_record import LossCollection, LossRecord
-from modularml.utils.data.data_format import get_data_format_for_backend
+from modularml.utils.data.data_format import DataFormat, get_data_format_for_backend
 from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
 from modularml.utils.errors.exceptions import (
     BackendMismatchError,
@@ -22,6 +21,7 @@ from modularml.utils.errors.exceptions import (
 from modularml.utils.logging.warnings import catch_warnings, warn
 from modularml.utils.nn.backend import Backend
 from modularml.utils.representation.summary import safe_cast_to_summary_rows
+from modularml.utils.topology.graph_search_utils import find_upstream_featuresets
 
 if TYPE_CHECKING:
     from modularml.context.execution_context import ExecutionContext
@@ -100,34 +100,20 @@ class ModelNode(ComputeNode):
         self._optimizer = optimizer
         self._check_valid_optimizer(required=False)
 
+    @property
+    def model(self) -> BaseModel:
+        return self._model
+
     # ================================================
     # ComputeNode Interface
     # ================================================
     @property
-    def node_shapes(self) -> NodeShapes:
-        """
-        Input and output shapes expected by this ModelNode.
+    def input_shape(self) -> tuple[int, ...]:
+        return self.model.input_shape
 
-        Description:
-            Defines the input and output shapes after model building.
-            Model must be built before this property can be accessed.
-
-        """
-        if self._model.input_shape is None:
-            if self.is_built:
-                raise RuntimeError("Input shape is None after model building.")
-            raise RuntimeError("Model must be built before accessing input_shape")
-
-        if self._model.output_shape is None:
-            if self.is_built:
-                raise RuntimeError("Output shape is None after model building.")
-            raise RuntimeError("Model must be built before accessing output_shape")
-
-        # ModelNodes only support single input, single output
-        return NodeShapes(
-            input_shapes={0: self._model.input_shape},
-            output_shapes={0: self._model.output_shape},
-        )
+    @property
+    def output_shape(self) -> tuple[int, ...]:
+        return self.model.output_shape
 
     @property
     def max_upstream_refs(self) -> int:
@@ -143,78 +129,6 @@ class ModelNode(ComputeNode):
 
         """
         return self._model.is_built
-
-    def infer_output_shape(
-        self,
-        input_shapes: dict[str, tuple[int, ...]],
-    ) -> dict[str, tuple[int, ...]]:
-        """
-        Infer the expected output shape of this ModelNode without building the backend model.
-
-        Description:
-            This method is used during graph construction to determine the shape of data
-            produced by this stage, based on its input shape(s) and internal configuration.
-
-            Expected behavior:
-            - If `self.output_shape` is already defined, it will be returned directly.
-            - If the underlying `BaseModel` defines a static method `infer_output_shape(input_shape)`,
-            it will be used to compute the output shape from the given input.
-            - If the output shape cannot be inferred, an error is raised.
-
-        Note that this method:
-            - Assumes the stage only supports a single input; an error will be raised
-                if multiple input shapes are provided.
-            - Does NOT instantiate or build the backend model.
-
-        Args:
-            input_shapes (dict[str, tuple[int, ...]]):
-                Input shapes from upstream connections. ModelNode's expect exactly one element.
-
-        Returns:
-            dict[str, tuple[int, ...]]: The inferred output shape (one element).
-
-        Raises:
-            ValueError: If multiple input shapes are provided or output shape cannot be inferred.
-
-        """
-        # Get only input tuple (drop keys, but sort by them for reproducibility)
-        inp_shapes: list[tuple[int, ...]] = [v for k, v in sorted(input_shapes.items())]
-        if (
-            self.max_upstream_refs is not None
-            and len(inp_shapes) > self.max_upstream_refs
-        ):
-            msg = f"ModelNode only support a single input. Received {len(inp_shapes)}: {input_shapes}"
-            raise ValueError(msg)
-        inp_shape: tuple[int, ...] = inp_shapes[0]
-
-        # Return output_shape is already known
-        try:
-            out_shapes: dict[str, tuple[int, ...]] = self.node_shapes.output_shapes
-            if out_shapes is not None:
-                return out_shapes
-        except RuntimeError:
-            pass
-
-        # Pass inferencing task to BaseModel (if supports it)
-        meth = getattr(
-            self._model,
-            "infer_output_shapes",
-            None,
-        )  # returns list of shapes
-        if callable(meth):
-            out_shapes: dict[str, tuple[int, ...]] = dict(enumerate(meth(inp_shape)))
-            if len(out_shapes) > 1:
-                msg = f"Detected more than 1 inferred output shape: {out_shapes}"
-                raise RuntimeError(msg)
-            return out_shapes
-
-        meth = getattr(self._model, "infer_output_shape", None)  # returns single shape
-        if callable(meth):
-            return {0: meth(inp_shape)}
-
-        # Otherwise, raise error
-        msg = f"Cannot infer output shape for ModelNode `{self.label}`."
-        raise ValueError(msg)
 
     def _build_optimizer(self, *, force: bool = False):
         if self._optimizer is None:
@@ -242,7 +156,32 @@ class ModelNode(ComputeNode):
                 message="Unknown backend for optimizer building",
             )
 
-    def build(
+    def _build_impl(
+        self,
+        *,
+        input_shapes: dict[ExperimentNodeReference, tuple[int, ...]] | None = None,
+        output_shape: tuple[int, ...] | None = None,
+        force: bool = False,
+        **kwargs,  # noqa: ARG002
+    ):
+        if input_shapes is None:
+            input_shape = None
+        else:
+            if len(input_shapes) != 1:
+                msg = (
+                    f"{self.__class__.__name__} expects exactly one input. "
+                    f"Received {len(input_shapes)}."
+                )
+                raise ValueError(msg)
+            input_shape = next(iter(input_shapes.values()))
+
+        self.build_model(
+            input_shape=input_shape,
+            output_shape=output_shape,
+            force=force,
+        )
+
+    def build_model(
         self,
         input_shape: tuple[int, ...] | None = None,
         output_shape: tuple[int, ...] | None = None,
@@ -286,12 +225,12 @@ class ModelNode(ComputeNode):
             self._build_optimizer(force=force)
 
     @overload
-    def forward(self, batch: Batch, **kwargs) -> Batch: ...
+    def forward_single(self, batch: Batch, **kwargs) -> Batch: ...
     @overload
-    def forward(self, roles: RoleData, **kwargs) -> RoleData: ...
+    def forward_single(self, roles: RoleData, **kwargs) -> RoleData: ...
     @overload
-    def forward(self, data: SampleData, **kwargs) -> SampleData: ...
-    def forward(
+    def forward_single(self, data: SampleData, **kwargs) -> SampleData: ...
+    def forward_single(
         self,
         x: SampleData | RoleData | Batch,
         **kwargs,
@@ -311,6 +250,37 @@ class ModelNode(ComputeNode):
                 Outputs from the model. Output type matches input.
 
         """
+        # Ensure built
+        if not self.is_built:
+            # We can try to auto-build base on runtime upstream/downstream connections
+            # If upstream_ref is a FeatureSet, we can take feature shapes
+            in_shape = None
+            if isinstance(self.upstream_ref, FeatureSetReference):
+                # Get feature and target shapes (drops leading dim of n_samples)
+                fsv = self.upstream_ref.resolve()
+                in_shape = fsv.get_features(fmt=DataFormat.NUMPY).shape[1:]
+
+            # If this is a tail node, and is downstream of only one FeatureSet, we
+            # can infer the output shape to be the FeatureSet.targets shape
+            out_shape = None
+            ups_fs_refs = find_upstream_featuresets(node=self)
+            ups_fs_ids = {ref.node_id for ref in ups_fs_refs}
+            if len(ups_fs_ids) == 1:
+                fsv = ups_fs_refs[0].resolve()
+                t_shape = fsv.get_targets(fmt=DataFormat.NUMPY).shape[1:]
+                out_shape = tuple(t_shape)
+
+            try:
+                self.build_model(
+                    input_shape=in_shape,
+                    output_shape=out_shape,
+                )
+            except Exception as e:
+                msg = (
+                    f"ModelNode '{self.label}' has not been built yet. "
+                    "Call `build_model()` first."
+                )
+                raise RuntimeError(msg) from e
 
         def _forward_sample_data(d: SampleData) -> SampleData:
             # Ensure SampleData is in expected backend (modified inplace)
@@ -351,16 +321,28 @@ class ModelNode(ComputeNode):
         msg = f"Input must be of type SampleData or RoleData or Batch. Received: {type(x)}"
         raise TypeError(msg)
 
+    def _forward_impl(
+        self,
+        *,
+        inputs: dict[ExperimentNodeReference, TForward],
+        **kwargs,
+    ) -> TForward:
+        if len(inputs) != 1:
+            msg = (
+                f"{self.__class__.__name__} expects exactly one input. "
+                f"Received {len(inputs)}."
+            )
+            raise ValueError(msg)
+
+        x = next(iter(inputs.values()))
+        return self.forward_single(x, **kwargs)
+
+    __call__ = forward_single
+
     # ================================================
     # Representation
     # ================================================
     def _summary_rows(self) -> list[tuple]:
-        def _reduce_dict(x: dict) -> str | list[tuple]:
-            if len(x) == 1:
-                k = next(iter(x.keys()))
-                return str(x[k])
-            return [(str(k), str(v)) for k, v in x.items()]
-
         return [
             ("label", self.label),
             ("upstream_ref", safe_cast_to_summary_rows(self.upstream_ref)),
@@ -370,16 +352,16 @@ class ModelNode(ComputeNode):
             ),
             (
                 "input_shape",
-                _reduce_dict(self.input_shapes) if self.is_built else "NOT BUILT YET",
+                str(self.input_shape) if self.is_built else "NOT BUILT YET",
             ),
             (
-                "output_shapes",
-                _reduce_dict(self.output_shapes) if self.is_built else "NOT BUILT YET",
+                "output_shape",
+                str(self.output_shape) if self.is_built else "NOT BUILT YET",
             ),
             ("model", safe_cast_to_summary_rows(self._model)),
             ("optimizer", safe_cast_to_summary_rows(self._optimizer)),
             ("backend", safe_cast_to_summary_rows(self.backend)),
-            ("frozen", f"{'True' if self.freeze else 'False'}"),
+            ("frozen", f"{'True' if self.is_frozen else 'False'}"),
         ]
 
     def __repr__(self):
@@ -394,34 +376,6 @@ class ModelNode(ComputeNode):
 
     def __str__(self):
         return f"ModelNode('{self.label}')"
-
-    # ================================================
-    # ModelNodes Properties & Dunders
-    # ================================================
-    @overload
-    def __call__(self, batch: Batch, **kwargs) -> Batch: ...
-    @overload
-    def __call__(self, roles: RoleData, **kwargs) -> RoleData: ...
-    @overload
-    def __call__(self, data: SampleData, **kwargs) -> SampleData: ...
-    def __call__(
-        self,
-        x: SampleData | RoleData | Batch,
-        **kwargs,
-    ) -> SampleData | RoleData | Batch:
-        """
-        Shorthand to call `forward()` on input.
-
-        Args:
-            x (SampleData | RoleData | Batch): Input data to the model.
-            **kwargs: Any additional keyword arguments to provide to BaseModel.forward
-
-        Returns:
-            SampleData | RoleData | Batch:
-                Outputs from the model. Output type matches input.
-
-        """
-        return self.forward(x=x, **kwargs)
 
     # ================================================
     # Error Checking Methods
@@ -479,12 +433,8 @@ class ModelNode(ComputeNode):
             raise ValueError(msg)
 
     # ================================================
-    # Trainable Mixin
+    # Trainable Protocol
     # ================================================
-    @property
-    def model(self) -> BaseModel:
-        return self._model
-
     @property
     def backend(self) -> Backend:
         """
@@ -497,7 +447,7 @@ class ModelNode(ComputeNode):
         return self._model.backend
 
     @property
-    def freeze(self) -> bool:
+    def is_frozen(self) -> bool:
         """
         Indicates whether this stage is frozen (not trainable).
 
@@ -507,31 +457,39 @@ class ModelNode(ComputeNode):
         """
         return self._freeze
 
-    @freeze.setter
-    def freeze(self, value: bool):
-        """
-        Sets the stage to be frozen (non-trainable) or trainable.
+    def freeze(self):
+        """Freezes this node (prevents training updates)."""
+        self._freeze = True
 
-        Args:
-            value (bool): True to freeze, False to unfreeze.
+        # Ensure trainable state
+        if self.backend == Backend.TORCH:
+            for p in self.model.parameters():
+                p.requires_grad = False
+            self.model.eval()
+        elif self.backend == Backend.TENSORFLOW:
+            self.model.trainable = False
 
-        Raises:
-            ValueError: If value is not a boolean.
+    def unfreeze(self):
+        """Unfreezes this node (allows training updates)."""
+        self._freeze = False
 
-        """
-        if not isinstance(value, bool):
-            msg = f"Freeze must be a boolean, got {type(value)}"
-            raise TypeError(msg)
-        self._freeze = value
+        # Ensure trainable state
+        if self.backend == Backend.TORCH:
+            for p in self.model.parameters():
+                p.requires_grad = True
+            self.model.train()
+        elif self.backend == Backend.TENSORFLOW:
+            self.model.trainable = True
 
-    def get_input_data(
+    def _get_input_batch(
         self,
         ctx: ExecutionContext,
     ) -> Batch:
         """Retrieves Batch data for this ModelNode at the current execution step."""
-        all_inp_data = super().get_input_data(
+        all_inp_data = self.get_input_data(
+            inputs=ctx.inputs,
+            outputs=ctx.outputs,
             fmt=get_data_format_for_backend(backend=self.backend),
-            ctx=ctx,
         )
         return all_inp_data[self.upstream_ref]
 
@@ -557,7 +515,7 @@ class ModelNode(ComputeNode):
         loss_records: list[LossRecord] = []
 
         # Forward pass (ctx.execution modified inplace)
-        out_batch: Batch = self.forward(self.get_input_data(ctx=ctx))
+        out_batch: Batch = self.forward_single(self._get_input_batch(ctx=ctx))
         ctx.set_output(node_id=self.node_id, batch=out_batch)
 
         # Compute losses
@@ -601,8 +559,8 @@ class ModelNode(ComputeNode):
         # Track gradients over forward passes & loss computation
         with tf.GradientTape() as tape:
             # Forward pass (ctx.execution modified inplace)
-            out_batch: Batch = self.forward(
-                self.get_input_data(ctx=ctx),
+            out_batch: Batch = self.forward_single(
+                self._get_input_batch(ctx=ctx),
                 training=True,
             )
             ctx.set_output(node_id=self.node_id, batch=out_batch)
@@ -655,8 +613,8 @@ class ModelNode(ComputeNode):
 
         """
         # If stage is frozen, raise error
-        if self.freeze:
-            msg = "`train_step` called with `freeze=True`. Use `eval_step` instead."
+        if self.is_frozen:
+            msg = "Cannot train a frozen node. Either unfreeze or use `eval_step`."
             raise RuntimeError(msg)
 
         # Ensure input data exists for this node
@@ -682,7 +640,7 @@ class ModelNode(ComputeNode):
         raise ValueError(msg)
 
     # ================================================
-    # Evaluable Mixin
+    # Evaluable Protocol
     # ================================================
     def _eval_step_torch(
         self,
@@ -706,7 +664,7 @@ class ModelNode(ComputeNode):
 
         # Forward pass (ctx.execution modified inplace)
         with torch.no_grad():
-            out_batch: Batch = self.forward(self.get_input_data(ctx=ctx))
+            out_batch: Batch = self.forward_single(self._get_input_batch(ctx=ctx))
             ctx.set_output(node_id=self.node_id, batch=out_batch)
 
             # Compute losses
@@ -742,8 +700,8 @@ class ModelNode(ComputeNode):
         loss_records: list[LossRecord] = []
 
         # Forward pass (ctx.execution modified inplace)
-        out_batch: Batch = self.forward(
-            self.get_input_data(ctx=ctx),
+        out_batch: Batch = self.forward_single(
+            self._get_input_batch(ctx=ctx),
             training=False,
         )
         ctx.set_output(node_id=self.node_id, batch=out_batch)
@@ -792,10 +750,8 @@ class ModelNode(ComputeNode):
 
         """
         # If stage is not frozen, raise error
-        if not self.freeze:
-            msg = (
-                "`eval_step` called with `freeze=False`. Use `train_step` for training."
-            )
+        if self.is_frozen:
+            msg = "Cannot evaluate an unfrozen node. Either freeze or use `train_step`."
             raise RuntimeError(msg)
 
         # Ensure input data exists for this node
