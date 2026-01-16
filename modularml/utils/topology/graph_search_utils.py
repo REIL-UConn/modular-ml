@@ -1,0 +1,146 @@
+from __future__ import annotations
+
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Literal
+
+from modularml.core.references.featureset_reference import FeatureSetReference
+from modularml.core.topology.graph_node import GraphNode
+from modularml.utils.errors.error_handling import ErrorMode
+
+if TYPE_CHECKING:
+    from modularml.core.topology.graph_node import GraphNode
+    from modularml.core.topology.model_graph import ModelGraph
+
+TraversalDirection = Literal["upstream", "downstream", "both"]
+
+
+def find_upstream_featuresets(
+    node: GraphNode,
+) -> list[FeatureSetReference]:
+    """
+    Recursively find all upstream FeatureSetReferences feeding into `node`.
+
+    Traverses the graph upstream until FeatureSetReferences are reached.
+
+    Returns:
+        list[FeatureSetReference]:
+            All unique upstream FeatureSets (order not guaranteed).
+
+    """
+    found: dict[str, FeatureSetReference] = {}
+    visited: set[str] = set()
+
+    def _walk(n: GraphNode):
+        if n.node_id in visited:
+            return
+        visited.add(n.node_id)
+
+        for ref in n.get_upstream_refs():
+            if isinstance(ref, FeatureSetReference):
+                found[ref.node_id] = ref
+            else:
+                upstream_node = ref.resolve()
+                _walk(upstream_node)
+
+    _walk(node)
+    return list(found.values())
+
+
+def get_subgraph_nodes(
+    graph: ModelGraph,
+    roots: str | GraphNode | Iterable[str | GraphNode],
+    *,
+    direction: TraversalDirection = "upstream",
+    include_roots: bool = True,
+) -> set[str]:
+    """
+    Collect a set of GraphNode IDs reachable from one or more root nodes.
+
+    Description:
+        This utility traverses the ModelGraph starting from one or more root
+        nodes and returns the set of GraphNodes reachable in the specified
+        direction:
+
+            - "upstream": nodes required to compute the root(s)
+            - "downstream": nodes that depend on the root(s)
+            - "both": union of upstream and downstream traversal
+
+        Traversal is structural only. FeatureSet inputs are treated as external
+        data sources and are not included in the result.
+
+    Args:
+        graph (ModelGraph):
+            The ModelGraph containing the connected GraphNodes.
+
+        roots (str | GraphNode | Iterable[str | GraphNode]):
+            One or more root nodes from which traversal begins.
+            Each value may be a node ID, node label, or GraphNode instance.
+
+        direction ("upstream" | "downstream" | "both", optional):
+            Direction of traversal relative to the root nodes.
+            Defaults to "upstream".
+
+        include_roots (bool, optional):
+            Whether to include the root nodes themselves in the returned set.
+            Defaults to True.
+
+    Returns:
+        set[str]:
+            A set of GraphNode IDs reachable under the specified traversal.
+
+    Notes:
+        - Returned IDs always refer to nodes present in `graph.nodes`.
+        - FeatureSetReferences are excluded from traversal results.
+        - Order is not guaranteed; this is a dependency set, not an execution order.
+        - For execution ordering, use `ModelGraph._sorted_node_ids`.
+
+    """
+    from modularml.core.topology.graph_node import GraphNode
+
+    if direction not in {"upstream", "downstream", "both"}:
+        msg = f"Invalid traversal direction: {direction}"
+        raise ValueError(msg)
+
+    # Normalize roots
+    if isinstance(roots, (str, GraphNode)) or not isinstance(roots, Iterable):
+        roots = [roots]
+    root_nodes: list[GraphNode] = [graph._resolve_existing(r) for r in roots]
+
+    visited: set[str] = set()
+    result: set[str] = set()
+
+    def visit_upstream(node: GraphNode):
+        if node.node_id in visited:
+            return
+        visited.add(node.node_id)
+        result.add(node.node_id)
+
+        for ref in node.get_upstream_refs(error_mode=ErrorMode.IGNORE):
+            if isinstance(ref, FeatureSetReference):
+                continue
+            if ref.node_id in graph.nodes:
+                visit_upstream(graph.nodes[ref.node_id])
+
+    def visit_downstream(node: GraphNode):
+        if node.node_id in visited:
+            return
+        visited.add(node.node_id)
+        result.add(node.node_id)
+
+        for ref in node.get_downstream_refs(error_mode=ErrorMode.IGNORE):
+            if ref.node_id in graph.nodes:
+                visit_downstream(graph.nodes[ref.node_id])
+
+    # Traverse
+    for root in root_nodes:
+        if direction in {"upstream", "both"}:
+            visit_upstream(root)
+        if direction in {"downstream", "both"}:
+            visit_downstream(root)
+
+    # Remove root nodes (if requested)
+    if not include_roots:
+        for root in root_nodes:
+            result.discard(root.node_id)
+
+    return result
