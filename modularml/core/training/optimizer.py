@@ -211,7 +211,10 @@ class Optimizer(Configurable, Stateful):
         opt_cls = candidates.get(name_lc)
         if opt_cls is None:
             available = sorted(candidates.keys())
-            msg = f"Unknown optimizer name '{self.name}' for backend '{self.backend}'. Available optimizers: {available}"
+            msg = (
+                f"Unknown optimizer name '{self.name}' for backend '{self.backend}'. "
+                f"Available optimizers: {available}"
+            )
             raise OptimizerError(msg)
 
         return opt_cls
