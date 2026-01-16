@@ -130,7 +130,11 @@ class SequentialMLP(TorchBaseModel):
                 max_len=None,
                 allow_null_shape=False,
             )
-            if (self._input_shape is not None) and (input_shape != self._input_shape) and (not force):
+            if (
+                (self._input_shape is not None)
+                and (input_shape != self._input_shape)
+                and (not force)
+            ):
                 msg = (
                     f"Build called with `input_shape={input_shape}` but input shape is already defined "
                     f"with value `{self._input_shape}`. To override the existing shape, set `force=True`."
@@ -146,7 +150,11 @@ class SequentialMLP(TorchBaseModel):
                 max_len=None,
                 allow_null_shape=False,
             )
-            if (self._output_shape is not None) and (output_shape != self._output_shape) and (not force):
+            if (
+                (self._output_shape is not None)
+                and (output_shape != self._output_shape)
+                and (not force)
+            ):
                 msg = (
                     f"Build called with `output_shape={output_shape}` but input shape is already defined "
                     f"with value `{self._output_shape}`. To override the existing shape, set `force=True`."
@@ -196,8 +204,10 @@ class SequentialMLP(TorchBaseModel):
 
         """
         # ensure input is 3D
-        if x.ndim == 2:
-            x = x.unsqueeze(1)  # (batch, 1, length)
+        # if x.ndim == 2:
+        #     x = x.unsqueeze(1)  # (batch, 1, length)
+        if x.ndim > 2:
+            x = x.view(x.size(0), -1)
 
         if not self.is_built:
             self.build(input_shape=tuple(x.shape[1:]))

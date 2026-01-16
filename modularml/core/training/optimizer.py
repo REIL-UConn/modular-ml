@@ -7,7 +7,11 @@ from typing import TYPE_CHECKING, Any
 from modularml.core.io.protocols import Configurable, Stateful
 from modularml.utils.data.comparators import deep_equal
 from modularml.utils.environment.optional_imports import ensure_tensorflow, ensure_torch
-from modularml.utils.errors.exceptions import BackendNotSupportedError, OptimizerError, OptimizerNotSetError
+from modularml.utils.errors.exceptions import (
+    BackendNotSupportedError,
+    OptimizerError,
+    OptimizerNotSetError,
+)
 from modularml.utils.nn.backend import Backend, infer_backend, normalize_backend
 
 if TYPE_CHECKING:
@@ -18,7 +22,10 @@ def _safe_infer_backend(obj_or_cls: Any) -> Backend:
     backend = infer_backend(obj_or_cls=obj_or_cls)
 
     if backend == Backend.NONE:
-        raise ValueError("Could not infer backend from optimizer class. Please specify backend explicitly.")
+        msg = (
+            "Could not infer backend from optimizer class. Specify backend explicitly."
+        )
+        raise ValueError(msg)
 
     return backend
 
@@ -41,14 +48,21 @@ class Optimizer(Configurable, Stateful):
         backend: Backend | None = None,
     ):
         if opt is not None and factory is not None:
-            raise ValueError("Provide either an optimizer (`opt`) or a `factory` callable, not both.")
+            msg = (
+                "Provide either an optimizer (`opt`) or a `factory` callable, not both."
+            )
+            raise ValueError(msg)
 
         # Case 1: class / name + kwargs
         if opt is not None:
             if isinstance(opt, str):
                 self.name = opt.lower()
                 if backend is None:
-                    raise ValueError("Backend must be specified when initializing an optimizer with a string-name.")
+                    msg = (
+                        "Backend must be specified when initializing an optimizer "
+                        "with a string-name."
+                    )
+                    raise ValueError(msg)
                 self._backend = normalize_backend(backend)
                 self.cls = self._resolve()
 
@@ -58,7 +72,10 @@ class Optimizer(Configurable, Stateful):
                 self._backend = _safe_infer_backend(self.cls)
 
             else:
-                msg = f"Optimizer (`opt`) must be a string-name or class. Recevied: {type(opt)}"
+                msg = (
+                    "Optimizer (`opt`) must be a string-name or class. "
+                    f"Recevied: {type(opt)}"
+                )
                 raise TypeError(msg)
 
             self.kwargs = opt_kwargs or {}
@@ -72,11 +89,17 @@ class Optimizer(Configurable, Stateful):
             self.name = None
             self.kwargs = opt_kwargs or {}
             if backend is None:
-                raise ValueError("Backend must be specified when initializing an optimizer with a factory.")
+                msg = (
+                    "Backend must be specified when initializing an optimizer "
+                    "with a factory."
+                )
+                raise ValueError(msg)
             self._backend = normalize_backend(backend)
 
         else:
-            raise ValueError("Must provide either an optimizer (`opt`) or a `factory` callable.")
+            raise ValueError(
+                "Must provide either an optimizer (`opt`) or a `factory` callable.",
+            )
 
         # Runtime state
         self.instance: Any | None = None
@@ -152,7 +175,9 @@ class Optimizer(Configurable, Stateful):
             3. Match class name case-insensitively against `self.name`
         """
         if not isinstance(self.name, str):
-            raise OptimizerError("Optimizer name must be a string to resolve dynamically.")
+            raise OptimizerError(
+                "Optimizer name must be a string to resolve dynamically.",
+            )
 
         name_lc = self.name.lower()
 
@@ -164,7 +189,10 @@ class Optimizer(Configurable, Stateful):
             tf = ensure_tensorflow()
             module = tf.keras.optimizers
         else:
-            raise BackendNotSupportedError(backend=self.backend, method="Optimizer._resolve()")
+            raise BackendNotSupportedError(
+                backend=self.backend,
+                method="Optimizer._resolve()",
+            )
 
         # Inspect available classes
         candidates: dict[str, type] = {}
@@ -183,9 +211,7 @@ class Optimizer(Configurable, Stateful):
         opt_cls = candidates.get(name_lc)
         if opt_cls is None:
             available = sorted(candidates.keys())
-            msg = (
-                f"Unknown optimizer name '{self.name}' for backend '{self.backend}'. Available optimizers: {available}"
-            )
+            msg = f"Unknown optimizer name '{self.name}' for backend '{self.backend}'. Available optimizers: {available}"
             raise OptimizerError(msg)
 
         return opt_cls
@@ -236,17 +262,20 @@ class Optimizer(Configurable, Stateful):
 
         """
         if self.is_built and not force_rebuild:
-            raise OptimizerNotSetError(
-                message=(
-                    "Optimizer.built() is being called on an already instantiated optimizer. "
-                    "If you want to rebuild the optimizer, set `force_rebuild=True`."
-                ),
+            msg = (
+                "Optimizer.built() is being called on an already instantiated "
+                "optimizer. If you want to rebuild the optimizer, set "
+                "`force_rebuild=True`."
             )
+            raise OptimizerNotSetError(message=msg)
 
         # Set/validate backend
         if backend is not None:
             if self.backend is not None and backend != self.backend:
-                msg = f"Backend passed to Optimizer.build differs from backend at init: {backend} != {self.backend}"
+                msg = (
+                    "Backend passed to Optimizer.build differs from backend "
+                    f"at init: {backend} != {self.backend}"
+                )
                 raise ValueError(msg)
             self.backend = backend
         if self.backend is None:
@@ -257,7 +286,9 @@ class Optimizer(Configurable, Stateful):
         if self.cls is not None:
             if self.backend == Backend.TORCH:
                 if parameters is None:
-                    raise ValueError("Torch Optimizer requires model parameters during build.")
+                    raise ValueError(
+                        "Torch Optimizer requires model parameters during build.",
+                    )
                 self.parameters = parameters
                 self.instance = self.cls(self.parameters, **self.kwargs)
 
@@ -315,13 +346,18 @@ class Optimizer(Configurable, Stateful):
 
         elif self._backend == Backend.TENSORFLOW:
             if grads is None or variables is None:
-                raise ValueError(
-                    "TensorFlow backend requires both `grads` and `variables` to be set in Optimizer.step().",
+                msg = (
+                    "TensorFlow backend requires both `grads` and `variables` to be "
+                    "set in Optimizer.step()."
                 )
+                raise ValueError(msg)
             self.instance.apply_gradients(zip(grads, variables, strict=True))
 
         else:
-            raise BackendNotSupportedError(backend=self._backend, method="Optimizer.step()")
+            raise BackendNotSupportedError(
+                backend=self._backend,
+                method="Optimizer.step()",
+            )
 
     def zero_grad(self):
         """Resets the optimizer gradients."""
@@ -336,7 +372,10 @@ class Optimizer(Configurable, Stateful):
                 var.assign(tf.zeros_like(var))
 
         else:
-            raise BackendNotSupportedError(backend=self._backend, method="Optimizer.zero_grad()")
+            raise BackendNotSupportedError(
+                backend=self._backend,
+                method="Optimizer.zero_grad()",
+            )
 
     # ================================================
     # Configurable
@@ -348,13 +387,17 @@ class Optimizer(Configurable, Stateful):
             return {
                 "opt": str(self.name).lower(),
                 "opt_kwargs": self.kwargs,
-                "backend": None if self.backend is None else str(self.backend.value).lower(),
+                "backend": None
+                if self.backend is None
+                else str(self.backend.value).lower(),
             }
 
         return {
             "opt": None if self.name is None else str(self.name).lower(),
             "opt_kwargs": self.kwargs,
-            "backend": None if self.backend is None else str(self.backend.value).lower(),
+            "backend": None
+            if self.backend is None
+            else str(self.backend.value).lower(),
             "factory": self._factory,
         }
 
@@ -423,7 +466,10 @@ class Optimizer(Configurable, Stateful):
                 self.instance.set_weights(weights)
 
         else:
-            raise BackendNotSupportedError(backend=self._backend, method="Optimizer._restore_internal_state()")
+            raise BackendNotSupportedError(
+                backend=self._backend,
+                method="Optimizer._restore_internal_state()",
+            )
 
     # ================================================
     # Serialization

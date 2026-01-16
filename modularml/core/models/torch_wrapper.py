@@ -170,7 +170,11 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
                 max_len=None,
                 allow_null_shape=False,
             )
-            if (self._input_shape is not None) and (input_shape != self._input_shape) and (not force):
+            if (
+                (self._input_shape is not None)
+                and (input_shape != self._input_shape)
+                and (not force)
+            ):
                 msg = (
                     f"Build called with `input_shape={input_shape}` but input shape is already defined "
                     f"with value `{self._input_shape}`. To override the existing shape, set `force=True`."
@@ -186,7 +190,11 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
                 max_len=None,
                 allow_null_shape=False,
             )
-            if (self._output_shape is not None) and (output_shape != self._output_shape) and (not force):
+            if (
+                (self._output_shape is not None)
+                and (output_shape != self._output_shape)
+                and (not force)
+            ):
                 msg = (
                     f"Build called with `output_shape={output_shape}` but input shape is already defined "
                     f"with value `{self._output_shape}`. To override the existing shape, set `force=True`."
@@ -278,9 +286,7 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
             if name in accepted_params:
                 kwargs[name] = value
             else:
-                msg = (
-                    f"Model constructor for `{self.model_class.__name__}` does not accept `{name}`. Skipping injection."
-                )
+                msg = f"Model constructor for `{self.model_class.__name__}` does not accept `{name}`. Skipping injection."
                 if error == "raise":
                     raise ValueError(msg)
                 hint = "Revise keys given in `model_kwargs`."
@@ -288,12 +294,16 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
 
         # Try to inject input shape
         # If user explicitly changed input key -> raise error if not accepted
-        error_mode = "raise" if (self.inject_input_shape_as != "input_shape") else "warn"
+        error_mode = (
+            "raise" if (self.inject_input_shape_as != "input_shape") else "warn"
+        )
         maybe_inject(self.inject_input_shape_as, input_shape, error=error_mode)
 
         # Try to inject output shape
         # If user explicitly changed output key -> raise error if not accepted
-        error_mode = "raise" if (self.inject_output_shape_as != "output_shape") else "warn"
+        error_mode = (
+            "raise" if (self.inject_output_shape_as != "output_shape") else "warn"
+        )
         maybe_inject(self.inject_output_shape_as, output_shape, error=error_mode)
 
         return kwargs

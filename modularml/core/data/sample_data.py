@@ -163,14 +163,13 @@ class SampleData(Summarizable):
             msg = f"DataFormat must be tensor-like. Received: {fmt}. Allowed formats: {_TENSORLIKE_FORMATS}."
             raise ValueError(msg)
 
-        self.data[DOMAIN_FEATURES] = convert_to_format(
-            data=self.data[DOMAIN_FEATURES],
-            fmt=fmt,
-        )
-        self.data[DOMAIN_TARGETS] = convert_to_format(
-            data=self.data[DOMAIN_TARGETS],
-            fmt=fmt,
-        )
+        for k_to_convert in [DOMAIN_FEATURES, DOMAIN_TARGETS]:
+            if k_to_convert not in self.data:
+                continue
+            self.data[k_to_convert] = convert_to_format(
+                data=self.data[k_to_convert],
+                fmt=fmt,
+            )
 
     def to_format(self, fmt: DataFormat) -> SampleData:
         """
@@ -572,12 +571,14 @@ class SampleShapes(Summarizable):
         return f"SampleShapes({self.shapes})"
 
     @property
-    def features_shape(self) -> tuple[int, ...]:
+    def features_shape(self) -> tuple[int, ...] | None:
         """Shape tuple for the DOMAIN_FEATURES."""
-        return self.shapes[DOMAIN_FEATURES]
+        if DOMAIN_FEATURES in self.shapes:
+            return self.shapes[DOMAIN_FEATURES]
+        return None
 
     @property
-    def outputs_shape(self) -> tuple[int, ...]:
+    def outputs_shape(self) -> tuple[int, ...] | None:
         """Shape tuple for the DOMAIN_OUTPUTS."""
         if self._kind != "output":
             msg = (
@@ -587,14 +588,18 @@ class SampleShapes(Summarizable):
         return self.features_shape
 
     @property
-    def targets_shape(self) -> tuple[int, ...]:
+    def targets_shape(self) -> tuple[int, ...] | None:
         """Shape tuple for the DOMAIN_TARGETS domain."""
-        return self.shapes[DOMAIN_TARGETS]
+        if DOMAIN_TARGETS in self.shapes:
+            return self.shapes[DOMAIN_TARGETS]
+        return None
 
     @property
-    def tags_shape(self) -> tuple[int, ...]:
+    def tags_shape(self) -> tuple[int, ...] | None:
         """Shape tuple for the DOMAIN_TAGS domain."""
-        return self.shapes[DOMAIN_TAGS]
+        if DOMAIN_TAGS in self.shapes:
+            return self.shapes[DOMAIN_TAGS]
+        return None
 
     def _summary_rows(self) -> list[tuple]:
         rows: list[tuple] = []
