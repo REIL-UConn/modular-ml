@@ -1,8 +1,9 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import overload
+from typing import TYPE_CHECKING, overload
 
 import numpy as np
-from numpy.typing import NDArray
 
 from modularml.core.data.batch import Batch
 from modularml.core.data.featureset import FeatureSet
@@ -15,11 +16,15 @@ from modularml.core.data.schema_constants import (
     DOMAIN_TARGETS,
 )
 from modularml.core.references.featureset_reference import FeatureSetReference
-from modularml.core.topology.model_node import ModelNode
 from modularml.utils.data.conversion import to_numpy
 from modularml.utils.data.data_format import DataFormat, format_is_tensorlike
 from modularml.utils.data.pyarrow_data import resolve_column_selectors
 from modularml.utils.representation.summary import Summarizable
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+    from modularml.core.topology.model_node import ModelNode
 
 
 @dataclass(frozen=True)
