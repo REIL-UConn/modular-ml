@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from modularml.core.io.protocols import Configurable, Stateful
+from modularml.utils.data.comparators import deep_equal
+from modularml.utils.io.cloning import clone_via_serialization
 
 if TYPE_CHECKING:
     import numpy as np
@@ -20,7 +22,7 @@ class Scaler(Configurable, Stateful):
 
     def __init__(
         self,
-        scaler: str | Any = "StandardScaler",
+        scaler: str | Any,
         scaler_kwargs: dict[str, Any] | None = None,
     ):
         """
@@ -28,7 +30,7 @@ class Scaler(Configurable, Stateful):
 
         Args:
             scaler (str | Any):
-                Name of a registered scaler (preferred) or a scaler instance.
+                Name of a registered scaler (preferred), a scaler class, or an instance.
             scaler_kwargs (dict[str, Any] | None):
                 Keyword arguments for constructing the scaler.
 
@@ -39,25 +41,44 @@ class Scaler(Configurable, Stateful):
         # Case 1: scaler given by name
         if isinstance(scaler, str):
             if scaler not in scaler_registry:
-                msg = (
-                    f"Scaler '{scaler}' not recognized. Run `Scaler.get_supported_scalers()` to see supported scalers."
-                )
+                msg = f"Scaler '{scaler}' not recognized. Run `Scaler.get_supported_scalers()` to see supported scalers."
                 raise ValueError(msg)
             self.scaler_name = scaler
             self.scaler_kwargs = scaler_kwargs or {}
             self._scaler = scaler_registry[scaler](**self.scaler_kwargs)
-            self._is_fit = False
 
-        # Case 2: scaler given as instance
+        # Case 2: scaler given as class
+        elif isinstance(scaler, type):
+            cls_name = scaler.__name__
+            self.scaler_name = scaler_registry.get_original_key(cls_name) or cls_name
+            self.scaler_kwargs = scaler_kwargs or {}
+            self._scaler = scaler(**self.scaler_kwargs)
+
+        # Case 3: scaler given as instance
         else:
             cls_name = scaler.__class__.__name__
             self.scaler_name = scaler_registry.get_original_key(cls_name) or cls_name
             self.scaler_kwargs = scaler_kwargs or getattr(scaler, "get_params", dict)()
             self._scaler = scaler
-            self._is_fit = False
+
+        self._is_fit = False
 
         # Validate scaler
         self._validate_scaler()
+
+    def __eq__(self, other: Scaler):
+        if not isinstance(other, Scaler):
+            msg = f"Cannot compare equality between Scaler and {type(other)}"
+            raise TypeError(msg)
+
+        # Compare configs
+        if not deep_equal(self.get_config(), other.get_config()):
+            return False
+
+        # Compare states
+        return deep_equal(self.get_state(), other.get_state())
+
+    __hash__ = None
 
     # ================================================
     # Configurable
@@ -70,8 +91,12 @@ class Scaler(Configurable, Stateful):
             dict[str, Any]: Scaler configuration.
 
         """
+        # If internal scaler is a Scaler instance, unwrap it
+        if isinstance(self._scaler, Scaler):
+            return self._scaler.get_config()
+
         return {
-            "scaler_name": self.scaler_name,
+            "scaler_cls": type(self._scaler),
             "scaler_kwargs": self.scaler_kwargs,
         }
 
@@ -87,8 +112,12 @@ class Scaler(Configurable, Stateful):
             Scaler: Unfitted Scaler instance.
 
         """
+        if config["scaler_cls"] is cls:
+            msg = "Invalid Scaler config: `scaler_cls` cannot be Scaler itself. "
+            raise RuntimeError(msg)
+
         return cls(
-            scaler=config["scaler_name"],
+            scaler=config["scaler_cls"],
             scaler_kwargs=config.get("scaler_kwargs"),
         )
 
@@ -106,7 +135,9 @@ class Scaler(Configurable, Stateful):
         state: dict[str, Any] = {"is_fit": self._is_fit}
 
         if self._is_fit:
-            state["learned"] = {k: v for k, v in self._scaler.__dict__.items() if k.endswith("_")}
+            state["learned"] = {
+                k: v for k, v in self._scaler.__dict__.items() if k.endswith("_")
+            }
 
         return state
 
@@ -133,9 +164,13 @@ class Scaler(Configurable, Stateful):
     # ================================================
     def _validate_scaler(self):
         if not hasattr(self._scaler, "fit"):
-            raise AttributeError("Underlying scaler instance does not have a `fit()` method.")
+            raise AttributeError(
+                "Underlying scaler instance does not have a `fit()` method.",
+            )
         if not hasattr(self._scaler, "transform"):
-            raise AttributeError("Underlying scaler instance does not have a `transform()` method.")
+            raise AttributeError(
+                "Underlying scaler instance does not have a `transform()` method.",
+            )
 
     @classmethod
     def get_supported_scalers(cls) -> dict[str, Any]:
@@ -154,7 +189,9 @@ class Scaler(Configurable, Stateful):
 
     def clone_unfitted(self) -> Scaler:
         """Create a fresh, unfitted Scaler with the same config."""
-        return self.from_config(self.get_config())
+        clone = clone_via_serialization(self)
+        clone._is_fit = False
+        return clone
 
     # ================================================
     # Core logic

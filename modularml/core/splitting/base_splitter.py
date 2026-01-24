@@ -121,7 +121,10 @@ class BaseSplitter(Configurable, Stateful, ABC):
             return split_indices
 
         # FeatureSetView.select_rows constructs new views from itself
-        return {label: view.take(rel_indices=idxs, label=label) for label, idxs in split_indices.items()}
+        return {
+            label: view.take(rel_indices=idxs, label=label)
+            for label, idxs in split_indices.items()
+        }
 
     # ================================================
     # Configurable
@@ -205,7 +208,7 @@ class BaseSplitter(Configurable, Stateful, ABC):
         return serializer.save(
             self,
             filepath,
-            policy=SerializationPolicy.BUILTIN,
+            policy=SerializationPolicy.REGISTERED,
             overwrite=overwrite,
         )
 

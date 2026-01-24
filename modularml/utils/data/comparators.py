@@ -10,7 +10,11 @@ def deep_equal(a, b):
 
     # NumPy array
     if isinstance(a, np.ndarray) or isinstance(b, np.ndarray):
-        return isinstance(a, np.ndarray) and isinstance(b, np.ndarray) and np.array_equal(a, b)
+        return (
+            isinstance(a, np.ndarray)
+            and isinstance(b, np.ndarray)
+            and np.array_equal(a, b)
+        )
 
     # Primitive types
     if isinstance(a, (int, float, str, bool)) or a is None:
@@ -19,6 +23,7 @@ def deep_equal(a, b):
     # Dictionary
     if isinstance(a, dict) and isinstance(b, dict):
         if set(a.keys()) != set(b.keys()):
+            print("keys differ")
             return False
         return all(deep_equal(a[k], b[k]) for k in a)
 
@@ -27,6 +32,36 @@ def deep_equal(a, b):
         if len(a) != len(b):
             return False
         return all(deep_equal(x, y) for x, y in zip(a, b, strict=True))
+
+    # Classes
+    if isinstance(a, type) and isinstance(b, type):
+        return (
+            (a.__qualname__ == b.__qualname__)
+            and (
+                getattr(
+                    a,
+                    "__module___",
+                    None,
+                )
+                == getattr(
+                    b,
+                    "__module___",
+                    None,
+                )
+            )
+            and (
+                getattr(
+                    a,
+                    "__file__",
+                    None,
+                )
+                == getattr(
+                    b,
+                    "__file__",
+                    None,
+                )
+            )
+        )
 
     # Fallback
     return a == b
