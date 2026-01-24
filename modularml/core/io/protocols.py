@@ -5,18 +5,16 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class Configurable(Protocol):
-    """
-    Protocol for objects that can be reconstructed from a JSON-serializable config.
-
-    The config must contain only JSON-safe values (dict/list/str/int/float/bool/None).
-    """
+    """Protocol for objects that have configurable instantiation."""
 
     def get_config(self) -> dict[str, Any]:
         """
-        Return a JSON-serializable configuration for reconstructing the object.
+        Returns configuration details of this object.
 
         Returns:
-            dict[str, Any]: Configuration used to reconstruct the object.
+            dict[str, Any]:
+                Configuration used to reconstruct the object.
+                Keys must be strings.
 
         """
         ...
@@ -27,10 +25,11 @@ class Configurable(Protocol):
         Construct an object from a configuration dict.
 
         Args:
-            config (dict[str, Any]): Configuration used to construct the object.
+            config (dict[str, Any]):
+                Configuration used to construct the object.
 
         Returns:
-            Self: Constructed object.
+            cls: Constructed object.
 
         """
         ...
@@ -38,11 +37,7 @@ class Configurable(Protocol):
 
 @runtime_checkable
 class Stateful(Protocol):
-    """
-    Protocol for objects that can export and restore runtime state.
-
-    State may be JSON-safe OR backend-native; handlers are responsible for encoding.
-    """
+    """Protocol for objects that can export and restore runtime state."""
 
     def get_state(self) -> Any:
         """

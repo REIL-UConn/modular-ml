@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from typing import ClassVar
 
 from modularml.core.io.serialization_policy import SerializationPolicy, normalize_policy
 
@@ -18,7 +19,13 @@ class SymbolSpec:
     It *does not* describe behaviour, configuration, or state.
     """
 
+    # Structural metadata
+    TAG: ClassVar[str] = "__mml_symbol_spec__"
+    VERSION: ClassVar[int] = 1
+
+    # Core fields
     policy: SerializationPolicy
+    version: int = VERSION
 
     # BUILTIN
     #  - key into symbol_registry._builtin_registry
@@ -47,7 +54,9 @@ class SymbolSpec:
 
         elif self.policy is SerializationPolicy.STATE_ONLY:
             if any([self.key, self.module, self.qualname, self.source_ref]):
-                raise ValueError("STATE_ONLY SymbolSpec must not define class identity fields.")
+                raise ValueError(
+                    "STATE_ONLY SymbolSpec must not define class identity fields.",
+                )
 
         elif self.policy is SerializationPolicy.REGISTERED:
             if not (self.registry_path and self.registry_key):
@@ -60,3 +69,21 @@ class SymbolSpec:
         else:
             msg = f"Unsupported policy: {self.policy}"
             raise TypeError(msg)
+
+    def to_dict(self) -> dict:
+        """JSON-safe dict representation of this SymbolSpec."""
+        data = asdict(self)
+        data[self.TAG] = True
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict) -> SymbolSpec:
+        data = dict(data)
+        if cls.TAG not in data or not data[cls.TAG]:
+            raise ValueError("Not a SymbolSpec dict")
+        data.pop(cls.TAG)
+        return cls(**data)
+
+    @classmethod
+    def is_symbol_spec_dict(cls, data: dict) -> bool:
+        return isinstance(data, dict) and data.get(cls.TAG) is True

@@ -115,7 +115,9 @@ class SymbolRegistry:
         policy = spec.policy
 
         if policy is SerializationPolicy.STATE_ONLY:
-            raise SymbolResolutionError("STATE_ONLY artifacts require user-supplied class.")
+            raise SymbolResolutionError(
+                "STATE_ONLY artifacts require user-supplied class.",
+            )
 
         if policy is SerializationPolicy.BUILTIN:
             if spec.key in self._builtin_classes:
@@ -162,7 +164,11 @@ class SymbolRegistry:
         cls = obj_or_cls if isinstance(obj_or_cls, type) else obj_or_cls.__class__
         return cls in set(self._builtin_classes.values())
 
-    def obj_in_a_builtin_registry(self, obj_or_cls: Any, registry_name: str | None) -> bool:
+    def obj_in_a_builtin_registry(
+        self,
+        obj_or_cls: Any,
+        registry_name: str | None,
+    ) -> bool:
         """
         Checks whether an instance is in a built-in registry.
 
@@ -184,11 +190,14 @@ class SymbolRegistry:
             ks_to_search = valid_ks
 
         # Search registries
-        for k in valid_ks:
+        for k in ks_to_search:
             entry = self._builtin_registries[k]
-            key = entry.naming_fn(cls)
-            if key in entry.registry:
-                return True
+            try:
+                key = entry.naming_fn(cls)
+                if key in entry.registry:
+                    return True
+            except Exception:  # noqa: BLE001, S112
+                continue
 
         return False
 

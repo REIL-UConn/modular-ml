@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import zipfile
-from dataclasses import asdict
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any
@@ -12,9 +12,15 @@ from modularml.core.io.artifacts import Artifact, ArtifactHeader
 from modularml.core.io.conventions import KindRegistry, kind_registry
 from modularml.core.io.handlers.registry import handler_registry
 from modularml.core.io.migrations.registry import migration_registry
-from modularml.core.io.packaged_code_loaders.default_loader import default_packaged_code_loader
+from modularml.core.io.packaged_code_loaders.default_loader import (
+    default_packaged_code_loader,
+)
 from modularml.core.io.serialization_policy import SerializationPolicy, normalize_policy
-from modularml.core.io.symbol_registry import SymbolRegistry, SymbolResolutionError, symbol_registry
+from modularml.core.io.symbol_registry import (
+    SymbolRegistry,
+    SymbolResolutionError,
+    symbol_registry,
+)
 from modularml.core.io.symbol_spec import SymbolSpec
 
 if TYPE_CHECKING:
@@ -79,7 +85,8 @@ class SaveContext:
         Rules:
         - Symbols are packaged once per SaveContext
         - Source code is always copied into artifact/code/
-        - Previously packaged symbols are re-packaged by source text
+        - Filename collisions are resolved by appending _0, _1, ...
+        - Existing files are reused if already packaged
         """
         # Resolve instances to its class (functions should be unchanged)
         if not (inspect.isclass(symbol) or inspect.isfunction(symbol)):
@@ -99,48 +106,87 @@ class SaveContext:
         # Reject unsupported symbols
         if inspect.isfunction(symbol):
             if symbol.__name__ == "<lambda>":
-                raise RuntimeError("Cannot package lambda functions. Define a named function in a .py file.")
+                msg = (
+                    "Cannot package lambda functions. Define a named function "
+                    "in a .py file."
+                )
+                raise RuntimeError(msg)
 
             if inspect.getclosurevars(symbol).nonlocals:
                 msg = f"Cannot package function '{qualname}' with closures."
                 raise RuntimeError(msg)
         if module == "__main__":
-            msg = f"Cannot package symbol '{qualname}' defined in '__main__'. Define it in a standalone Python file."
+            msg = (
+                f"Cannot package symbol '{qualname}' defined in '__main__'. "
+                "Define it in a standalone Python file."
+            )
             raise RuntimeError(msg)
 
         # Prepare destination
         code_dir = self.artifact_path / "code"
         code_dir.mkdir(exist_ok=True)
 
+        # Helpers: resolve destination filename safely
+        def _hash_text(text: str) -> str:
+            return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+        def _resolve_dest_file(base_name: str, source_txt: str) -> Path:
+            base = Path(base_name)
+            candidate = code_dir / base.name
+
+            # Case 1: filename unused
+            if not candidate.exists():
+                return candidate
+
+            # Case 2: filename exists & contain same content
+            existing_txt = candidate.read_text(encoding="utf-8")
+            if _hash_text(existing_txt) == _hash_text(source_txt):
+                return candidate
+
+            # Case 3: conflicting filename -> append suffix
+            i = 0
+            while True:
+                candidate = code_dir / f"{base.stem}_{i}{base.suffix}"
+                if not candidate.exists():
+                    return candidate
+                i += 1
+
         # Case 1: symbol came from packaged loader
-        if hasattr(symbol, "__mml_source_text__") and hasattr(symbol, "__mml_source_ref__"):
+        if hasattr(
+            symbol,
+            "__mml_source_text__",
+        ) and hasattr(
+            symbol,
+            "__mml_source_ref__",
+        ):
             source_text: str = symbol.__mml_source_text__
             source_ref: str = symbol.__mml_source_ref__
 
             rel_path, _ = source_ref.split(":", 1)
-            dest_file = code_dir / Path(rel_path).name
-
-            if not dest_file.exists():
-                dest_file.write_text(source_text, encoding="utf-8")
-
+            base_name = Path(rel_path).name
         # Case 2: normal symbol -> inspect source file
         else:
             try:
                 src_file = Path(inspect.getfile(symbol))
             except (TypeError, OSError) as exc:
-                msg = f"Cannot bundle source for symbol '{qualname}'. Source file is not resolvable."
+                msg = (
+                    f"Cannot bundle source for symbol '{qualname}'. Source "
+                    "file is not resolvable."
+                )
                 raise RuntimeError(msg) from exc
-
             if not src_file.exists():
                 msg = f"Source file not found: {src_file}"
                 raise FileNotFoundError(msg)
+            source_text = src_file.read_text(encoding="utf-8")
+            base_name = src_file.name
 
-            dest_file = code_dir / src_file.name
-            if not dest_file.exists():
-                dest_file.write_text(
-                    src_file.read_text(encoding="utf-8"),
-                    encoding="utf-8",
-                )
+        # Get destination filepath & write if not already written
+        dest_file = _resolve_dest_file(
+            base_name=base_name,
+            source_txt=source_text,
+        )
+        if not dest_file.exists():
+            dest_file.write_text(source_text, encoding="utf-8")
 
         # Build SymbolSpec
         source_ref = f"code/{dest_file.name}:{qualname}"
@@ -153,7 +199,6 @@ class SaveContext:
         spec.validate()
 
         self._packaged_symbols[symbol] = spec
-
         return spec
 
     def make_symbol_spec(
@@ -243,7 +288,7 @@ class SaveContext:
                 schema_version=Artifact.schema_version,
                 object_version=handler.object_version,
                 kind=kind_registry.get_kind(type(obj)).kind,
-                symbol_spec=asdict(symbol_spec),
+                symbol_spec=symbol_spec.to_dict(),
             ),
             files=file_mapping,
         )
@@ -304,7 +349,7 @@ class SaveContext:
 
 class LoadContext:
     """
-    Context provided to TypeHandlers during deserialization.
+    Context provided to BaseHandlers during deserialization.
 
     Attributes:
         artifact_path (Path):
@@ -315,8 +360,8 @@ class LoadContext:
         allow_packaged_code (bool):
             Whether executing bundled code is permitted.
         overwrite_collision (bool):
-            Whether to overwrite collision (ie. same `node_id`) or generate a new node_id.
-            Defaults to False (ie. register with new node_id)
+            Whether to overwrite collision (ie. same `node_id`) or generate a new
+            node_id. Defaults to False (ie. register with new node_id)
 
     """
 
@@ -360,13 +405,15 @@ class LoadContext:
             artifact = Artifact.from_json(json.load(f))
 
         # Extract SymbolSpec
-        spec = SymbolSpec(**artifact.header.symbol_spec)
+        spec = SymbolSpec.from_dict(artifact.header.symbol_spec)
         spec.validate()
 
         # Resolve class (no object instantiation yet)
         if spec.policy is SerializationPolicy.STATE_ONLY:
             if provided_cls is None:
-                raise SymbolResolutionError("STATE_ONLY artifacts require `provided_cls`.")
+                raise SymbolResolutionError(
+                    "STATE_ONLY artifacts require `provided_cls`.",
+                )
             cls = provided_cls
         else:
             cls = symbol_registry.resolve_symbol(
@@ -422,12 +469,12 @@ class LoadContext:
 
 class Serializer:
     """
-    Central serializer that saves and loads ModularML objects using registries and handlers.
+    Central serializer that saves and loads ModularML objects.
 
     The serializer:
     - determines artifact kind (KindRegistry)
     - determines class identity (SymbolRegistry + SerializationPolicy)
-    - encodes config/state (TypeHandlers, Configurable, Stateful)
+    - encodes config/state (BaseHandlers, Configurable, Stateful)
     - writes to disk and reconstructs on load
 
     Args:
@@ -436,7 +483,7 @@ class Serializer:
         symbol_registry (SymbolRegistry):
             Registry for SymbolSpec to/from class resolution.
         handler_registry (HandlerRegistry):
-            Registry for TypeHandlers.
+            Registry for BaseHandlers.
         mml_version (str):
             ModularML version string to embed in artifacts.
         schema_version (int):

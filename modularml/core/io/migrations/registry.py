@@ -3,10 +3,10 @@ from dataclasses import replace
 from pathlib import Path
 
 from modularml.core.io.artifacts import Artifact
-from modularml.core.io.handlers.handler import TypeHandler
+from modularml.core.io.handlers.handler import BaseHandler
 
 # A migration transforms (artifact, artifact_path, handler) -> Artifact
-MigrationFnc = Callable[[Artifact, Path, TypeHandler], Artifact]
+MigrationFnc = Callable[[Artifact, Path, BaseHandler], Artifact]
 
 
 class MigrationRegistry:
@@ -57,7 +57,7 @@ class MigrationRegistry:
         artifact: Artifact,
         *,
         artifact_path: Path,
-        handler: TypeHandler,
+        handler: BaseHandler,
     ) -> Artifact:
         """
         Apply all registered migrations to an Artifact until up-to-date.
