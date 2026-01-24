@@ -118,11 +118,20 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
 
         # Same collection (fast index-based check)
         if self.source is other.source:
-            return len(np.intersect1d(self.indices, other.indices, assume_unique=True)) == 0
+            return (
+                len(np.intersect1d(self.indices, other.indices, assume_unique=True))
+                == 0
+            )
 
         # Otherwise compare SAMPLE_IDs
-        ids_self = {self.source.collection.table[DOMAIN_SAMPLE_ID].to_pylist()[i] for i in self.indices}
-        ids_other = {other.source.collection.table[DOMAIN_SAMPLE_ID].to_pylist()[i] for i in other.indices}
+        ids_self = {
+            self.source.collection.table[DOMAIN_SAMPLE_ID].to_pylist()[i]
+            for i in self.indices
+        }
+        ids_other = {
+            other.source.collection.table[DOMAIN_SAMPLE_ID].to_pylist()[i]
+            for i in other.indices
+        }
         return ids_self.isdisjoint(ids_other)
 
     def get_overlap_with(self, other: FeatureSetView) -> list[int]:
@@ -140,11 +149,21 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
         # Same collection (fast index-based check)
         if self.source is other.source:
             overlap = np.intersect1d(self.indices, other.indices, assume_unique=True)
-            return self.source.collection.table[DOMAIN_SAMPLE_ID].take(pa.array(overlap)).to_pylist()
+            return (
+                self.source.collection.table[DOMAIN_SAMPLE_ID]
+                .take(pa.array(overlap))
+                .to_pylist()
+            )
 
         # Otherwise compare SAMPLE_IDs
-        ids_self = {self.source.collection.table[DOMAIN_SAMPLE_ID].to_pylist()[i] for i in self.indices}
-        ids_other = {other.source.collection.table[DOMAIN_SAMPLE_ID].to_pylist()[i] for i in other.indices}
+        ids_self = {
+            self.source.collection.table[DOMAIN_SAMPLE_ID].to_pylist()[i]
+            for i in self.indices
+        }
+        ids_other = {
+            other.source.collection.table[DOMAIN_SAMPLE_ID].to_pylist()[i]
+            for i in other.indices
+        }
         return list(ids_self.intersection(ids_other))
 
     # ================================================
@@ -186,8 +205,9 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
             raise ValueError("Invalid config for FeatureSetView.")
 
         # Re-link source using ExperimentContext
+        exp_ctx = ExperimentContext.get_active()
         try:
-            node = ExperimentContext.get_node(node_id=config["source"]["node_id"])
+            node = exp_ctx.get_node(node_id=config["source"]["node_id"])
         except KeyError as e:
             msg = (
                 f"There are no registered nodes with id: '{config['source']['node_id']}'. "
@@ -219,15 +239,30 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
                 [
                     (
                         DOMAIN_FEATURES,
-                        str(self.get_feature_keys(include_domain_prefix=False, include_rep_suffix=True)),
+                        str(
+                            self.get_feature_keys(
+                                include_domain_prefix=False,
+                                include_rep_suffix=True,
+                            ),
+                        ),
                     ),
                     (
                         DOMAIN_TARGETS,
-                        str(self.get_target_keys(include_domain_prefix=False, include_rep_suffix=True)),
+                        str(
+                            self.get_target_keys(
+                                include_domain_prefix=False,
+                                include_rep_suffix=True,
+                            ),
+                        ),
                     ),
                     (
                         DOMAIN_TAGS,
-                        str(self.get_tag_keys(include_domain_prefix=False, include_rep_suffix=True)),
+                        str(
+                            self.get_tag_keys(
+                                include_domain_prefix=False,
+                                include_rep_suffix=True,
+                            ),
+                        ),
                     ),
                 ],
             ),

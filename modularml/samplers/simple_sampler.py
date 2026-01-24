@@ -26,6 +26,7 @@ class SimpleSampler(BaseSampler):
         strict_stratification: bool = True,
         drop_last: bool = False,
         seed: int | None = None,
+        show_progress: bool = True,
         source: FeatureSet | FeatureSetView | None = None,
     ):
         """
@@ -74,6 +75,9 @@ class SimpleSampler(BaseSampler):
                 Drop the final incomplete batch.
             seed (int, optional):
                 Random seed for reproducible shuffling.
+            show_progress (bool, optional):
+                Whether to show a progress bar during the batch building process.
+                Defaults to True.
             source (FeatureSet | FeatureSetView):
                 The source data from samples are drawn. Note that batches are not
                 constructed until `materialize_batches` is called.
@@ -94,7 +98,7 @@ class SimpleSampler(BaseSampler):
             strict_stratification=strict_stratification,
             drop_last=drop_last,
             seed=seed,
-            show_progress=False,
+            show_progress=show_progress,
         )
 
     def build_samples(self) -> dict[tuple[str, str], Samples]:

@@ -450,6 +450,7 @@ class BaseSampler(Configurable, Stateful, ABC):
         if stream_to_source_label is None:
             msg = "Sampler state is missing required keyword: 'sources_label_map'."
             raise RuntimeError(msg)
+        self._stream_to_source_label = stream_to_source_label
 
         # Rebuild sources
         sources: dict[str, FeatureSetView] = {}
@@ -465,7 +466,7 @@ class BaseSampler(Configurable, Stateful, ABC):
             for stream_lbl, bv_cfg_list in sampled_cfg.items():
                 for bv_cfg in bv_cfg_list:
                     bv = BatchView(
-                        source=sources[stream_to_source_label[stream_lbl]],
+                        source=sources[self._stream_to_source_label[stream_lbl]].source,
                         role_indices=bv_cfg["role_indices"],
                         role_indice_weights=bv_cfg["role_indice_weights"],
                     )
@@ -502,7 +503,7 @@ class BaseSampler(Configurable, Stateful, ABC):
         return serializer.save(
             self,
             filepath,
-            policy=SerializationPolicy.BUILTIN,
+            policy=SerializationPolicy.REGISTERED,
             overwrite=overwrite,
         )
 
