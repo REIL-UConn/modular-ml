@@ -18,6 +18,84 @@ class ModularMLFormatter(logging.Formatter):
         return f"[{timestamp}] {level} {location} | {message}"
 
 
+class _BannerMixin:
+    max_width: int = 88
+
+    def _wrap(self, text: str, *, indent: int = 2) -> list[str]:
+        pad = " " * indent
+        return [
+            pad + line
+            for line in textwrap.wrap(
+                text,
+                width=self.max_width - 2 * indent,
+                replace_whitespace=True,
+                drop_whitespace=True,
+            )
+        ]
+
+    def _supports_color(self) -> bool:
+        import os
+        import sys
+
+        return sys.stdout.isatty() and os.environ.get("TERM") not in (None, "dumb")
+
+    def _color(self, text: str, *, code: str) -> str:
+        if not self._supports_color():
+            return text
+        return f"\033[{code}m{text}\033[0m"
+
+    def _separator(self, label: str | None = None) -> str:
+        if label:
+            core = f" {label} "
+            side = (self.max_width - len(core)) // 2
+            line = "─" * side + core + "─" * (self.max_width - side - len(core))
+        else:
+            line = "─" * self.max_width
+        return line
+
+
+class ModularMLBannerFormatter(ModularMLFormatter, _BannerMixin):
+    """
+    Banner-style formatter for standard ModularML logs.
+
+    Label format:
+        "{LEVEL}" or "{LEVEL} - {custom_title_desc}"
+
+    Body format:
+        [timestamp] module:lineno   # optional
+        message
+    """
+
+    def __init__(self, *, max_width: int = 88) -> None:
+        super().__init__()
+        self.max_width = max_width
+
+    def format(self, record: logging.LogRecord) -> str:
+        level = record.levelname
+
+        # Optional custom title_desc:
+        #   logger.info("msg", extra={"title_desc": "FeatureSet"})
+        custom = getattr(record, "title_desc", None)
+        title_desc = f"{level} - {custom}" if custom else level
+
+        # Optional timestamp + location line
+        #   logger.info("msg", extra={"omit_origin": True})
+        omit_origin = getattr(record, "omit_origin", False)
+        timestamp = datetime.fromtimestamp(record.created).strftime("%H:%M:%S")
+        location = f"{record.module}:{record.lineno}"
+        origin = f"[{timestamp}] {location}"
+
+        message = record.getMessage()
+
+        lines: list[str] = []
+        lines.append(self._separator(title_desc))
+        if not omit_origin:
+            lines.extend(self._wrap(origin, indent=1))
+        lines.extend(self._wrap(message, indent=1))
+        lines.append(self._separator())
+        return "\n".join(lines)
+
+
 class WarningFormatter(logging.Formatter):
     """
     Formatter for ModularML warnings using a banner-style layout.
@@ -61,18 +139,6 @@ class WarningFormatter(logging.Formatter):
         if not self._supports_color():
             return text
         return f"\033[31m{text}\033[0m"
-
-    def _wrap(self, text: str, *, indent: int = 2) -> list[str]:
-        pad = " " * indent
-        return [
-            pad + line
-            for line in textwrap.wrap(
-                text,
-                width=self.max_width - 2 * indent,
-                replace_whitespace=True,
-                drop_whitespace=True,
-            )
-        ]
 
     def _separator(self, label: str | None = None) -> str:
         """Create a separator line, optionally with a centered label."""

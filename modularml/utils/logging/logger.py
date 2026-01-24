@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from .formatters import ModularMLFormatter, WarningFormatter
+from .formatters import ModularMLBannerFormatter, WarningFormatter
 
 """
 Example usage of logging:
@@ -50,7 +50,7 @@ def get_logger(
         if name == "warnings":
             handler.setFormatter(WarningFormatter())
         else:
-            handler.setFormatter(ModularMLFormatter())
+            handler.setFormatter(ModularMLBannerFormatter())
 
         logger.addHandler(handler)
 

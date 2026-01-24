@@ -273,10 +273,14 @@ class FeatureSet(
 
     from_df = from_pandas
 
-    def __eq__(self, other):
+    def __eq__(self, other: FeatureSet):
         if not isinstance(other, FeatureSet):
             msg = f"Cannot compare equality between FeatureSet and {type(other)}"
             raise TypeError(msg)
+
+        # Compare ID and label
+        if (self.node_id != other.node_id) or (self.label != other.label):
+            return False
 
         # Compare collection
         if self.collection != other.collection:
@@ -1195,7 +1199,7 @@ class FeatureSet(
         filepath: Path,
         *,
         allow_packaged_code: bool = False,
-        overwrite: bool = True,
+        overwrite: bool = False,
     ) -> FeatureSet:
         """
         Load a FeatureSet from file.
@@ -1209,7 +1213,7 @@ class FeatureSet(
                 Whether to replace any colliding node registrations in ExperimentContext
                 If False, a new node_id is assigned to the reloaded FeatureSet. Otherwise,
                 the existing FeatureSet is removed from the ExperimentContext registry.
-                Defaults to True.
+                Defaults to False.
 
         Returns:
             FeatureSet: The reloaded FeatureSet.

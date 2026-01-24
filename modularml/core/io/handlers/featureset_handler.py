@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -8,13 +8,17 @@ import numpy as np
 
 from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.featureset import FeatureSet
-from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_TAGS, DOMAIN_TARGETS, REP_TRANSFORMED
+from modularml.core.data.schema_constants import (
+    DOMAIN_FEATURES,
+    DOMAIN_TAGS,
+    DOMAIN_TARGETS,
+    REP_TRANSFORMED,
+)
 from modularml.core.experiment.experiment_node import generate_node_id
-from modularml.core.io.handlers.handler import TypeHandler
-from modularml.core.io.serialization_policy import SerializationPolicy
-from modularml.core.io.symbol_registry import symbol_registry
-from modularml.core.references.featureset_reference import FeatureSetSplitReference
+from modularml.core.io.handlers.handler import BaseHandler
+from modularml.core.io.protocols import Stateful
 from modularml.utils.data.pyarrow_data import hash_pyarrow_table
+from modularml.utils.logging import get_logger
 
 if TYPE_CHECKING:
     from modularml.core.data.featureset_view import FeatureSetView
@@ -24,8 +28,11 @@ if TYPE_CHECKING:
     from modularml.core.transforms.scaler_record import ScalerRecord
 
 
-class FeatureSetHandler(TypeHandler[FeatureSet]):
-    """TypeHandler for FeatureSet objects."""
+logger = get_logger(level=logging.INFO)
+
+
+class FeatureSetHandler(BaseHandler[FeatureSet]):
+    """BaseHandler for FeatureSet objects."""
 
     object_version: ClassVar[str] = "1.0"
 
@@ -35,56 +42,6 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
     # ================================================
     # FeatureSet Encoding
     # ================================================
-    def encode(
-        self,
-        obj: FeatureSet,
-        save_dir: Path,
-        *,
-        ctx: SaveContext,
-    ) -> dict[str, str | None]:
-        """
-        Encodes state and config to files.
-
-        Args:
-            obj (FeatureSet):
-                Object instance to encode.
-            save_dir (Path):
-                Directory to write encodings to.
-            ctx (SaveContext, optional):
-                Additional serialization context.
-
-        Returns:
-            dict[str, str | None]: Mapping of "config" and "state" keys to saved files.
-
-        """
-        file_mapping = self.encode_config(obj=obj, save_dir=save_dir, ctx=ctx)
-        file_mapping.update(self.encode_state(obj=obj, save_dir=save_dir, ctx=ctx))
-        return file_mapping
-
-    def encode_config(
-        self,
-        obj: FeatureSet,
-        save_dir: Path,
-        *,
-        ctx: SaveContext,
-    ) -> dict[str, str]:
-        """
-        Encodes config to a json file.
-
-        Args:
-            obj (FeatureSet):
-                Object to encode config for.
-            save_dir (Path):
-                Directory to write encodings to.
-            ctx (SaveContext, optional):
-                Additional serialization context.
-
-        Returns:
-            dict[str, str]: Mapping of config to saved json file
-
-        """
-        return super().encode_config(obj=obj, save_dir=save_dir, ctx=ctx, config_rel_path=self.config_rel_path)
-
     def encode_state(
         self,
         obj: FeatureSet,
@@ -107,55 +64,37 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
             dict[str, str]: Mapping of state to saved pkl file
 
         """
-        # FeatureSet.get_state() -> set_state() works within the same runtime environment
-        # To preserve underlying Scaler/Splitter classes that may be user-defined, we need
-        # to separately save the Scaler/Splitter classes
+        if not isinstance(obj, Stateful):
+            raise NotImplementedError(
+                "FeatureSet must implement the `Stateful` protocol.",
+            )
+        save_dir = Path(save_dir)
 
-        # The featureset.fs.mml file is structure as follows:
-        # ├── artifact.json             <- FeatureSet identity
-        # ├── config.json               <- FeatureSet.get_config()
-        # │
-        # ├── sample_collection.arrow   <- pyarrow table + schema
-        # ├── split_configs.json        <- Splits (FeatureSetView)
-        # │
-        # ├── scaler_records/
-        # │   ├── record_000.json       <- ScalerRecord config
-        # │   ├── record_001.json
-        # │   └── record_002.json
-        # ├── scalers/
-        # │   ├── scaler_000.sc.mml     <- Scaler artifact (holds class definition if custom)
-        # │   ├── scaler_001.sc.mml
-        # │   └── scaler_002.sc.mml
-        # │
-        # ├── splitter_records/
-        # │   ├── record_000.json       <- SplitterRecord config
-        # │   ├── record_001.json
-        # │   └── record_002.json
-        # └── splitters/
-        #     ├── splitter_000.sc.mml   <- Splitter artifact (holds class definition if custom)
-        #     ├── splitter_001.sc.mml
-        #     └── splitter_002.sc.mml
-
-        if not hasattr(obj, "get_state"):
-            raise NotImplementedError("FeatureSet must implement a `get_state` method.")
-
-        # Track which files go where:
+        # Track which files go where
         file_mapping: dict[str, str] = {}
 
         # Grab FeatureSet state (holds live instances)
         state = obj.get_state()
 
-        # Save SampleCollection to arrow file (stores data + schema)
+        # ------------------------------------------------
+        # Save SampleCollection
+        #  - uses PyArrow file to store data + schema
+        # ------------------------------------------------
         coll: SampleCollection = state["sample_collection"]
         coll_path = coll.save(Path(save_dir) / "sample_collection.arrow")
         file_mapping["sample_collection"] = coll_path.name
 
-        # Save split configs (remove source reference)
+        # ------------------------------------------------
+        # Save Split Configs
+        #  - removes source reference
+        # ------------------------------------------------
         split_cfgs = {}
         splits: dict[str, FeatureSetView] = state["splits"]
         for k, fsv in splits.items():
             split_cfgs[k] = {
-                "indices": fsv.indices.tolist() if isinstance(fsv.indices, np.ndarray) else fsv.indices,
+                "indices": fsv.indices.tolist()
+                if isinstance(fsv.indices, np.ndarray)
+                else fsv.indices,
                 "columns": fsv.columns,
                 "label": fsv.label,
             }
@@ -165,83 +104,70 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
         )
         file_mapping["split_configs"] = split_cfg_path.name
 
-        # Save Scaler records + artifacts
-        # Scalers can hold user-defined code, we need to store serialized artifacts of the Scaler instances in addition to the ScalerRecord attributes
+        # ------------------------------------------------
+        # Save ScalerRecords
+        #  - only configs used during reload (refit)
+        #  - full artifact saved for tracking only
+        # ------------------------------------------------
         dir_scaler_rec = Path(save_dir) / "scaler_records"
         dir_scaler_rec.mkdir(exist_ok=True)
-        dir_scaler_art = Path(save_dir) / "scalers"
-        dir_scaler_art.mkdir(exist_ok=True)
 
         scaler_cfg_files: list[str] = []
-        scaler_recs: list[ScalerRecord] = sorted(state["scaler_records"], key=lambda x: x.order)
+        scaler_recs: list[ScalerRecord] = sorted(
+            state["scaler_records"],
+            key=lambda x: x.order,
+        )
         n_digits = (len(scaler_recs) // 10) + 1
         for i, rec in enumerate(scaler_recs):
-            # Store modifed scaler record config
-            rec_cfg = rec.get_config()
-            scaler_name: str = f"scaler_{i:0{n_digits}d}"
+            # json-safe conversion of config data
+            # non-json elements are converted via SymbolSpec
+            rec_cfg = self._json_safe_cfg(config=rec.get_config(), ctx=ctx)
 
-            # Save scaler artifact
-            scaler_obj = rec.scaler_obj
-            if scaler_obj is not None:
-                symbol_spec = ctx.make_symbol_spec(
-                    symbol=type(scaler_obj),
-                    policy=SerializationPolicy.BUILTIN,
+            # optional artifact reference (for tracking only)
+            if rec.scaler_obj is not None:
+                art_path = rec.scaler_obj.save(
+                    filepath=save_dir / "scalers" / f"scaler_{i:03d}",
+                    overwrite=False,
                 )
-                save_path = ctx.emit_mml(
-                    obj=scaler_obj,
-                    symbol_spec=symbol_spec,
-                    out_path=dir_scaler_art / scaler_name,
-                    overwrite=True,
+                rec_cfg["_scaler_artifact"] = str(
+                    Path(art_path).relative_to(save_dir),
                 )
-                rec_cfg["scaler_ref"] = str(save_path)[str(save_path).rindex(save_dir.name) + len(save_dir.name) + 1 :]
 
-            # Save config (JSON)
-            cfg_path = (dir_scaler_rec / scaler_name).with_suffix(".json")
-            save_path = self._write_json(data=rec_cfg, save_path=cfg_path)
-            scaler_cfg_files.append(save_path.name)
+            cfg_path = dir_scaler_rec / f"scaler_{i:0{n_digits}d}.json"
+            self._write_json(rec_cfg, cfg_path)
+            scaler_cfg_files.append(cfg_path.name)
 
         file_mapping["scaler_records"] = scaler_cfg_files
 
-        # Save Splitter records + artifacts
-        # Splitters can hold user-defined code, we need to store serialized artifacts of the Splitter instances in addition to the SplitterRecord attributes
+        # ------------------------------------------------
+        # Save SplitterRecords
+        #  - only configs used during reload (resplit)
+        #  - full artifact saved for tracking only
+        # ------------------------------------------------
         dir_splitter_rec = Path(save_dir) / "splitter_records"
         dir_splitter_rec.mkdir(exist_ok=True)
-        dir_splitter_art = Path(save_dir) / "splitters"
-        dir_splitter_art.mkdir(exist_ok=True)
 
         splitter_cfg_files: list[str] = []
         splitter_recs: list[SplitterRecord] = state["splitter_records"]
         n_digits = (len(splitter_recs) // 10) + 1
         for i, rec in enumerate(splitter_recs):
-            # Store modifed splitter record config
-            rec_cfg = rec.get_config()
-            splitter_name: str = f"splitter_{i:0{n_digits}d}"
+            # json-safe conversion of config data
+            # non-json elements are converted via SymbolSpec
+            rec_cfg = self._json_safe_cfg(config=rec.get_config(), ctx=ctx)
 
-            # Save splitter artifact
+            # optional artifact reference (for tracking only)
             if rec.splitter is not None:
-                policy = (
-                    SerializationPolicy.BUILTIN
-                    if symbol_registry.obj_is_a_builtin_class(rec.splitter)
-                    else SerializationPolicy.REGISTERED
+                art_path = rec.splitter.save(
+                    filepath=save_dir / "splitters" / f"splitter_{i:0{n_digits}d}",
+                    overwrite=False,
                 )
-                symbol_spec = ctx.make_symbol_spec(
-                    symbol=rec.splitter.__class__,
-                    policy=policy,
+                rec_cfg["_splitter_artifact"] = str(
+                    Path(art_path).relative_to(save_dir),
                 )
-                save_path = ctx.emit_mml(
-                    obj=rec.splitter,
-                    symbol_spec=symbol_spec,
-                    out_path=dir_splitter_art / splitter_name,
-                    overwrite=True,
-                )
-                rec_cfg["splitter_ref"] = str(save_path)[
-                    str(save_path).rindex(save_dir.name) + len(save_dir.name) + 1 :
-                ]
 
-            # Save config (JSON)
-            cfg_path = (dir_splitter_rec / splitter_name).with_suffix(".json")
-            save_path = self._write_json(data=rec_cfg, save_path=cfg_path)
-            splitter_cfg_files.append(save_path.name)
+            cfg_path = dir_splitter_rec / f"splitter_{i:0{n_digits}d}.json"
+            self._write_json(rec_cfg, cfg_path)
+            splitter_cfg_files.append(cfg_path.name)
 
         file_mapping["splitter_records"] = splitter_cfg_files
 
@@ -277,16 +203,26 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
         """
         from modularml.core.data.featureset_view import FeatureSetView
 
+        # ------------------------------------------------
+        # Decode Config
+        # ------------------------------------------------
         config: dict[str, Any] = self.decode_config(load_dir=load_dir, ctx=ctx)
 
-        # Instantiate new FeatureSet from config, we cannot register until performing collision checks
-        fs_obj = cls.from_config(config=config, register=False)
-
-        # Extract state
+        # ------------------------------------------------
+        # Decode State
+        # ------------------------------------------------
         state: dict[str, Any] = self.decode_state(load_dir=load_dir, ctx=ctx)
 
-        # Splits need to instantiated with FeatureSet reference
-        split_cfgs: dict[str, Any] = state.pop("split_cfgs")
+        # ------------------------------------------------
+        # Instantiate FeatureSet
+        #  - Cannot register until performing collision checks
+        #  - Reconstruct splits and scalers from config
+        #  - Scalers get re-fit and re-applied in order
+        # ------------------------------------------------
+        fs_obj = cls.from_config(config=config, register=False)
+
+        # Restore splits (provide source)
+        split_cfgs: dict[str, Any] = state.pop("split_configs")
         splits: dict[str, FeatureSetView] = {
             k: FeatureSetView(
                 source=fs_obj,
@@ -301,30 +237,67 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
         # Set state
         fs_obj.set_state(state=state)
 
-        # Collision checking
+        # ------------------------------------------------
+        # Collision Checking
+        #  If same node_id exists, perform the following checks:
+        #  1. If same label + same state -> reuse existing
+        #  2. If different label or different state -> override or fork
+        #     - Override = replace existing node_id reference in ExperimentContext
+        #       with new object
+        #     - Fork = generate new node_id for reloaded object and register
+        # ------------------------------------------------
         exp_ctx: ExperimentContext = ExperimentContext.get_active()
         if exp_ctx.has_node(node_id=fs_obj.node_id):
-            # If same node_id exists, perform the following checks:
-            # 1. same label + same state -> reuse existing
-            # 2. different label or different state -> override or fork
-
-            # Override = replace existing node_id reference in ExperimentContext with new object
-            # Fork = generate new node_id for reloaded object and register
             existing = exp_ctx.get_node(node_id=fs_obj.node_id)
 
             # Case 1
             if isinstance(existing, FeatureSet) and existing == fs_obj:
                 # Early-return existing node
+                msg = (
+                    f"Loaded FeatureSet is identical to '{existing.label}' in "
+                    f"the existing ExperimentContext. Returning '{existing}'."
+                )
+                logger.info(
+                    msg=msg,
+                    extra={
+                        "title_desc": "Node ID Collision",
+                        "omit_origin": True,
+                    },
+                )
                 return existing
 
             # Case 2
             if ctx.overwrite_collision:
                 # Remove existing from ExperimentContext
+                msg = (
+                    "The loaded FeatureSet has an overlapping node ID with existing "
+                    f"FeatureSet '{existing.label}'. '{existing.label}' will be "
+                    "overwritten in the active ExperimentContext."
+                )
+                logger.info(
+                    msg=msg,
+                    extra={
+                        "title_desc": "Node ID Collision",
+                        "omit_origin": True,
+                    },
+                )
                 _ = exp_ctx.remove_node(
                     node_id=existing.node_id,
                     error_if_missing=True,
                 )
             else:
+                msg = (
+                    "The loaded FeatureSet has an overlapping node ID with existing "
+                    f"FeatureSet '{existing.label}'. A new node ID will be assigned "
+                    "to the loaded FeatureSet."
+                )
+                logger.info(
+                    msg=msg,
+                    extra={
+                        "title_desc": "Node ID Collision",
+                        "omit_origin": True,
+                    },
+                )
                 # Update node_id of new node
                 fs_obj._node_id = generate_node_id()
 
@@ -334,11 +307,13 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
             check_label_collision=False,
         )
 
-        # While the transformed data and splits are identical after set_state,
-        # some scaler states can't be fully serialized. This means that reusing the
-        # de-serialized scaler (e.g., using `undo_transform`) could cause instability.
-        # To avoid this, we reapply the scalers in the same order (ie re-fit them)
-
+        # ------------------------------------------------
+        # Re-fit Scalers
+        # - While the transformed data and splits are identical after set_state,
+        #   some scaler states can't be fully serialized. This means that reusing the
+        #   de-serialized scaler (e.g., using `undo_transform`) could cause instability.
+        # - To avoid this, we re-apply the scalers in the same order (ie re-fit them)
+        # ------------------------------------------------
         # 1. Remove any residual transformed representations (we fully rebuild from raw rep)
         for domain in [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS]:
             for k in fs_obj.collection._get_domain_keys(
@@ -346,8 +321,15 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
                 include_domain_prefix=False,
                 include_rep_suffix=False,
             ):
-                if REP_TRANSFORMED in fs_obj.collection._get_rep_keys(domain=domain, key=k):
-                    fs_obj.collection.delete_rep(domain=domain, key=k, rep=REP_TRANSFORMED)
+                if REP_TRANSFORMED in fs_obj.collection._get_rep_keys(
+                    domain=domain,
+                    key=k,
+                ):
+                    fs_obj.collection.delete_rep(
+                        domain=domain,
+                        key=k,
+                        rep=REP_TRANSFORMED,
+                    )
 
         # 2. Reapply scalers (clear those on featureset)
         fs_obj._scaler_recs = []
@@ -361,27 +343,6 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
             )
 
         return fs_obj
-
-    def decode_config(
-        self,
-        load_dir: Path,
-        *,
-        ctx: LoadContext,
-    ) -> dict[str, Any] | None:
-        """
-        Decodes config from a json file.
-
-        Args:
-            load_dir (Path):
-                Directory to decode from.
-            ctx (LoadContext, optional):
-                Additional de-serialization context.
-
-        Returns:
-            dict[str, Any] | None: The decoded config data.
-
-        """
-        return super().decode_config(load_dir=load_dir, ctx=ctx, config_rel_path=self.config_rel_path)
 
     def decode_state(
         self,
@@ -406,37 +367,17 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
         from modularml.core.splitting.splitter_record import SplitterRecord
         from modularml.core.transforms.scaler_record import ScalerRecord
 
-        # The featureset.fs.mml file is structure as follows:
-        # ├── artifact.json             <- FeatureSet identity
-        # ├── config.json               <- FeatureSet.get_config()
-        # │
-        # ├── sample_collection.arrow   <- pyarrow table + schema
-        # ├── split_configs.json        <- Splits (FeatureSetView)
-        # │
-        # ├── scaler_records/
-        # │   ├── record_000.json       <- ScalerRecord config
-        # │   ├── record_001.json
-        # │   └── record_002.json
-        # ├── scalers/
-        # │   ├── scaler_000.sc.mml     <- Scaler artifact (holds class definition if custom)
-        # │   ├── scaler_001.sc.mml
-        # │   └── scaler_002.sc.mml
-        # │
-        # ├── splitter_records/
-        # │   ├── record_000.json       <- SplitterRecord config
-        # │   ├── record_001.json
-        # │   └── record_002.json
-        # └── splitters/
-        #     ├── splitter_000.sc.mml   <- Splitter artifact (holds class definition if custom)
-        #     ├── splitter_001.sc.mml
-        #     └── splitter_002.sc.mml
         state: dict[str, Any] = {}
         load_dir = Path(load_dir)
 
         # Extract file mapping
-        file_mapping: dict[str, Any] = self._read_json(load_dir / "artifact.json")["files"]
+        file_mapping: dict[str, Any] = self._read_json(
+            load_dir / "artifact.json",
+        )["files"]
 
-        # Decode the SampleCollection
+        # ------------------------------------------------
+        # Restore SampleCollection
+        # ------------------------------------------------
         file_coll: Path = load_dir / file_mapping["sample_collection"]
         coll: SampleCollection = SampleCollection.load(file_coll)
         state["sample_collection"] = coll
@@ -444,44 +385,52 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
         # Add hash for later validation
         state["table_hash"] = hash_pyarrow_table(coll.table)
 
-        # Decode splits (configs only)
-        file_split_cfgs = load_dir / file_mapping["split_configs"]
-        split_cfgs: dict[str, dict[str, Any]] = self._read_json(file_split_cfgs)
-        state["split_cfgs"] = split_cfgs
+        # ------------------------------------------------
+        # Restore Split Configs
+        # ------------------------------------------------
+        file_split_cfgs: Path = load_dir / file_mapping["split_configs"]
+        state["split_configs"] = self._read_json(file_split_cfgs)
 
-        # Decode splitter records
-        files_split_recs: list[Path] = [(load_dir / "splitter_records" / x) for x in file_mapping["splitter_records"]]
-        split_rec_cfgs: list[dict[str, Any]] = [self._read_json(x) for x in files_split_recs]
+        # ------------------------------------------------
+        # Restore SplitterRecords
+        # ------------------------------------------------
+        files_split_recs: list[Path] = [
+            (load_dir / "splitter_records" / x)
+            for x in file_mapping["splitter_records"]
+        ]
         split_recs: list[SplitterRecord] = []
-        for rec_cfg in split_rec_cfgs:
-            # Instantiate splitter via LoadContext
-            splitter_obj = ctx.load_from_mml(mml_file=load_dir / rec_cfg["splitter_ref"])
+        for cfg_path in files_split_recs:
+            raw_cfg = self._read_json(cfg_path)
 
-            # Create record
-            split_recs.append(
-                SplitterRecord(
-                    splitter=splitter_obj,
-                    applied_to=FeatureSetSplitReference.from_config(rec_cfg["applied_to_config"]),
-                ),
-            )
+            # Restore any SymbolSpecs
+            rec_cfg = self._restore_json_cfg(data=raw_cfg, ctx=ctx)
+
+            # Remove reference to stored artifact (not used in reloading)
+            _ = rec_cfg.pop("_splitter_artifact", None)
+
+            # Construct SplitterRecord
+            split_recs.append(SplitterRecord.from_config(rec_cfg))
+
         state["splitter_records"] = split_recs
 
-        # Decode scaler records
-        files_scaler_recs: list[Path] = [(load_dir / "scaler_records" / x) for x in file_mapping["scaler_records"]]
-        scaler_rec_cfgs: list[dict[str, Any]] = [self._read_json(x) for x in files_scaler_recs]
+        # ------------------------------------------------
+        # Restore ScalerRecords
+        # ------------------------------------------------
+        files_scaler_recs: list[Path] = [
+            (load_dir / "scaler_records" / x) for x in file_mapping["scaler_records"]
+        ]
         scaler_recs: list[SplitterRecord] = []
-        for rec_cfg in scaler_rec_cfgs:
-            # Instantiate scaler via LoadContext
-            scaler_obj = ctx.load_from_mml(mml_file=load_dir / rec_cfg["scaler_ref"])
+        for cfg_path in files_scaler_recs:
+            raw_cfg = self._read_json(cfg_path)
 
-            # Need to remove scaler config, as we from_config
-            # will fail if scaler is not in SCALER_REGISTRY
-            _ = rec_cfg.pop("scaler_config", None)
+            # Restore any SymbolSpecs
+            rec_cfg = self._restore_json_cfg(data=raw_cfg, ctx=ctx)
 
-            # Create record
-            s_rec = ScalerRecord.from_config(rec_cfg)
-            s_rec = replace(s_rec, scaler_obj=scaler_obj)
-            scaler_recs.append(s_rec)
+            # Remove reference to stored artifact (not used in reloading)
+            _ = rec_cfg.pop("_scaler_artifact", None)
+
+            # Construct ScalerRecord
+            scaler_recs.append(ScalerRecord.from_config(rec_cfg))
 
         state["scaler_records"] = scaler_recs
 
