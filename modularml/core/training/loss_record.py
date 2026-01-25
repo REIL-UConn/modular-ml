@@ -19,7 +19,8 @@ class LossRecord:
 
     value: Any  # raw value output by AppliedLoss.compute
     label: str  # AppliedLoss.label
-    contributes_to_update: bool = False  # True = loss is a trainable loss, False = auxillary loss
+    # True = loss is a trainable loss, False = auxillary loss
+    contributes_to_update: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -30,8 +31,6 @@ class LossRecord:
 
 
 class LossCollection:
-    """Aggregate and query losses from multiple LossRecords."""
-
     def __init__(self, records: list[LossRecord]):
         self._records = records
 
@@ -74,7 +73,13 @@ class LossCollection:
         for label, recs in grouped.items():
             vals = [r.value for r in recs]
             agg = _sum(vals)
-            out[label] = float(agg.item()) if (as_float and hasattr(agg, "item")) else float(agg) if as_float else agg
+            out[label] = (
+                float(agg.item())
+                if (as_float and hasattr(agg, "item"))
+                else float(agg)
+                if as_float
+                else agg
+            )
         return out
 
     def __repr__(self) -> str:

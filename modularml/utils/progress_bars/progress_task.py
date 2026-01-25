@@ -51,7 +51,7 @@ class ProgressTask:
 
         progress.advance(self._task_id, n)
         if fields:
-            progress.update(self._task_id, fields=fields)
+            progress.update(self._task_id, **fields)
 
         # Must refresh layout manually
         mgr._refresh_layout()

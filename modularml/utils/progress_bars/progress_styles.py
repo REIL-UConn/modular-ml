@@ -53,11 +53,7 @@ style_training_loss = ProgressStyle(
         MofNCompleteColumn(),
         TextColumn("|"),
         TextColumn(
-            (
-                "loss={task.fields[loss_total]:.4f} "
-                "({task.fields[loss_train]:.3f}/"
-                "{task.fields[loss_aux]:.3f})"
-            ),
+            ("loss={task.fields[loss_total]:.6f}"),
             justify="right",
         ),
     ),
