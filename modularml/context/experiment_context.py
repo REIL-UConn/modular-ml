@@ -323,6 +323,10 @@ class ExperimentContext:
         # Update internal reference
         self._mg = graph
 
+    def remove_model_graph(self):
+        """Removes the registered ModelGraph from this context."""
+        self._mg = None
+
     # ================================================
     # Node Lookup
     # ================================================

@@ -419,7 +419,7 @@ class Optimizer(Configurable, Stateful):
 
     def set_state(self, state: dict[str, Any]) -> None:
         # Stash pending optimizer internal state; will be applied in build()
-        if state.get("is_built"):
+        if state.get("is_built") is not None:
             self._pending_state = state.get("internal")
 
     # ================================================

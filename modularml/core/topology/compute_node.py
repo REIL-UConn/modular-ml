@@ -259,6 +259,7 @@ class ComputeNode(GraphNode):
     # ================================================
     def get_config(self) -> dict[str, Any]:
         cfg = super().get_config()
+        cfg["graph_node_type"] = "ComputeNode"
         return cfg
 
     @classmethod
@@ -268,4 +269,10 @@ class ComputeNode(GraphNode):
         *,
         register: bool = True,
     ) -> ComputeNode:
+        if (
+            "graph_node_type" not in config
+            or config["graph_node_type"] != "ComputeNode"
+        ):
+            raise ValueError("Invalid config data for ComputeNode.")
+
         return cls(register=register, **config)

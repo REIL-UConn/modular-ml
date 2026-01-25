@@ -7,10 +7,12 @@ from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.sample_data import RoleData, SampleData
 from modularml.core.experiment.experiment_node import ExperimentNode
 from modularml.core.models import wrap_model
+from modularml.core.models.base_model import BaseModel
 from modularml.core.references.experiment_reference import ExperimentNodeReference
 from modularml.core.references.featureset_reference import FeatureSetReference
 from modularml.core.topology.compute_node import ComputeNode, TForward
 from modularml.core.training.loss_record import LossCollection, LossRecord
+from modularml.core.training.optimizer import Optimizer
 from modularml.utils.data.data_format import DataFormat, get_data_format_for_backend
 from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
 from modularml.utils.errors.exceptions import (
@@ -25,9 +27,7 @@ from modularml.utils.topology.graph_search_utils import find_upstream_featureset
 
 if TYPE_CHECKING:
     from modularml.context.execution_context import ExecutionContext
-    from modularml.core.models.base_model import BaseModel
     from modularml.core.training.applied_loss import AppliedLoss
-    from modularml.core.training.optimizer import Optimizer
 
 tf = check_tensorflow()
 torch = check_torch()
@@ -51,6 +51,9 @@ class ModelNode(ComputeNode):
         model: BaseModel | Any,
         upstream_ref: ExperimentNode | ExperimentNodeReference,
         optimizer: Optimizer | None = None,
+        *,
+        node_id: str | None = None,
+        register: bool = True,
     ):
         """
         Initialize a ModelNode.
@@ -64,6 +67,10 @@ class ModelNode(ComputeNode):
                 Reference to the upstream node.
             optimizer (Optional[Optimizer]):
                 Optimizer to use during training (optional).
+            node_id (str, optional):
+                Used only for de-serialization.
+            register (bool, optional):
+                Used only for de-serialization.
 
         """
         ref = None
@@ -90,7 +97,12 @@ class ModelNode(ComputeNode):
             msg = f"`upstream_ref` must be of type ExperimentReference or ExperimentNode. Received: {type(upstream_ref)}."
             raise TypeError(msg)
 
-        super().__init__(label=label, upstream_refs=ref)
+        super().__init__(
+            label=label,
+            upstream_refs=ref,
+            node_id=node_id,
+            register=register,
+        )
 
         # Set model (cast to BaseModel if explicit subclass not provided)
         self._model: BaseModel = wrap_model(model)
@@ -772,3 +784,93 @@ class ModelNode(ComputeNode):
 
         msg = f"Unknown backend: {self.backend}"
         raise ValueError(msg)
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Retrieve the configuration details of this ModelNode instance.
+
+        This does not contain state information of the underlying model or optimizer.
+        """
+        cfg = super().get_config()
+        cfg.update(
+            {
+                "model": self._model.get_config(),
+                "optimizer": None
+                if self._optimizer is None
+                else self._optimizer.get_config(),
+                "frozen": self._freeze,
+                "graph_node_type": "ModelNode",
+            },
+        )
+        return cfg
+
+    @classmethod
+    def from_config(
+        cls,
+        config: dict[str, Any],
+        *,
+        register: bool = True,
+    ) -> ModelNode:
+        """
+        Reconstructs a ModelNode from configuration details.
+
+        This does not restore state information of the underlying model or optimizer.
+        """
+        if "graph_node_type" not in config or config["graph_node_type"] != "ModelNode":
+            raise ValueError("Invalid config data for ModelNode.")
+
+        # Rebuild model (no weights)
+        model = BaseModel.from_config(config["model"])
+
+        # Rebuild optimizer
+        optimizer = None
+        optimizer_cfg = config.get("optimizer")
+        if optimizer_cfg is not None:
+            optimizer = Optimizer.from_config(optimizer_cfg)
+
+        # Create ModelNode
+        node = cls(
+            label=config["label"],
+            model=model,
+            upstream_ref=config["upstream_refs"][0]
+            if config["upstream_refs"]
+            else None,
+            optimizer=optimizer,
+            node_id=config.get("node_id"),
+            register=register,
+        )
+
+        # Restore downstream refs explicitly
+        node.set_downstream_refs(config.get("downstream_refs", []))
+
+        # Restore frozen flag
+        node._freeze = config.get("frozen", False)
+
+        return node
+
+    # ================================================
+    # Stateful
+    # ================================================
+    def get_state(self) -> dict[str, Any]:
+        state = {
+            "model": self._model.get_state(),
+            "optimizer": None
+            if self._optimizer is None
+            else self._optimizer.get_state(),
+            "frozen": self._freeze,
+        }
+        return state
+
+    def set_state(self, state: dict[str, Any]) -> None:
+        # Model weights can always be restored
+        self._model.set_state(state["model"])
+
+        # Optimizer state may need to wait until build()
+        if self._optimizer is not None and state.get("optimizer") is not None:
+            self._optimizer.set_state(state["optimizer"])
+
+        # Restore freeze flag state
+        self._freeze = state.get("frozen", False)

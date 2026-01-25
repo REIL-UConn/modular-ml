@@ -96,7 +96,7 @@ class ModularMLBannerFormatter(ModularMLFormatter, _BannerMixin):
         return "\n".join(lines)
 
 
-class WarningFormatter(logging.Formatter):
+class WarningFormatter(ModularMLFormatter, _BannerMixin):
     """
     Formatter for ModularML warnings using a banner-style layout.
 
@@ -121,35 +121,9 @@ class WarningFormatter(logging.Formatter):
     def _short_location(filename: str) -> str:
         return Path(filename).name
 
-    def _supports_color(self) -> bool:
-        """Return True if the current stdout supports ANSI color codes."""
-        import sys
-
-        if not sys.stdout.isatty():
-            return False
-        try:
-            import os
-
-            return os.environ.get("TERM") not in (None, "dumb")
-        except Exception:  # noqa: BLE001
-            return False
-
     def _red(self, text: str) -> str:
         """Color text red if supported."""
-        if not self._supports_color():
-            return text
-        return f"\033[31m{text}\033[0m"
-
-    def _separator(self, label: str | None = None) -> str:
-        """Create a separator line, optionally with a centered label."""
-        if label:
-            core = f" {label} "
-            side = (self.max_width - len(core)) // 2
-            line = "─" * side + core + "─" * (self.max_width - side - len(core))
-        else:
-            line = "─" * self.max_width
-
-        return self._red(line)
+        return self._color(text=text, code=31)
 
     def format(self, record: logging.LogRecord) -> str:
         """

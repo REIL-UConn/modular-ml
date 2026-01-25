@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import logging
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
 
+from modularml.core.experiment.experiment_node import ExperimentNode
 from modularml.core.io.packaged_code_loaders.default_loader import (
     default_packaged_code_loader,
 )
@@ -13,11 +15,14 @@ from modularml.core.io.protocols import Configurable, Stateful
 from modularml.core.io.serialization_policy import SerializationPolicy
 from modularml.core.io.symbol_registry import symbol_registry
 from modularml.core.io.symbol_spec import SymbolSpec
+from modularml.utils.logging.logger import get_logger
 
 if TYPE_CHECKING:
     from modularml.core.io.serializer import LoadContext, SaveContext
 
 T = TypeVar("T")
+
+logger = get_logger(level=logging.INFO)
 
 
 class BaseHandler(Generic[T]):
@@ -168,11 +173,14 @@ class BaseHandler(Generic[T]):
             json_cfg = self.decode_config(load_dir=load_dir, ctx=ctx)
 
             # Restore any non-JSON elements
-            config = self._restore_json_cfg(
-                data=json_cfg,
-                ctx=ctx,
-            )
-            obj = cls.from_config(config)
+            config = self._restore_json_cfg(data=json_cfg, ctx=ctx)
+
+            # Delay node registration, if supported
+            # Registration will be handled by collision checking later
+            if isinstance(cls, ExperimentNode):
+                obj = cls.from_config(config, register=False)
+            else:
+                obj = cls.from_config(config)
         else:
             obj = cls()
 
@@ -180,6 +188,9 @@ class BaseHandler(Generic[T]):
         if isinstance(obj, Stateful):
             state = self.decode_state(load_dir=load_dir, ctx=ctx)
             obj.set_state(state)
+
+        # Collision checking
+        obj = self.handle_node_collision(obj=obj, ctx=ctx)
 
         return obj
 
@@ -256,32 +267,6 @@ class BaseHandler(Generic[T]):
     # ================================================
     # Convenience Methods
     # ================================================
-    def has_config(self, obj: T) -> bool:
-        """
-        Return True if object has config that should be serialized.
-
-        Args:
-            obj (T): Object to inspect.
-
-        Returns:
-            bool: True if Configurable.
-
-        """
-        return isinstance(obj, Configurable)
-
-    def has_state(self, obj: T) -> bool:
-        """
-        Return True if object has state that should be serialized.
-
-        Args:
-            obj (T): Object to inspect.
-
-        Returns:
-            bool: True if Stateful.
-
-        """
-        return isinstance(obj, Stateful)
-
     def get_symbol_spec(self, obj_or_cls: Any, *, ctx: SaveContext) -> SymbolSpec:
         """
         Gets the SymbolSpec instance for a given object and SaveContext.
@@ -310,6 +295,201 @@ class BaseHandler(Generic[T]):
 
         # Create spec (internally packages code only if needed)
         return ctx.make_symbol_spec(symbol=obj_or_cls, policy=policy)
+
+    def handle_node_collision(self, obj: Any, *, ctx: LoadContext) -> Any:
+        """
+        Applies collision handling logic if `obj` is an `ExperimentNode`.
+
+        Description:
+            If same node_id exists, perform the following checks:
+            1. If same label + same state -> reuse existing
+            2. If different label or different state -> override or fork
+                - Override = replace existing node_id reference in ExperimentContext
+                with new object
+                - Fork = generate new node_id for reloaded object and register
+        """
+        from modularml.context.experiment_context import ExperimentContext
+        from modularml.core.experiment.experiment_node import (
+            ExperimentNode,
+            generate_node_id,
+        )
+
+        # If not ExperimentNode, return object
+        if not isinstance(obj, ExperimentNode):
+            return obj
+
+        # ------------------------------------------------
+        # Collision Checking
+        #  If same node_id exists, perform the following checks:
+        #  1. If same label + same state -> reuse existing
+        #  2. If different label or different state -> override or fork
+        #     - Override = replace existing node_id reference in ExperimentContext
+        #       with new object
+        #     - Fork = generate new node_id for reloaded object and register
+        # ------------------------------------------------
+        exp_ctx: ExperimentContext = ExperimentContext.get_active()
+        if exp_ctx.has_node(node_id=obj.node_id):
+            cls_name = type(obj).__qualname__
+            existing = exp_ctx.get_node(node_id=obj.node_id)
+
+            # Case 1
+            if isinstance(existing, type(obj)) and existing == obj:
+                # Early-return existing node
+                msg = (
+                    f"Loaded {cls_name} is identical to '{existing.label}' in "
+                    f"the existing ExperimentContext. Returning '{existing}'."
+                )
+                logger.info(
+                    msg=msg,
+                    extra={
+                        "title_desc": "Node ID Collision",
+                        "omit_origin": True,
+                    },
+                )
+                return existing
+
+            # Case 2
+            if ctx.overwrite_collision:
+                # Remove existing from ExperimentContext
+                msg = (
+                    f"The loaded {cls_name} has an overlapping node ID with existing "
+                    f"{cls_name} '{existing.label}'. '{existing.label}' will be "
+                    "overwritten in the active ExperimentContext."
+                )
+                logger.info(
+                    msg=msg,
+                    extra={
+                        "title_desc": "Node ID Collision",
+                        "omit_origin": True,
+                    },
+                )
+                _ = exp_ctx.remove_node(
+                    node_id=existing.node_id,
+                    error_if_missing=True,
+                )
+            else:
+                msg = (
+                    f"The loaded {cls_name} has an overlapping node ID with existing "
+                    f"{cls_name} '{existing.label}'. A new node ID will be assigned "
+                    f"to the loaded {cls_name}."
+                )
+                logger.info(
+                    msg=msg,
+                    extra={
+                        "title_desc": "Node ID Collision",
+                        "omit_origin": True,
+                    },
+                )
+                # Update node_id of new node
+                obj._node_id = generate_node_id()
+
+        # Register new node (we allow same labels)
+        exp_ctx.register_experiment_node(
+            node=obj,
+            check_label_collision=False,
+        )
+
+        return obj
+
+    def handle_model_graph_collision(
+        self,
+        obj: Any,
+        *,
+        ctx: LoadContext,
+    ) -> Any:
+        """
+        Applies collision handling logic if `obj` is a `ModelGraph`.
+
+        Description:
+            If same node_id exists, perform the following checks:
+            1. If same label + same state -> reuse existing
+            2. If different label or different state -> override or fork
+                - Override = replace existing node_id reference in ExperimentContext
+                with new object
+                - Fork = generate new node_id for reloaded object and register
+        """
+        from modularml.context.experiment_context import ExperimentContext
+        from modularml.core.experiment.experiment_node import (
+            ExperimentNode,
+            generate_node_id,
+        )
+
+        # If not ExperimentNode, return object
+        if not isinstance(obj, ExperimentNode):
+            return obj
+
+        # ------------------------------------------------
+        # Collision Checking
+        #  If same node_id exists, perform the following checks:
+        #  1. If same label + same state -> reuse existing
+        #  2. If different label or different state -> override or fork
+        #     - Override = replace existing node_id reference in ExperimentContext
+        #       with new object
+        #     - Fork = generate new node_id for reloaded object and register
+        # ------------------------------------------------
+        exp_ctx: ExperimentContext = ExperimentContext.get_active()
+        if exp_ctx.has_node(node_id=obj.node_id):
+            cls_name = type(obj).__qualname__
+            existing = exp_ctx.get_node(node_id=obj.node_id)
+
+            # Case 1
+            if isinstance(existing, type(obj)) and existing == obj:
+                # Early-return existing node
+                msg = (
+                    f"Loaded {cls_name} is identical to '{existing.label}' in "
+                    f"the existing ExperimentContext. Returning '{existing}'."
+                )
+                logger.info(
+                    msg=msg,
+                    extra={
+                        "title_desc": "Node ID Collision",
+                        "omit_origin": True,
+                    },
+                )
+                return existing
+
+            # Case 2
+            if ctx.overwrite_collision:
+                # Remove existing from ExperimentContext
+                msg = (
+                    f"The loaded {cls_name} has an overlapping ID with existing "
+                    f"{cls_name} '{existing.label}'. '{existing.label}' will be "
+                    "overwritten in the active ExperimentContext."
+                )
+                logger.info(
+                    msg=msg,
+                    extra={
+                        "title_desc": "Node ID Collision",
+                        "omit_origin": True,
+                    },
+                )
+                _ = exp_ctx.remove_node(
+                    node_id=existing.node_id,
+                    error_if_missing=True,
+                )
+            else:
+                msg = (
+                    f"The loaded {cls_name} has an overlapping node ID with existing "
+                    f"{cls_name} '{existing.label}'. A new node ID will be assigned "
+                    f"to the loaded {cls_name}."
+                )
+                logger.info(
+                    msg=msg,
+                    extra={
+                        "title_desc": "Node ID Collision",
+                        "omit_origin": True,
+                    },
+                )
+                # Update node_id of new node
+                obj._node_id = generate_node_id()
+
+        # Register new node (we allow same labels)
+        exp_ctx.register_experiment_node(
+            node=obj,
+            check_label_collision=False,
+        )
+
+        return obj
 
     # ================================================
     # JSON-based config encode/decode
@@ -394,6 +574,7 @@ class BaseHandler(Generic[T]):
         data: dict[str, Any],
         *,
         ctx: LoadContext,
+        register: bool = True,
     ):
         """Restores any non-JSON items in the config file."""
 
@@ -412,7 +593,7 @@ class BaseHandler(Generic[T]):
 
             # If a configurable instance
             if isinstance(val, dict) and val.get("__mml_object__"):
-                cls = symbol_registry.resolve_symbol(
+                cls: Configurable = symbol_registry.resolve_symbol(
                     spec=SymbolSpec.from_dict(val["class"]),
                     allow_packaged_code=ctx.allow_packaged_code,
                     packaged_code_loader=lambda source_ref: default_packaged_code_loader(
@@ -422,7 +603,13 @@ class BaseHandler(Generic[T]):
                     ),
                 )
                 config = self._restore_json_cfg(data=val["config"], ctx=ctx)
-                return cls.from_config(config)
+
+                if isinstance(cls, ExperimentNode):
+                    obj = cls.from_config(config, register=register)
+                else:
+                    obj = cls.from_config(config)
+
+                return obj
 
             # If a general mapping instance
             if isinstance(val, Mapping):

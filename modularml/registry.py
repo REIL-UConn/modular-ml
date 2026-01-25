@@ -3,6 +3,8 @@ from .core.transforms import registry as transform_registry
 
 from .core.sampling import registry as sampler_registry
 from .core.data import registry as data_registry
+from .core.topology import registry as topology_registry
+from .core.references import registry as reference_registry
 from .core.models import registry as model_registry
 
 from .core.training import registry as training_registry
@@ -24,6 +26,14 @@ def register_all():
     # Register FeatureSet
     data_registry.register_builtin()
     data_registry.register_kinds()
+
+    # Register all node types
+    topology_registry.register_builtin()
+    topology_registry.register_kinds()
+
+    # Register all reference types
+    reference_registry.register_builtin()
+    reference_registry.register_kinds()
 
     # Register base models
     model_registry.register_builtin()

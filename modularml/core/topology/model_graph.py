@@ -2,15 +2,19 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from collections.abc import Iterable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from modularml.context.experiment_context import ExperimentContext
+from modularml.core.io.protocols import Configurable, Stateful
 from modularml.core.references.featureset_reference import FeatureSetReference
 from modularml.core.topology.compute_node import ComputeNode, TForward
 from modularml.core.topology.graph_node import GraphNode
 from modularml.core.topology.model_node import ModelNode
 from modularml.core.topology.protocols import Evaluable, Forwardable, Trainable
 from modularml.core.training.loss_record import LossCollection, LossRecord
+from modularml.core.training.optimizer import Optimizer
+from modularml.utils.data.comparators import deep_equal
 from modularml.utils.data.data_format import DataFormat, get_data_format_for_backend
 from modularml.utils.data.dummy_data import make_dummy_sample_data
 from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
@@ -28,8 +32,6 @@ from modularml.utils.topology.graph_search_utils import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from modularml.context.execution_context import ExecutionContext
     from modularml.core.data.batch import Batch
     from modularml.core.data.sample_data import SampleData
@@ -38,19 +40,20 @@ if TYPE_CHECKING:
         GraphNodeReference,
     )
     from modularml.core.training.applied_loss import AppliedLoss
-    from modularml.core.training.optimizer import Optimizer
 
 tf = check_tensorflow()
 torch = check_torch()
 
 
-class ModelGraph:
+class ModelGraph(Configurable, Stateful):
     def __init__(
         self,
         nodes: list[str | GraphNode] | None,
         optimizer: Optimizer | None = None,
-        label: str = "model-graph-0",
+        label: str = "model-graph",
+        *,
         ctx: ExperimentContext | None = None,
+        register: bool = True,
     ):
         """
         Initialize a ModelGraph from a list of modular nodes and an optional global optimizer.
@@ -73,6 +76,9 @@ class ModelGraph:
                 The ExperimentContext this ModelGraph should exist within. If None, uses the
                 active ExperimentContext. Defaults to None.
 
+            register (bool, optional):
+                Used only for de-serialization.
+
         Raises:
             ValueError:
                 If duplicate node labels are provided or if graph connectivity is invalid.
@@ -80,8 +86,10 @@ class ModelGraph:
                 If required optimizers are missing or if backends are incompatible.
 
         """
+        # Register to context
         self.exp_ctx = ctx or ExperimentContext.get_active()
-        self.exp_ctx.register_model_graph(self)
+        if register:
+            self.exp_ctx.register_model_graph(self)
 
         # Update default label to next available name
         self.label = label
@@ -174,6 +182,21 @@ class ModelGraph:
     @property
     def is_built(self) -> bool:
         return self._built
+
+    def __eq__(self, other: ModelGraph):
+        if not isinstance(other, ModelGraph):
+            msg = f"Cannot compare equality between ModelGraph and {type(other)}"
+            raise TypeError(msg)
+
+        if not self.label == other.label:
+            return False
+
+        if not deep_equal(self.get_config(), other.get_config()):
+            return False
+
+        return deep_equal(self.get_state(), other.get_state())
+
+    __hash__ = None
 
     # ================================================
     # Error Checking Methods
@@ -1025,6 +1048,7 @@ class ModelGraph:
         nodes_to_include: list[str] | None = None,
         *,
         include_only_unfrozen: bool = True,
+        force: bool = False,
     ):
         """
         Builds the global optimizer with parameters from the specified nodes.
@@ -1039,6 +1063,11 @@ class ModelGraph:
                 will be used for parameter extraction. If False, all nodes in
                 `nodes_to_include` are used (i.e., ignores any frozen state).
 
+            force (bool, optional):
+                If False, the optimizer will only be rebuilt if the node
+                parameters the optimizer relies on, has changed. Otherwise,
+                the optimizer will be forcefully rebuilt.
+
         """
         if self._optimizer is None:
             msg = "No global optimizer exists for the graph."
@@ -1052,7 +1081,7 @@ class ModelGraph:
         new_node_ids = info["contributing_nodes"]
 
         # Rebuild only if contributing nodes changed
-        if self._opt_built_from_node_ids == new_node_ids:
+        if (self._opt_built_from_node_ids == new_node_ids) and not force:
             return
 
         # Build optimizer
@@ -1189,7 +1218,7 @@ class ModelGraph:
 
         # Build/rebuild optimizer
         if self._optimizer is not None:
-            self._build_optimizer()
+            self._build_optimizer(force=force)
 
         # Update flag
         self._built = True
@@ -1694,6 +1723,169 @@ class ModelGraph:
         for n_id, lc in lcs_by_node.items():
             ctx.set_losses(node_id=n_id, loss=lc)
 
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Retrieve the configuration details of this ModelGraph instance.
+
+        This does not contain state information of any underlying models or optimizers.
+        """
+        return {
+            "label": self.label,
+            "nodes": [self.nodes[n_id].get_config() for n_id in self._sorted_node_ids],
+            "optimizer": None
+            if self._optimizer is None
+            else self._optimizer.get_config(),
+        }
+
+    @classmethod
+    def from_config(
+        cls,
+        config: dict[str, Any],
+        *,
+        register: bool = True,
+    ) -> ModelGraph:
+        """
+        Reconstructs a ModelGraph from configuration details.
+
+        This does not restore state information of any underlying models or optimizers.
+        """
+        ctx = ExperimentContext.get_active()
+
+        # Rebuild nodes first (must register them to use a ModelGraph)
+        nodes: list[GraphNode] = []
+        for node_cfg in config["nodes"]:
+            node = GraphNode.from_config(config=node_cfg, register=register)
+            nodes.append(node)
+
+        # Rebuild optimizer
+        optimizer = None
+        optimizer_cfg = config.get("optimizer")
+        if optimizer_cfg is not None:
+            optimizer = Optimizer.from_config(optimizer_cfg)
+
+        # Create ModelGraph
+        mg = cls(
+            nodes=nodes,
+            optimizer=optimizer,
+            label=config.get("label", "model-graph"),
+            ctx=ctx,
+            register=register,
+        )
+
+        return mg
+
+    # ================================================
+    # Stateful
+    # ================================================
+    def get_state(self) -> dict[str, Any]:
+        state = {
+            "nodes": {
+                n_id: self.nodes[n_id].get_state()
+                for n_id in self._sorted_node_ids
+                if isinstance(self.nodes[n_id], Stateful)
+            },
+            "optimizer": None
+            if self._optimizer is None
+            else self._optimizer.get_state(),
+            "opt_built_from_node_ids": self._opt_built_from_node_ids,
+            "is_built": self.is_built,
+        }
+        return state
+
+    def set_state(self, state: dict[str, Any]) -> None:
+        # Restore node state
+        for n_id, n_state in state.get("nodes", {}).items():
+            node = self._nodes[n_id]
+            if isinstance(node, Stateful):
+                node.set_state(n_state)
+
+        # Restore optimizer
+        if self._optimizer is not None and state.get("optimizer") is not None:
+            self._optimizer.set_state(state["optimizer"])
+        opt_nodes = state.get("opt_built_from_node_ids")
+        self._opt_built_from_node_ids = None if opt_nodes is None else set(opt_nodes)
+
+        if state.get("is_built", False):
+            self._build_optimizer(
+                self._opt_built_from_node_ids,
+                include_only_unfrozen=False,
+                force=True,
+            )
+            self._built = True
+
+    # ================================================
+    # Serialization
+    # ================================================
+    def save(self, filepath: Path, *, overwrite: bool = False) -> Path:
+        """
+        Serializes this ModelGraph to the specified filepath.
+
+        Args:
+            filepath (Path):
+                File location to save to. Note that the suffix may be overwritten
+                to enforce the ModularML file extension schema.
+            overwrite (bool, optional):
+                Whether to overwrite any existing file at the save location.
+                Defaults to False.
+
+        Returns:
+            Path: The actual filepath to write the ModelGraph is saved.
+
+        """
+        from modularml.core.io.serialization_policy import SerializationPolicy
+        from modularml.core.io.serializer import serializer
+
+        return serializer.save(
+            self,
+            filepath,
+            policy=SerializationPolicy.BUILTIN,
+            overwrite=overwrite,
+        )
+
+    @classmethod
+    def load(
+        cls,
+        filepath: Path,
+        *,
+        allow_packaged_code: bool = False,
+        overwrite: bool = False,
+    ) -> ModelGraph:
+        """
+        Load a FeaturModelGrapheSet from file.
+
+        Args:
+            filepath (Path):
+                File location of a previously saved ModelGraph.
+            allow_packaged_code : bool
+                Whether bundled code execution is allowed.
+            overwrite (bool):
+                Whether to replace any colliding node registrations in ExperimentContext
+                If False, new IDs are assigned to the reloaded nodes comprising the
+                graph. Otherwise, any collision are overwritten with the saved nodes.
+                Defaults to False.
+                It is recommended to only reload a ModelGraph into a new/empty
+                `ExperimentContext`.
+
+        Returns:
+            ModelGraph: The reloaded ModelGraph.
+
+        """
+        from modularml.core.io.serializer import _enforce_file_suffix, serializer
+
+        # Append proper sufficx only if no suffix is given
+        if Path(filepath).suffix == "":
+            filepath = _enforce_file_suffix(path=filepath, cls=cls)
+
+        return serializer.load(
+            filepath,
+            allow_packaged_code=allow_packaged_code,
+            overwrite=overwrite,
+        )
+
+    # TODO:
     # TODO: fix below
     # ================================================
     # Checkpointing

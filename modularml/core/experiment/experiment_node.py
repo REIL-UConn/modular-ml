@@ -104,5 +104,10 @@ class ExperimentNode(Summarizable, Configurable):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any], *, register: bool = True) -> ExperimentNode:
+    def from_config(
+        cls,
+        config: dict[str, Any],
+        *,
+        register: bool = True,
+    ) -> ExperimentNode:
         return cls(register=register, **config)

@@ -18,8 +18,6 @@ from modularml.utils.errors.exceptions import GraphNodeInputError, GraphNodeOutp
 from modularml.utils.logging.warnings import warn
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from modularml.core.data.featureset import FeatureSet
     from modularml.core.data.featureset_view import FeatureSetView
     from modularml.core.sampling.base_sampler import BaseSampler
@@ -631,53 +629,21 @@ class GraphNode(ABC, ExperimentNode):
 
     @classmethod
     def from_config(cls, config: dict[str, Any], *, register: bool = True) -> GraphNode:
-        return cls(register=register, **config)
+        # Create GraphNode instance if subclass not specified
+        if "graph_node_type" not in config:
+            return cls(register=register, **config)
 
-    # ================================================
-    # Serialization
-    # ================================================
-    def save(self, filepath: Path, *, overwrite: bool = False) -> Path:
-        """
-        Serializes this GraphNode to the specified filepath.
+        # Create subclasses directly
+        g_type = config["graph_node_type"]
+        if g_type == "ModelNode":
+            from modularml.core.topology.model_node import ModelNode
 
-        Args:
-            filepath (Path):
-                File location to save to. Note that the suffix may be overwritten
-                to enforce the ModularML file extension schema.
-            overwrite (bool, optional):
-                Whether to overwrite any existing file at the save location.
-                Defaults to False.
+            return ModelNode.from_config(config=config, register=register)
 
-        Returns:
-            Path: The actual filepath to write the FeatureSet is saved.
+        if g_type == "ComputeNode":
+            from modularml.core.topology.compute_node import ComputeNode
 
-        """
-        raise NotImplementedError
+            return ComputeNode.from_config(config=config, register=register)
 
-    @classmethod
-    def load(
-        cls,
-        filepath: Path,
-        *,
-        allow_packaged_code: bool = False,
-        overwrite: bool = True,
-    ) -> GraphNode:
-        """
-        Load a GraphNode from file.
-
-        Args:
-            filepath (Path):
-                File location of a previously saved GraphNode.
-            allow_packaged_code : bool
-                Whether bundled code execution is allowed.
-            overwrite (bool):
-                Whether to replace any colliding node registrations in ExperimentContext
-                If False, a new node_id is assigned to the reloaded GraphNode. Otherwise,
-                the existing GraphNode is removed from the ExperimentContext registry.
-                Defaults to True.
-
-        Returns:
-            GraphNode: The reloaded GraphNode.
-
-        """
-        raise NotImplementedError
+        msg = f"Unknown GraphNode subclass: {g_type}."
+        raise ValueError(msg)

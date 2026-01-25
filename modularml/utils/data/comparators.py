@@ -1,6 +1,18 @@
 import numpy as np
 
+from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
 from modularml.utils.nn.backend import Backend
+
+torch = check_torch()
+tf = check_tensorflow()
+
+
+def arrays_equal(a, b, *, rtol=1e-6, atol=1e-8):
+    if a.shape != b.shape:
+        return False
+    if a.dtype != b.dtype:
+        return False
+    return np.allclose(a, b, rtol=rtol, atol=atol)
 
 
 def deep_equal(a, b):
@@ -8,13 +20,22 @@ def deep_equal(a, b):
     if a is b:
         return True
 
-    # NumPy array
-    if isinstance(a, np.ndarray) or isinstance(b, np.ndarray):
-        return (
-            isinstance(a, np.ndarray)
-            and isinstance(b, np.ndarray)
-            and np.array_equal(a, b)
+    # Arrays & tensors
+    if isinstance(a, np.ndarray) and isinstance(b, np.ndarray):
+        return arrays_equal(a, b, rtol=1e-6, atol=1e-8)
+    if (
+        torch is not None
+        and isinstance(a, torch.Tensor)
+        and isinstance(b, torch.Tensor)
+    ):
+        return arrays_equal(
+            a.detach().cpu().numpy(),
+            b.detach().cpu().numpy(),
+            rtol=1e-6,
+            atol=1e-8,
         )
+    if tf is not None and isinstance(a, tf.Tensor) and isinstance(b, tf.Tensor):
+        return arrays_equal(a.numpy(), b.numpy(), rtol=1e-6, atol=1e-8)
 
     # Primitive types
     if isinstance(a, (int, float, str, bool)) or a is None:
@@ -23,7 +44,6 @@ def deep_equal(a, b):
     # Dictionary
     if isinstance(a, dict) and isinstance(b, dict):
         if set(a.keys()) != set(b.keys()):
-            print("keys differ")
             return False
         return all(deep_equal(a[k], b[k]) for k in a)
 
