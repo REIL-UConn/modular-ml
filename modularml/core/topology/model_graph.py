@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from modularml.context.experiment_context import ExperimentContext
+from modularml.core.io.checkpoint import Checkpoint
 from modularml.core.io.protocols import Configurable, Stateful
 from modularml.core.references.featureset_reference import FeatureSetReference
 from modularml.core.topology.compute_node import ComputeNode, TForward
@@ -1502,7 +1503,7 @@ class ModelGraph(Configurable, Stateful):
                 dependencies are included automatically.
 
         """
-        # TODO
+        # TODO: not implemented yet
         msg = "Training with a scikit global optimizer not implemented yet."
         raise NotImplementedError(msg)
 
@@ -1885,24 +1886,84 @@ class ModelGraph(Configurable, Stateful):
             overwrite=overwrite,
         )
 
-    # TODO:
-    # TODO: fix below
     # ================================================
     # Checkpointing
     # ================================================
-    def save_checkpoint(self, path: str) -> Path:
+    def save_checkpoint(
+        self,
+        filepath: Path,
+        *,
+        overwrite: bool = False,
+    ) -> Path:
         """
         Save full ModelGraph state.
 
         Args:
-            path (str | Path): Filename to save to.
+            filepath (Path):
+                File location to save to. Note that the suffix may be overwritten
+                to enforce the ModularML file extension schema.
+            overwrite (bool, optional):
+                Whether to overwrite any existing file at the save location.
+                Defaults to False.
 
         Returns:
-            Path: Final path of saved ModelGraph state.
+            Path: Final path of saved ModelGraph checkpoint.
 
         """
-        raise NotImplementedError
+        from modularml.core.io.serialization_policy import SerializationPolicy
+        from modularml.core.io.serializer import serializer
 
-    def load_checkpoint(self, path: str):
-        """Restore ModelGraph state from checkpoint."""
-        raise NotImplementedError
+        ckpt = Checkpoint()
+        ckpt.add_entry(key="modelgraph", obj=self)
+        for n_id, node in self.nodes.items():
+            ckpt.add_entry(key=f"nodes:{n_id}", obj=node)
+        if self._optimizer is not None:
+            ckpt.add_entry(key="optimizer", obj=self._optimizer)
+
+        return serializer.save(
+            ckpt,
+            filepath,
+            policy=SerializationPolicy.BUILTIN,
+            overwrite=overwrite,
+        )
+
+    def load_checkpoint(self, filepath: Path) -> ModelGraph:
+        """
+        Restore ModelGraph state from checkpoint.
+
+        Args:
+            filepath (Path):
+                File location of a previously saved ModelGraph checkpoint.
+
+        Returns:
+            self: The ModelGraph restored to the checkpoint state.
+
+        """
+        from modularml.core.io.serializer import _enforce_file_suffix, serializer
+
+        # Append proper suffix only if no suffix is given
+        if Path(filepath).suffix == "":
+            filepath = _enforce_file_suffix(path=filepath, cls=Checkpoint)
+
+        # Load checkpoint
+        ckpt: Checkpoint = serializer.load(filepath)
+
+        # Set node states
+        n_states = {
+            k.split(":")[-1]: v.entry_state
+            for k, v in ckpt.entries.items()
+            if k.startswith("nodes")
+        }
+        for n_id, n_state in n_states.items():
+            self.nodes[n_id].set_state(n_state)
+
+        # Set optimizer state
+        if "optimizer" in ckpt.entries:
+            self._optimizer.set_state(ckpt.entries["optimizer"].entry_state)
+
+        # Update model graph state
+        mg_state = ckpt.entries["modelgraph"].entry_state
+        self._opt_built_from_node_ids = mg_state["opt_built_from_node_ids"]
+        self._built = mg_state["is_built"]
+
+        return self

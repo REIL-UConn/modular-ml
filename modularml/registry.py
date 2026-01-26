@@ -1,6 +1,7 @@
 from .core.splitting import registry as splitting_registry
 from .core.transforms import registry as transform_registry
 
+from .core.io import registry as io_registry
 from .core.sampling import registry as sampler_registry
 from .core.data import registry as data_registry
 from .core.topology import registry as topology_registry
@@ -11,6 +12,10 @@ from .core.training import registry as training_registry
 
 
 def register_all():
+    # Registers io classes
+    io_registry.register_builtin()
+    io_registry.register_kinds()
+
     # Registers all splitters
     splitting_registry.register_builtin()
     splitting_registry.register_kinds()
