@@ -47,7 +47,6 @@ def register_builtin():
         key="FeatureSetColumnReference",
         cls=FeatureSetColumnReference,
     )
-
     symbol_registry.register_builtin_class(
         key="ModelOutputReference",
         cls=ModelOutputReference,

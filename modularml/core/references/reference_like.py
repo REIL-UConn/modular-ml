@@ -20,3 +20,30 @@ class ReferenceLike(Protocol):
         self,
         ctx: ExperimentContext | ExecutionContext | None = None,
     ) -> Any: ...
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return configuration required to reconstruct this reference.
+
+        Returns:
+            dict[str, Any]: Reference configuration.
+
+        """
+        ...
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> ReferenceLike:
+        """
+        Construct a reference from configuration.
+
+        Args:
+            config (dict[str, Any]): Reference configuration.
+
+        Returns:
+            ReferenceLike: Reconstructed reference..
+
+        """
+        ...

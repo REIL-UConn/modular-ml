@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from modularml.context.execution_context import ExecutionContext
 from modularml.core.references.execution_reference import ExecutionReference
@@ -44,3 +46,35 @@ class ModelOutputReference(ExecutionReference):
             role=role,
             domain=self.domain,
         )
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return configuration required to reconstruct this reference.
+
+        Returns:
+            dict[str, Any]: Reference configuration.
+
+        """
+        return {
+            "node_label": self.node_label,
+            "node_id": self.node_id,
+            "role": self.role,
+            "domain": self.domain,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> ModelOutputReference:
+        """
+        Construct a reference from configuration.
+
+        Args:
+            config (dict[str, Any]): Reference configuration.
+
+        Returns:
+            ReferenceLike: Reconstructed reference..
+
+        """
+        return cls(**config)
