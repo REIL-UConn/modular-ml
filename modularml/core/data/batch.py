@@ -29,8 +29,14 @@ class Batch(Summarizable):
     """
     Immutable, role-structured tensor container produced from a single BatchView.
 
-    A Batch represents one sampler's worth of data for a single
-    execution step. It contains no graph or node semantics.
+    Description:
+        A Batch represents one sampler's worth of data for a single execution step.
+        It stores role-structured SampleData along with per-role weights and masks.
+
+        When exactly one role is present, domain attributes such as `features`,
+        `targets`, `tags`, `outputs`, and `sample_uuids` are exposed directly via
+        delegation to the underlying RoleData for convenience. If multiple roles
+        exist, direct domain access is disallowed to prevent ambiguity.
     """
 
     batch_size: int
@@ -122,6 +128,59 @@ class Batch(Summarizable):
         if domain is None:
             return self.role_data.get_data(role=role)
         return self.role_data.get_data(role=role, domain=domain)
+
+    # ================================================
+    # SampleData Pass-through for Single Role
+    # ================================================
+    @property
+    def sample_uuids(self):
+        """
+        Tensor-like sample UUIDs for the batch.
+
+        Only valid when exactly one role is present. Raises an error if
+        multiple roles exist.
+        """
+        return self.role_data.sample_uuids
+
+    @property
+    def features(self):
+        """
+        Tensor-like feature data for the batch.
+
+        Only valid when exactly one role is present. Raises an error if
+        multiple roles exist.
+        """
+        return self.role_data.features
+
+    @property
+    def targets(self):
+        """
+        Tensor-like target data for the batch.
+
+        Only valid when exactly one role is present. Raises an error if
+        multiple roles exist.
+        """
+        return self.role_data.targets
+
+    @property
+    def tags(self):
+        """
+        Tensor-like tag data for the batch.
+
+        Only valid when exactly one role is present. Raises an error if
+        multiple roles exist.
+        """
+        return self.role_data.tags
+
+    @property
+    def outputs(self):
+        """
+        Tensor-like output (prediction) data for the batch.
+
+        Only valid when exactly one role is present and the underlying
+        SampleData represents model outputs.
+        """
+        return self.role_data.outputs
 
     # ================================================
     # Pseudo-attribute access

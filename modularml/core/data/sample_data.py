@@ -308,15 +308,15 @@ class RoleData(Mapping[str, SampleData], Summarizable):
     Immutable, role-keyed container for SampleData objects.
 
     Description:
-        RoleData is a lightweight convenience wrapper around
-        `dict[str, SampleData]` that provides:
+        RoleData is a lightweight wrapper around a mapping of role names to
+        SampleData instances. It provides role introspection, attribute-style
+        access, readable summaries, and a stable return type for model forward
+        passes.
 
-        - attribute-style role access
-        - role introspection
-        - readable summaries
-        - a stable return type for model forward passes
-
-        It contains no graph, batch, or sampler semantics.
+        When exactly one role is present, domain attributes such as `features`,
+        `targets`, `tags`, and `outputs` are exposed directly for convenience.
+        If multiple roles exist, direct domain access is disallowed to prevent
+        ambiguity.
     """
 
     __slots__ = ("_data",)
