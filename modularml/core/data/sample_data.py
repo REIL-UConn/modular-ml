@@ -393,6 +393,52 @@ class RoleData(Mapping[str, SampleData], Summarizable):
         return self._data[role]
 
     # ================================================
+    # SampleData Pass-through for Single Role
+    # ================================================
+    def _require_single_role(self) -> SampleData:
+        """
+        Return the sole SampleData if exactly one role exists.
+
+        Raises:
+            RuntimeError:
+                If multiple roles are present.
+
+        """
+        if len(self._data) != 1:
+            msg = (
+                "Direct domain access is only supported when exactly one role "
+                f"is present. Available roles: {self.available_roles}. "
+                "Use `get_data` instead."
+            )
+            raise RuntimeError(msg)
+        return next(iter(self._data.values()))
+
+    @property
+    def sample_uuids(self):
+        """Tensor-like sample UUIDs (only valid if data has a single role)."""
+        return self._require_single_role().sample_uuids
+
+    @property
+    def features(self):
+        """Tensor-like feature data (only valid if data has a single role)."""
+        return self._require_single_role().features
+
+    @property
+    def targets(self):
+        """Tensor-like target data (only valid if data has a single role)."""
+        return self._require_single_role().targets
+
+    @property
+    def tags(self):
+        """Tensor-like tag data (only valid if data has a single role)."""
+        return self._require_single_role().tags
+
+    @property
+    def outputs(self):
+        """Tensor-like output data (only valid if data has a single role)."""
+        return self._require_single_role().outputs
+
+    # ================================================
     # Pseudo-attribute access
     # ================================================
     def __getattr__(self, name: str) -> SampleData:
