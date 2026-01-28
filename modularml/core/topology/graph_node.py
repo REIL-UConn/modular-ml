@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.schema_constants import STREAM_DEFAULT
 from modularml.core.experiment.experiment_node import ExperimentNode
-from modularml.core.experiment.phase import InputBinding
+from modularml.core.experiment.phases.phase import InputBinding
 from modularml.core.references.experiment_reference import (
     ExperimentNodeReference,
     GraphNodeReference,
@@ -574,15 +574,14 @@ class GraphNode(ABC, ExperimentNode):
 
             upstream (FeatureSet | FeatureSetView | str | None):
                 Identifies which upstream FeatureSet connection of this node this
-                binding applies to.
+                binding applies to. Only required when a node has multiple
+                upstream FeatureSets (needed to disambiguate which input is being
+                bound).
                 Accepted values:
                 - FeatureSet instance
                 - FeatureSetView instance
                 - FeatureSet node ID or label (str)
                 - None, only if this node has exactly one upstream FeatureSet
-
-                If this node has multiple upstream FeatureSets, this argument is
-                required to disambiguate which input is being bound.
 
             split (str, optional):
                 Optional split name of the upstream FeatureSet (e.g. "train", "val").

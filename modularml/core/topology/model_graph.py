@@ -30,6 +30,8 @@ from modularml.utils.nn.backend import (
 from modularml.utils.topology.graph_search_utils import (
     find_upstream_featuresets,
     get_subgraph_nodes,
+    is_head_node,
+    is_tail_node,
 )
 
 if TYPE_CHECKING:
@@ -198,6 +200,15 @@ class ModelGraph(Configurable, Stateful):
         return deep_equal(self.get_state(), other.get_state())
 
     __hash__ = None
+
+    @property
+    def frozen_nodes(self) -> dict[str, GraphNode]:
+        """All trainable but frozen nodes in this graph, keyed by `node_id`."""
+        return {
+            n_id: node
+            for n_id, node in self.nodes.items()
+            if isinstance(node, Trainable) and node.is_frozen
+        }
 
     # ================================================
     # Error Checking Methods
@@ -465,13 +476,11 @@ class ModelGraph(Configurable, Stateful):
         tail_nodes: dict[str, GraphNode] = {}
         for n_id, node in self._nodes.items():
             # Head nodes: inputs from a FeatureSet
-            ups = node.get_upstream_refs(error_mode=ErrorMode.IGNORE)
-            if ups and all(isinstance(r, FeatureSetReference) for r in ups):
+            if is_head_node(node):
                 head_nodes[n_id] = node
 
             # Tail nodes: no downstream consumers
-            dwn = node.get_downstream_refs(error_mode=ErrorMode.IGNORE)
-            if len(dwn) == 0:
+            if is_tail_node(node):
                 tail_nodes[n_id] = node
 
         self._head_nodes = head_nodes
