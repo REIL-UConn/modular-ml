@@ -512,6 +512,43 @@ class SplitMixin:
         rel = [abs_to_rel[i] for i in common_abs]
         return self.take(rel, label="intersection")
 
+    def take_sample_uuids(
+        self,
+        sample_uuids: Sequence[str],
+        *,
+        label: str | None = None,
+    ) -> FeatureSetView:
+        """
+        Create a new FeatureSetView over the specified samples.
+
+        Description:
+            Produces a new view referencing the same collection and parent
+            FeatureSet, but is restricted to a subset of the rows. Only
+            rows with matching sample UUIDs to those specified are included
+            in the returned view. All sample UUIDs must exist in the caller's
+            collection.
+
+        Args:
+            sample_uuids (Sequence[str]):
+                A list of sample UUIDs to include in the returned view.
+                The order is preserved in the returned view.
+
+            label (str, optional):
+                The label to assign to the returned FeatureSetView.
+
+        """
+        # Get indices of the calling class
+        source, is_view = self._get_split_context()
+        idxs = self.indices if is_view else np.arange(source.n_samples)
+
+        # Get existing sample UUIDs of caller
+        all_sids = source.get_sample_uuids(fmt=DataFormat.NUMPY)[idxs]
+
+        # Get rel indices of subsamples
+        take_sids = np.asarray(sample_uuids, dtype=str)
+        rel_idxs = np.where(all_sids[:, None] == take_sids)[0]
+        return self.take(rel_indices=rel_idxs, label=label)
+
     # ================================================
     # Split methods
     # ================================================
