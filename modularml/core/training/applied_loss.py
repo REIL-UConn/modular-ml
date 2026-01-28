@@ -1,21 +1,17 @@
+from __future__ import annotations
+
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from modularml.context.execution_context import ExecutionContext
 from modularml.context.experiment_context import ExperimentContext
-from modularml.core.data.batch_view import BatchView
 from modularml.core.data.sample_schema import DOMAIN_TARGETS
 from modularml.core.data.schema_constants import DOMAIN_OUTPUTS
-from modularml.core.references.execution_reference import TensorLike
 from modularml.core.references.experiment_reference import ResolutionError
 from modularml.core.references.featureset_reference import FeatureSetColumnReference
 from modularml.core.references.model_io_reference import ModelOutputReference
-from modularml.core.references.reference_like import ReferenceLike
-from modularml.core.topology.graph_node import GraphNode
 from modularml.core.topology.model_node import ModelNode
-from modularml.core.training.loss import Loss
 from modularml.utils.data.conversion import align_ranks, convert_to_format, to_numpy
 from modularml.utils.data.data_format import get_data_format_for_backend
 from modularml.utils.data.shape_utils import ensure_tuple_shape
@@ -25,7 +21,13 @@ from modularml.utils.nn.backend import Backend
 from modularml.utils.representation.summary import Summarizable
 
 if TYPE_CHECKING:
+    from modularml.context.execution_context import ExecutionContext
     from modularml.core.data.batch import Batch
+    from modularml.core.data.batch_view import BatchView
+    from modularml.core.references.execution_reference import TensorLike
+    from modularml.core.references.reference_like import ReferenceLike
+    from modularml.core.topology.graph_node import GraphNode
+    from modularml.core.training.loss import Loss
 
 
 class AppliedLoss(Summarizable):
@@ -281,19 +283,19 @@ class AppliedLoss(Summarizable):
             # Ensure loss has shape (batch_size, )
             raw_loss = raw_loss.view(-1)
             w = torch.as_tensor(weights, device=raw_loss.device)
-            return torch.sum(raw_loss * w) * self.weight
+            return torch.sum(raw_loss * w) * self.weight / len(raw_loss)
 
         if self.backend == Backend.TENSORFLOW:
             tf = ensure_tensorflow()
             # Ensure loss has shape (batch_size, )
             raw_loss = tf.reshape(raw_loss, [-1])
             w = tf.convert_to_tensor(weights, dtype=raw_loss.dtype)
-            return tf.reduce_sum(raw_loss * w) * self.weight
+            return tf.reduce_sum(raw_loss * w) * self.weight / len(raw_loss)
 
         # Assume NumPy
         raw_loss = np.reshape(raw_loss, (-1,))
         w = np.reshape(weights, (-1,))
-        return np.sum(raw_loss * w) * self.weight
+        return np.sum(raw_loss * w) * self.weight / len(raw_loss)
 
     def compute(self, ctx: ExecutionContext) -> Any:
         """Compute loss for a single execution step."""
@@ -363,3 +365,36 @@ class AppliedLoss(Summarizable):
             f"AppliedLoss(label={self.label!r}, loss={self.loss.name!r}, "
             f"inputs={self.inputs!r}, weight={self.weight})"
         )
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return configuration required to reconstruct this loss.
+
+        Returns:
+            dict[str, Any]: Loss configuration.
+
+        """
+        return {
+            "loss": self.loss,  # not JSON safe
+            "on": self.node_id,
+            "inputs": self.inputs,  # not JSON safe
+            "weight": self.weight,
+            "label": self.label,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> AppliedLoss:
+        """
+        Construct an AppliedLoss from configuration.
+
+        Args:
+            config (dict[str, Any]): Loss configuration.
+
+        Returns:
+            AppliedLoss: Reconstructed applied loss.
+
+        """
+        return cls(**config)
