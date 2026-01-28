@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -586,6 +587,248 @@ class FeatureSet(
             flat_data, flat_meta = flatten_to_2d(arr=data, merged_axes=0)
 
         return flat_data, flat_meta
+
+    def _resolve_inverse_scaler_chain(
+        self,
+        *,
+        domain: str,
+        cols: list[str],
+    ) -> tuple[list[ScalerRecord], bool]:
+        """
+        Resolve the ordered list of scalers applicable for inverse scaling.
+
+        Description:
+            Determines which scaler records can be safely inverted for the provided
+            column set. The resolution enforces strict dependency ordering and
+            detects partial vs full unscaling cases.
+
+        Args:
+            domain (str):
+                Domain of the columns ("features", "targets", or "tags").
+            cols (list[str]):
+                Column keys (domain-local, no prefixes or suffixes).
+
+        Returns:
+            tuple[list[ScalerRecord], bool]:
+                A tuple containing:
+                    - List of ScalerRecords to inverse (newest to oldest).
+                    - Boolean indicating whether the unscale is partial.
+
+        Raises:
+            ValueError:
+                If the requested columns cannot be safely unscaled.
+                Or if no scalers are found on the specified columns.
+
+        """
+        col_req = set(cols)
+
+        # Relevant scalers in this domain that touch requested cols
+        relevant = [
+            rec
+            for rec in self._scaler_recs
+            if (rec.domain == domain) and col_req.intersection(rec.keys)
+        ]
+        if not relevant:
+            msg = f"No scalers found for {domain}.{cols}. Nothing to unscale."
+            raise ValueError(msg)
+
+        # Sort: most recent first
+        relevant = sorted(relevant, key=lambda r: r.order, reverse=True)
+
+        # Walk order and produce viable chain
+        chain: list[ScalerRecord] = []
+        working_cols = set(cols)
+        is_partial = False
+        for rec in relevant:
+            rec_cols = set(rec.keys)
+
+            # Case 1: scaler applied to more than defined columns
+            if working_cols.issubset(rec_cols) and (working_cols != rec_cols):
+                msg = (
+                    f"Cannot unscale {sorted(working_cols)} because scaler on "
+                    f"{sorted(rec_cols)} was applied later. Split columns first."
+                )
+                raise ValueError(msg)
+
+            # Case 2: exact match -> can invert
+            if working_cols == rec_cols:
+                chain.append(rec)
+                continue
+
+            # Case 3: scaler applied to less than defined columns
+            if rec_cols.issubset(working_cols) and (working_cols != rec_cols):
+                # We can only partially unscale to this point
+                is_partial = True
+                break
+
+            # Any other overlap is invalid
+            msg = (
+                f"Invalid scaler dependency ordering for {sorted(col_req)}. "
+                f"Conflicting scaler keys: {sorted(rec_cols)}."
+            )
+            raise ValueError(msg)
+
+        return chain, is_partial
+
+    def _iter_scaler_records_on_cols(
+        self,
+        *,
+        domain: str,
+        columns: str | list[str],
+    ) -> Iterable[ScalerRecord]:
+        """
+        Iterate over scaler objects applicable to the provided columns.
+
+        Description:
+            Resolves the scaler dependency chain for inverse scaling and returns
+            scaler objects in the correct order for calling `inverse_transform`.
+
+        Args:
+            domain (str):
+                One of {"features", "targets", "tags"}.
+            columns (str | list[str]):
+                Column keys within the domain (no domain prefix, no rep suffix).
+
+        Returns:
+            list[ScalerRecord]:
+                Scaler records ordered newest to oldest.
+
+        Raises:
+            ValueError:
+                If scalers cannot be safely resolved.
+
+        """
+        cols = ensure_list(columns)
+
+        chain, partial = self._resolve_inverse_scaler_chain(
+            domain=domain,
+            cols=cols,
+        )
+
+        if partial:
+            warn(
+                "Only partial inverse scaling applied. Full inversion will require "
+                "seperating interleaved scalers. ",
+                hints=(
+                    "It is best practice to only stack scalers on the same set of "
+                    "columns during FeatureSet creation."
+                ),
+            )
+
+        yield from chain
+
+    def iter_scalers_on_cols(
+        self,
+        *,
+        domain: str,
+        columns: str | list[str],
+    ) -> Iterable[Scaler]:
+        """
+        Iterate over scaler objects applicable to the provided columns.
+
+        Description:
+            Resolves the scaler dependency chain for inverse scaling and returns
+            scaler objects in the correct order for calling `inverse_transform`.
+
+        Args:
+            domain (str):
+                One of {"features", "targets", "tags"}.
+            columns (str | list[str]):
+                Column keys within the domain (no domain prefix, no rep suffix).
+
+        Returns:
+            list[Scaler]:
+                Scalers ordered newest to oldest.
+
+        Raises:
+            ValueError:
+                If scalers cannot be safely resolved.
+
+        """
+        cols = ensure_list(columns)
+
+        chain, partial = self._resolve_inverse_scaler_chain(
+            domain=domain,
+            cols=cols,
+        )
+
+        if partial:
+            warn(
+                "Only partial inverse scaling applied. Full inversion will require "
+                "seperating interleaved scalers. ",
+                hints=(
+                    "It is best practice to only stack scalers on the same set of "
+                    "columns during FeatureSet creation."
+                ),
+            )
+
+        for rec in chain:
+            yield rec.scaler_obj
+
+    def unscale_data_for_cols(
+        self,
+        *,
+        data: np.ndarray,
+        domain: str,
+        columns: str | list[str],
+    ) -> np.ndarray:
+        """
+        Inverse-scale provided data using FeatureSet scaler history.
+
+        Description:
+            Applies inverse transforms to user-provided NumPy data based on the
+            scaler records associated with the specified columns. Supports partial
+            unscaling with warnings when full inversion is not possible.
+
+        Args:
+            data (np.ndarray):
+                Scaled data to unscale.
+            domain (str):
+                One of {"features", "targets", "tags"}.
+            columns (str | list[str]):
+                Column keys represented by `data`, in correct order.
+                E.g., if `data` are the predictions of some model estimating
+                column `'targets.soh.transformed'`, then `domain='targets'`
+                and `columns='soh'`.
+
+        Returns:
+            np.ndarray:
+                Unscaled data array.
+
+        Raises:
+            ValueError:
+                If data shape is incompatible or scalers cannot be resolved.
+
+        """
+        cols = ensure_list(columns)
+
+        for rec in self._iter_scaler_records_on_cols(domain=domain, columns=cols):
+            # Scaler requires 2D array
+            flat_data, flat_meta = data, {}
+            if data.ndim > 2:
+                if rec.merged_axes is None:
+                    # Common use case is 1D data with 1 feature key (eg, shape = (n_sample, 1, n_f))
+                    # We can just reshape to (n_sample, n_f) without throwing error
+                    if data.ndim == 3 and len(cols) == 1:
+                        merged_axes = (1, 2)
+                    else:
+                        msg = f"Expected 2-dimensional data. Received: {data.shape}."
+                        raise ValueError(msg)
+                flat_data, flat_meta = flatten_to_2d(arr=data, merged_axes=merged_axes)
+
+            if data.ndim < 2:
+                # Add extra dimension to make 2D
+                flat_data, flat_meta = flatten_to_2d(arr=data, merged_axes=0)
+
+            # Inverse data and reshape
+            x_inv_flat = rec.scaler_obj.inverse_transform(data=flat_data)
+            data = (
+                unflatten_from_2d(flat=x_inv_flat, meta=flat_meta)
+                if flat_meta
+                else x_inv_flat
+            )
+
+        return data
 
     def fit_transform(
         self,
