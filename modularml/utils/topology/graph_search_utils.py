@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal
 
+from modularml.context.experiment_context import ExperimentContext
 from modularml.core.references.featureset_reference import FeatureSetReference
 from modularml.core.topology.graph_node import GraphNode
 from modularml.utils.errors.error_handling import ErrorMode
@@ -14,19 +15,54 @@ if TYPE_CHECKING:
 TraversalDirection = Literal["upstream", "downstream", "both"]
 
 
+def is_tail_node(node: GraphNode):
+    # Tail nodes: no downstream consumers
+    return (not node.allows_downstream_connections) or (
+        len(node.get_downstream_refs()) == 0
+    )
+
+
+def is_head_node(node: GraphNode):
+    # Head nodes: inputs from a FeatureSet
+    if not node.allows_upstream_connections:
+        return False
+    ups = node.get_upstream_refs()
+    return ups and all(isinstance(r, FeatureSetReference) for r in ups)
+
+
 def find_upstream_featuresets(
-    node: GraphNode,
+    node: str | GraphNode,
 ) -> list[FeatureSetReference]:
     """
     Recursively find all upstream FeatureSetReferences feeding into `node`.
 
-    Traverses the graph upstream until FeatureSetReferences are reached.
+    Description:
+        Traverses the graph upstream until FeatureSetReferences are reached.
+
+    Args:
+        node (str | GraphNode):
+            The node ID, label, or instance to perform a search for.
 
     Returns:
         list[FeatureSetReference]:
             All unique upstream FeatureSets (order not guaranteed).
 
     """
+    from modularml.core.topology.graph_node import GraphNode
+
+    graph_node = None
+    if isinstance(node, GraphNode):
+        graph_node = node
+    elif isinstance(node, str):
+        exp_ctx = ExperimentContext.get_active()
+        graph_node = exp_ctx.get_node(val=node, enforce_type="GraphNode")
+    else:
+        msg = (
+            "Invalid `node` type. Expected string or GraphNode. "
+            f"Received: {type(node)}."
+        )
+        raise TypeError(msg)
+
     found: dict[str, FeatureSetReference] = {}
     visited: set[str] = set()
 
@@ -42,7 +78,7 @@ def find_upstream_featuresets(
                 upstream_node = ref.resolve()
                 _walk(upstream_node)
 
-    _walk(node)
+    _walk(graph_node)
     return list(found.values())
 
 
