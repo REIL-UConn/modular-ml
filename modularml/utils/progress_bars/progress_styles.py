@@ -63,3 +63,16 @@ style_training_loss = ProgressStyle(
         "loss_aux": 0.0,
     },
 )
+
+style_evaluation = ProgressStyle(
+    name="evaluation",
+    columns=(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TextColumn("|"),
+        TimeElapsedColumn(),
+        TextColumn("|"),
+        TimeRemainingColumn(),
+    ),
+)

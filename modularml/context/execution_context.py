@@ -48,7 +48,7 @@ class ExecutionContext:
     ):
         if node_id not in self.inputs:
             self.inputs[node_id] = {}
-        self.inputs[node_id][upstream] = batch_view
+        self.inputs[(node_id, upstream)] = batch_view
 
     def set_output(self, *, node_id: str, batch: Batch):
         self.outputs[node_id] = batch
