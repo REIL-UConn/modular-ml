@@ -182,6 +182,28 @@ def ensure_list(x):
     return [x]
 
 
+def ensure_tuple(x):
+    """
+    Convert an object to a tuple.
+
+    Description:
+        Scalars (int, float, str, etc.) are wrapped as a single-element tuple.
+        Iterables (excluding strings and bytes) are converted via tuple(x).
+
+    Args:
+        x (Any):
+            Object to convert.
+
+    Returns:
+        tuple:
+            Tuple representation of the input.
+
+    """
+    if isinstance(x, Iterable) and not isinstance(x, (str, bytes)):
+        return tuple(x)
+    return (x,)
+
+
 def find_duplicates(
     items: list[T],
     *,
