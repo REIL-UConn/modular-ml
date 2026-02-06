@@ -17,6 +17,7 @@ from modularml.utils.data.data_format import (
     format_is_tensorlike,
     get_data_format_for_backend,
     infer_data_type,
+    normalize_format,
 )
 from modularml.utils.data.shape_utils import ensure_tuple_shape
 from modularml.utils.environment.optional_imports import ensure_tensorflow, ensure_torch
@@ -159,6 +160,7 @@ class SampleData(Summarizable):
                 (e.g., "torch", "tf", "np").
 
         """
+        fmt = normalize_format(fmt)
         if not format_is_tensorlike(fmt):
             msg = f"DataFormat must be tensor-like. Received: {fmt}. Allowed formats: {_TENSORLIKE_FORMATS}."
             raise ValueError(msg)
@@ -225,7 +227,82 @@ class SampleData(Summarizable):
     # ================================================
     # Concatenation
     # ================================================
-    def concat(
+    @classmethod
+    def concat(cls, *sds: SampleData, fmt: DataFormat | None = None) -> SampleData:
+        """Merge all data into a new SampleData instance."""
+        # Validate types
+        for sd in sds:
+            if not isinstance(sd, cls):
+                msg = f"Expected SampleData, got {type(sd)}."
+                raise TypeError(msg)
+
+        # Validate kind consistency (don't merge input + outputs)
+        kinds = {sd._kind for sd in sds}
+        if len(kinds) != 1:
+            msg = f"Cannot concatenate SampleData with differing kinds: {kinds}."
+            raise ValueError(msg)
+        kind = kinds.pop()
+
+        # Ensure all have data for the same domains
+        ref_ds = set(sds[0].data.keys())
+        for sd in sds[1:]:
+            ks = set(sd.data.keys())
+            if ks != ref_ds:
+                msg = f"Entries have different domain data: {ks} != {ref_ds}."
+                raise ValueError(msg)
+
+        # Ensure all shapes match (except batch dimension)
+        ref_shape = sds[0].shapes
+        for sd in sds[1:]:
+            if sd.shapes != ref_shape:
+                msg = (
+                    "Cannot merge data with different domain shapes: "
+                    f"{sd.shapes!r} != {ref_shape!r}."
+                )
+                raise ValueError(msg)
+
+        # Determine concat format
+        if fmt is not None:
+            sds = [sd.to_format(fmt) for sd in sds]
+        else:
+            backends = {
+                infer_backend(sd.features).value
+                if sd.features is not None
+                else infer_backend(sd.targets).value
+                for sd in sds
+                if any(x in ref_ds for x in [DOMAIN_FEATURES, DOMAIN_TARGETS])
+            }
+            if len(backends) != 1:
+                sds = [sd.to_format(DataFormat.NUMPY) for sd in sds]
+
+        # Perform concatenation
+        new_data: dict[str, Any] = {}
+        for domain in ref_ds:
+            vals = [sd.data.get(domain) for sd in sds]
+            if vals[0] is None:
+                new_data[domain] = None
+                continue
+
+            backend = infer_backend(vals[0])
+            if backend == Backend.NUMPY:
+                import numpy as np
+
+                new_data[domain] = np.concatenate(vals, axis=0)
+            elif backend == Backend.TORCH:
+                torch = ensure_torch()
+
+                new_data[domain] = torch.cat(vals, dim=0)
+            elif backend == Backend.TENSORFLOW:
+                tf = ensure_tensorflow()
+
+                new_data[domain] = tf.concat(vals, axis=0)
+            else:
+                msg = f"Unsupported backend for concatenation: {backend}."
+                raise RuntimeError(msg)
+
+        return cls(data=new_data, kind=kind)
+
+    def concat_with(
         self,
         *others: SampleData,
         fmt: DataFormat | None = None,
@@ -260,86 +337,7 @@ class SampleData(Summarizable):
                 If SampleData instances are structurally incompatible.
 
         """
-
-        def _concat_all(*sds: SampleData) -> SampleData:
-            # Validate types
-            for sd in sds:
-                if not isinstance(sd, SampleData):
-                    msg = f"Expected SampleData, got {type(sd)}."
-                    raise TypeError(msg)
-
-            # Validate kind consistency (don't merge input + outputs)
-            kinds = {sd._kind for sd in sds}
-            if len(kinds) != 1:
-                msg = f"Cannot concatenate SampleData with differing kinds: {kinds}."
-                raise ValueError(msg)
-            kind = kinds.pop()
-
-            # Ensure all have data for the same domains
-            ref_ds = set(sds[0].data.keys())
-            for sd in sds[1:]:
-                ks = set(sd.data.keys())
-                if ks != ref_ds:
-                    msg = f"Entries have different domain data: {ks} != {ref_ds}."
-                    raise ValueError(msg)
-
-            # Ensure all shapes match (except batch dimension)
-            ref_shape = sds[0].shapes
-            for sd in sds[1:]:
-                if sd.shapes != ref_shape:
-                    msg = (
-                        "Cannot merge data with different domain shapes: "
-                        f"{sd.shapes!r} != {ref_shape!r}."
-                    )
-                    raise ValueError(msg)
-
-            # Determine concat format
-            if fmt is not None:
-                sds = [sd.to_format(fmt) for sd in sds]
-            else:
-                backends = {
-                    infer_backend(sd.features).value
-                    if sd.features is not None
-                    else infer_backend(sd.targets).value
-                    for sd in sds
-                    if any(x in ref_ds for x in [DOMAIN_FEATURES, DOMAIN_TARGETS])
-                }
-                if len(backends) != 1:
-                    sds = [sd.to_format(DataFormat.NUMPY) for sd in sds]
-
-            # Perform concatenation
-            new_data: dict[str, Any] = {}
-            for domain in ref_ds:
-                vals = [sd.data.get(domain) for sd in sds]
-                if vals[0] is None:
-                    new_data[domain] = None
-                    continue
-
-                backend = infer_backend(vals[0])
-                if backend == Backend.NUMPY:
-                    import numpy as np
-
-                    new_data[domain] = np.concatenate(vals, axis=0)
-                elif backend == Backend.TORCH:
-                    torch = ensure_torch()
-
-                    new_data[domain] = torch.cat(vals, dim=0)
-                elif backend == Backend.TENSORFLOW:
-                    tf = ensure_tensorflow()
-
-                    new_data[domain] = tf.concat(vals, axis=0)
-                else:
-                    msg = f"Unsupported backend for concatenation: {backend}."
-                    raise RuntimeError(msg)
-
-            return SampleData(data=new_data, kind=kind)
-
-        # Support SampleData.concat(sd1, sd2, ...)
-        if isinstance(self, type):
-            return _concat_all(*others)
-
-        # Support sd1.concat(sd2, sd3, ...)
-        return _concat_all(self, *others)
+        return SampleData.concat(self, *others, fmt=fmt)
 
     # ================================================
     # Representation
@@ -657,7 +655,34 @@ class RoleData(Mapping[str, SampleData], Summarizable):
     # ================================================
     # Concatenation
     # ================================================
-    def concat(
+    @classmethod
+    def concat(cls, *rds: RoleData, fmt: DataFormat | None = None) -> RoleData:
+        """Merge all data into a new RoleData instance."""
+        # Validate types
+        for rd in rds:
+            if not isinstance(rd, cls):
+                msg = f"Expected RoleData, got {type(rd)}."
+                raise TypeError(msg)
+
+        # Validate matching roles
+        ref_roles = set(rds[0].available_roles)
+        for rd in rds[1:]:
+            if set(rd.available_roles) != ref_roles:
+                msg = (
+                    "Cannot concatenate RoleData with differing roles: "
+                    f"{set(rd.available_roles)} != {ref_roles}."
+                )
+                raise ValueError(msg)
+
+        # Concatenate per role
+        new_data: dict[str, SampleData] = {}
+        for role in ref_roles:
+            sds = [rd._data[role] for rd in rds]
+            new_data[role] = SampleData.concat(*sds, fmt=fmt)
+
+        return cls(data=new_data)
+
+    def concat_with(
         self,
         *others: RoleData,
         fmt: DataFormat | None = None,
@@ -691,38 +716,7 @@ class RoleData(Mapping[str, SampleData], Summarizable):
                 If RoleData instances are structurally incompatible.
 
         """
-
-        def _concat_all(*rds: RoleData) -> RoleData:
-            # Validate types
-            for rd in rds:
-                if not isinstance(rd, RoleData):
-                    msg = f"Expected RoleData, got {type(rd)}."
-                    raise TypeError(msg)
-
-            # Validate matching roles
-            ref_roles = set(rds[0].available_roles)
-            for rd in rds[1:]:
-                if set(rd.available_roles) != ref_roles:
-                    msg = (
-                        "Cannot concatenate RoleData with differing roles: "
-                        f"{set(rd.available_roles)} != {ref_roles}."
-                    )
-                    raise ValueError(msg)
-
-            # Concatenate per role
-            new_data: dict[str, SampleData] = {}
-            for role in ref_roles:
-                sds = [rd._data[role] for rd in rds]
-                new_data[role] = SampleData.concat(*sds, fmt=fmt)
-
-            return RoleData(data=new_data)
-
-        # Support RoleData.concat(rd1, rd2, ...)
-        if isinstance(self, type):
-            return _concat_all(*others)
-
-        # Support rd1.concat(rd2, rd3, ...)
-        return _concat_all(self, *others)
+        return RoleData.concat(self, *others, fmt=fmt)
 
     # ================================================
     # Representation

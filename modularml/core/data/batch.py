@@ -274,7 +274,39 @@ class Batch(Summarizable):
     # ================================================
     # Concatenation
     # ================================================
-    def concat(
+    @classmethod
+    def concat(cls, *batches: Batch, fmt: DataFormat | None = None) -> Batch:
+        """Merge all data into a new Batch instance."""
+        # Validate types
+        for b in batches:
+            if not isinstance(b, cls):
+                msg = f"Expected Batch, got {type(b)}."
+                raise TypeError(msg)
+
+        # Concate role data (perform validation checks)
+        new_rd = RoleData.concat(*[b.role_data for b in batches], fmt=fmt)
+
+        # Concat weights and mask
+        new_rweights = {}
+        new_rmasks = {}
+        for role in new_rd.available_roles:
+            new_rweights[role] = np.concatenate(
+                [b.role_weights[role] for b in batches],
+                axis=0,
+            )
+            new_rmasks[role] = np.concatenate(
+                [b.role_masks[role] for b in batches],
+                axis=0,
+            )
+        return cls(
+            batch_size=sum(b.batch_size for b in batches),
+            role_data=new_rd,
+            shapes=new_rd.shapes,
+            role_weights=new_rweights,
+            role_masks=new_rmasks,
+        )
+
+    def concat_with(
         self,
         *others: Batch,
         fmt: DataFormat | None = None,
@@ -307,43 +339,7 @@ class Batch(Summarizable):
                 If Batch instances are structurally incompatible.
 
         """
-
-        def _concat_all(*batches: Batch) -> Batch:
-            # Validate types
-            for b in batches:
-                if not isinstance(b, Batch):
-                    msg = f"Expected Batch, got {type(b)}."
-                    raise TypeError(msg)
-
-            # Concate role data (perform validation checks)
-            new_rd = RoleData.concat(*[b.role_data for b in batches], fmt=fmt)
-
-            # Concat weights and mask
-            new_rweights = {}
-            new_rmasks = {}
-            for role in new_rd.available_roles:
-                new_rweights[role] = np.concatenate(
-                    [b.role_weights[role] for b in batches],
-                    axis=0,
-                )
-                new_rmasks[role] = np.concatenate(
-                    [b.role_masks[role] for b in batches],
-                    axis=0,
-                )
-            return Batch(
-                batch_size=sum(b.batch_size for b in batches),
-                role_data=new_rd,
-                shapes=new_rd.shapes,
-                role_weights=new_rweights,
-                role_masks=new_rmasks,
-            )
-
-        # Support RoleData.concat(rd1, rd2, ...)
-        if isinstance(self, type):
-            return _concat_all(*others)
-
-        # Support rd1.concat(rd2, rd3, ...)
-        return _concat_all(self, *others)
+        return Batch.concat(self, *others, fmt=fmt)
 
     # ================================================
     # Representation
