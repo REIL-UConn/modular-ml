@@ -1,20 +1,27 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.schema_constants import STREAM_DEFAULT
 from modularml.core.references.featureset_reference import FeatureSetReference
-from modularml.utils.data.formatting import ensure_list
+from modularml.core.sampling.base_sampler import BaseSampler
+from modularml.utils.data.formatting import ensure_list, find_duplicates
 from modularml.utils.errors.error_handling import ErrorMode
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from modularml.context.execution_context import ExecutionContext
     from modularml.core.data.batch_view import BatchView
     from modularml.core.data.featureset import FeatureSet
     from modularml.core.data.featureset_view import FeatureSetView
-    from modularml.core.sampling.base_sampler import BaseSampler
+    from modularml.core.experiment.callback import Callback
+    from modularml.core.experiment.phases.phase_result import PhaseResults
     from modularml.core.topology.graph_node import GraphNode
+    from modularml.core.training.applied_loss import AppliedLoss
 
 
 def _get_upstream_featureset_refs_for_node(node_id: str) -> list[FeatureSetReference]:
@@ -391,13 +398,59 @@ class InputBinding:
         # Return only the batches for the specified stream
         return self.sampler.get_batches(stream=self.stream)
 
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return configuration details required to reconstruct this binding.
 
-class ExperimentPhase:
+        Returns:
+            dict[str, Any]:
+                Configuration used to reconstruct the binding.
+
+        """
+        return {
+            "node_id": self.node_id,
+            "upstream_ref": self.upstream_ref.get_config(),
+            "split": self.split,
+            "sampler": self.sampler.get_config() if self.sampler is not None else None,
+            "stream": self.stream,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict) -> ExperimentPhase:
+        """
+        Construct a phase from a configuration dictionary.
+
+        Args:
+            config (dict[str, Any]):
+                Configuration details. Keys must be strings.
+
+        Returns:
+            ExperimentPhase: Reconstructed phase.
+
+        """
+        sampler = None
+        if config.get("sampler") is not None:
+            sampler = BaseSampler.from_config(config=config["sampler"])
+        return cls(
+            node_id=config["node_id"],
+            upstream_ref=FeatureSetReference.from_config(config=config["upstream_ref"]),
+            split=config["split"],
+            sampler=sampler,
+            stream=config["stream"],
+        )
+
+
+class ExperimentPhase(ABC):
     def __init__(
         self,
         label: str,
         input_sources: list[InputBinding],
+        losses: list[AppliedLoss] | None = None,
         active_nodes: list[GraphNode] | None = None,
+        callbacks: list[Callback] | None = None,
     ):
         """
         Initiallizes a new phase of the experiment.
@@ -409,16 +462,166 @@ class ExperimentPhase:
             input_sources (list[InputBinding]):
                 Input bindings for each head node in ModelGraph.
 
+            losses (list[AppliedLoss], optional):
+                A list of losses to be applied during this experiment phase.
+
+            active_nodes (list[GraphNode] | None, optional):
+                A list of active GraphNodes in this phase of the experiment. Nodes can
+                be listed via their ID, label, or with the actual node instance. If
+                None, all nodes comprising the ModelGraph are used. Defaults to None.
+
+            callbacks (list[Callback] | None, optional):
+                An optional list of Callbacks to run during phase execution.
+
+        """
+        self.label = label
+        self.input_sources = self._normalize_input_sources(sources=input_sources)
+        self.losses = ensure_list(losses)
+        self._validate_losses()
+        self.callbacks = ensure_list(callbacks)
+        self._validate_callbacks()
+        self.active_nodes = self._resolve_active_nodes(active_nodes)
+        self._validate_inputs_for_head_nodes()
+
+    # ================================================
+    # Convenience Constructors
+    # ================================================
+    @classmethod
+    def _build_input_sources_from_split(
+        cls,
+        *,
+        split: str,
+        sampler: BaseSampler | None = None,
+        active_nodes: list[str | GraphNode] | None = None,
+    ) -> list[InputBinding]:
+        """
+        Build InputBindings automatically from a split name.
+
+        Rules:
+            - All active head nodes must resolve to exactly one upstream FeatureSet
+            - All must resolve to the same FeatureSet
+            - The FeatureSet must contain the given split
+
+        Args:
+            split (str):
+                Split name of the upstream FeatureSet (e.g. "train", "val").
+                Onnly rows from this split are use for phase execution.
+
+            sampler (BaseSampler, optional):
+                An optional sampler to use to generate batches from this split.
+                Required if this binding is for a TrainPhase.
+
             active_nodes (list[GraphNode] | None, optional):
                 A list of active GraphNodes in this phase of the experiment. Nodes can
                 be listed via their ID, label, or with the actual node instance. If
                 None, all nodes comprising the ModelGraph are used. Defaults to None.
 
         """
-        self.label = label
-        self.input_sources = self._normalize_input_sources(sources=input_sources)
-        self.active_nodes = self._resolve_active_nodes(active_nodes)
-        self._validate_inputs_for_head_nodes()
+        # Validate environment
+        exp_ctx = ExperimentContext.get_active()
+        mg = exp_ctx.model_graph
+        if mg is None:
+            msg = "Cannot infer input sources without a registered ModelGraph."
+            raise RuntimeError(msg)
+
+        # Resolve active nodes
+        active_node_ids = cls._resolve_active_nodes(nodes=active_nodes)
+
+        # Identify active head nodes
+        head_nodes: list[GraphNode] = [
+            exp_ctx.get_node(node_id=n_id, enforce_type="GraphNode")
+            for n_id in mg.head_nodes
+            if n_id in active_node_ids
+        ]
+        if not head_nodes:
+            msg = "No active head nodes found for phase."
+            raise ValueError(msg)
+
+        # Resolve upstream fsv per head node
+        fs_refs: list[FeatureSetReference] = []
+        for node in head_nodes:
+            ups = _get_upstream_featureset_refs_for_node(node.node_id)
+            if len(ups) != 1:
+                msg = (
+                    f"Head node '{node.label}' has {len(ups)} upstream FeatureSets. "
+                    "Automatic split-based binding requires exactly one. "
+                    "Use the default phase constructor instead."
+                )
+                raise ValueError(msg)
+            fs_refs.append(ups[0])
+
+        # Ensure all refs point to same FeatureSet
+        fs_ids = {ref.node_id for ref in fs_refs}
+        if len(fs_ids) != 1:
+            msg = (
+                "Automatic split-based binding requires all head nodes to "
+                "share the same upstream FeatureSet. "
+                "Use the default phase constructor instead."
+            )
+            raise ValueError(msg)
+
+        # Validate split exists
+        fs = fs_refs[0].resolve().source
+        if split not in fs.available_splits:
+            msg = (
+                f"Split '{split}' does not exist in FeatureSet '{fs.label}'. "
+                f"Available splits: {fs.available_splits}."
+            )
+            raise ValueError(msg)
+
+        # Create bindings
+        return [
+            node.create_input_binding(
+                split=split,
+                sampler=sampler,
+            )
+            for node in head_nodes
+        ]
+
+    # ================================================
+    # Validation
+    # ================================================
+    def _validate_losses(self):
+        from modularml.core.training.applied_loss import AppliedLoss
+
+        # Validate loss type
+        loss_lbls = []
+        for ls in self.losses:
+            if not isinstance(ls, AppliedLoss):
+                msg = f"Loss entries must be of type AppliedLoss. Received: {type(ls)}."
+                raise TypeError(msg)
+            loss_lbls.append(ls.label)
+
+        # Ensure unique loss labels (used for tracking)
+        dup_lbls = find_duplicates(items=loss_lbls)
+        if len(dup_lbls) > 0:
+            msg = (
+                f"Multiple AppliedLosses have the same label: {dup_lbls}. "
+                "Loss labels must be unique."
+            )
+            raise ValueError(msg)
+
+    def _validate_callbacks(self):
+        from modularml.core.experiment.callback import Callback
+
+        # Validate callback type
+        callback_lbls = []
+        for cb in self.callbacks:
+            if not isinstance(cb, Callback):
+                msg = (
+                    f"Callback entries must be of type Callback. Received: {type(cb)}."
+                )
+                raise TypeError(msg)
+            callback_lbls.append(cb.label)
+
+        # Ensure unique callback labels (used for tracking)
+        dup_lbls = find_duplicates(items=callback_lbls)
+        if len(dup_lbls) > 0:
+            msg = (
+                f"Multiple Callbacks have the same label: {dup_lbls}. "
+                "Callbacks labels must be unique."
+            )
+            raise ValueError(msg)
 
     def _normalize_input_sources(
         self,
@@ -446,8 +649,8 @@ class ExperimentPhase:
 
         return clean_sources
 
+    @staticmethod
     def _resolve_active_nodes(
-        self,
         nodes: list[str | GraphNode] | None,
     ) -> list[str]:
         """
@@ -508,3 +711,70 @@ class ExperimentPhase:
                     f"upstream FeatureSet(s): '{[r.node_label for r in missing]}'."
                 )
                 raise ValueError(msg)
+
+    # ================================================
+    # Execution
+    # ================================================
+    @abstractmethod
+    def iter_execution(
+        self,
+        *,
+        results: PhaseResults | None = None,
+    ) -> Iterator[ExecutionContext]:
+        """Iterate over execution steps for this phase."""
+        ...
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return configuration details required to reconstruct this phase.
+
+        Returns:
+            dict[str, Any]:
+                Configuration used to reconstruct the phase.
+
+        """
+        losses_cfg = None
+        if self.losses is not None:
+            losses_cfg = [ls.get_config() for ls in self.losses]
+
+        return {
+            "label": self.label,
+            "input_sources": [inp.get_config() for inp in self.input_sources],
+            "losses": losses_cfg,
+            "active_nodes": self.active_nodes,
+            "callbacks": self.callbacks,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict) -> ExperimentPhase:
+        """
+        Construct a phase from a configuration dictionary.
+
+        Args:
+            config (dict[str, Any]):
+                Configuration details. Keys must be strings.
+
+        Returns:
+            ExperimentPhase: Reconstructed phase.
+
+        """
+        if "phase_type" not in config:
+            raise ValueError("ExperimentPhase config must include `phase_type`")
+
+        # Create subclasses directly
+        phase_type = config["phase_type"]
+        if phase_type == "EvalPhase":
+            from modularml.core.experiment.phases.eval_phase import EvalPhase
+
+            return EvalPhase.from_config(config=config)
+
+        if phase_type == "TrainPhase":
+            from modularml.core.experiment.phases.train_phase import TrainPhase
+
+            return TrainPhase.from_config(config=config)
+
+        msg = f"Unknown ExperimentPhase subclass: {phase_type}."
+        raise ValueError(msg)
