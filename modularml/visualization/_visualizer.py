@@ -4,11 +4,11 @@ from typing import Any
 
 from IPython.display import Markdown, display
 
-from modularml.core.graph.feature_set import FeatureSet
-from modularml.core.graph.merge_stages.merge_stage import MergeStage
-from modularml.core.graph.model_graph import ModelGraph
-from modularml.core.graph.model_stage import ModelStage
-from modularml.utils.error_handling import ErrorMode
+from modularml.core.data.featureset import FeatureSet
+from modularml.core.topology.merge_nodes.merge_node import MergeNode
+from modularml.core.topology.model_graph import ModelGraph
+from modularml.core.topology.model_node import ModelNode
+from modularml.utils.errors.error_handling import ErrorMode
 
 
 @dataclass
@@ -69,19 +69,19 @@ FEATURE_SAMPLER = NodeSpec(
     shape="rect",
 )
 MODEL_STAGE = NodeSpec(
-    class_name="ModelStage",
+    class_name="ModelNode",
     color="#000000",
     fill="#BBDEFB",
     stroke="#2962FF",
-    header="ModelStage",
+    header="ModelNode",
     shape="rect",
 )
 MERGE_STAGE = NodeSpec(
-    class_name="MergeStage",
+    class_name="MergeNode",
     color="#000000",
     fill="#B1B1B1",
     stroke="#565656",
-    header="MergeStage",
+    header="MergeNode",
     shape="rect",
 )
 APPLIED_LOSS = NodeSpec(
@@ -253,11 +253,11 @@ class GraphIR:
         n_id_ctr = 0
         e_id_ctr = 0
         for node_lbl, node in mg._nodes.items():
-            if isinstance(node, ModelStage):
+            if isinstance(node, ModelNode):
                 nodes.append(NodeIR(id=f"n{n_id_ctr}", spec=MODEL_STAGE, label=node_lbl))
                 n_id_ctr += 1
 
-            elif isinstance(node, MergeStage):
+            elif isinstance(node, MergeNode):
                 nodes.append(NodeIR(id=f"n{n_id_ctr}", spec=MERGE_STAGE, label=node_lbl))
                 n_id_ctr += 1
 
@@ -392,7 +392,7 @@ class Visualizer:
             graph = GraphIR.from_model_graph(self.obj)
             return graph.to_mermaid()
 
-        # elif isinstance(self.obj, ModelStage):
+        # elif isinstance(self.obj, ModelNode):
         #     stage = StageIR.from_model_stage(self.obj)
         #     return stage.to_mermaid()
 
