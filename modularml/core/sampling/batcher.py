@@ -8,7 +8,7 @@ from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.batch_view import BatchView
 from modularml.core.references.featureset_reference import FeatureSetColumnReference
 from modularml.utils.data.data_format import DataFormat
-from modularml.utils.data.formatting import ensure_list
+from modularml.utils.data.formatting import ensure_list, to_hashable
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -80,7 +80,11 @@ class Batcher:
         """
         # Get sample indices (each role must have same number of samples)
         role_indices = {k: np.asarray(v).reshape(-1) for k, v in role_indices.items()}
-        role_weights = None if role_weights is None else {k: np.asarray(v).reshape(-1) for k, v in role_weights.items()}
+        role_weights = (
+            None
+            if role_weights is None
+            else {k: np.asarray(v).reshape(-1) for k, v in role_weights.items()}
+        )
         n = len(next(iter(role_indices.values())))
         for v in role_indices.values():
             if len(v) != n:
@@ -144,28 +148,6 @@ class Batcher:
 
         return batches
 
-    def _to_hashable(self, val: Any):
-        """
-        Convert a value into a hashable representation suitable for grouping keys.
-
-        Description:
-            - Scalars are returned as-is.
-            - NumPy arrays are converted to tuples.
-            - Lists are converted to tuples.
-            - Nested structures are recursively converted.
-        """
-        if isinstance(val, np.ndarray):
-            return tuple(self._to_hashable(x) for x in val.tolist())
-
-        if isinstance(val, (list, tuple)):
-            return tuple(self._to_hashable(x) for x in val)
-
-        # NumPy scalar → Python scalar
-        if isinstance(val, np.generic):
-            return val.item()
-
-        return val
-
     def _stratify(
         self,
         *,
@@ -215,7 +197,9 @@ class Batcher:
             # Get source data
             k = ref.to_string()
             if k in strata_data:
-                msg = f"ColumnReference.to_string() already exists in `strata_data`: {k}"
+                msg = (
+                    f"ColumnReference.to_string() already exists in `strata_data`: {k}"
+                )
                 raise ValueError(msg)
             ref_data: np.ndarray = view.get_data(
                 columns=f"{ref.domain}.{ref.key}.{ref.rep}",
@@ -232,7 +216,7 @@ class Batcher:
         buckets: dict[tuple, list[int]] = {}
         for i, abs_idx in enumerate(abs_indices):
             view_pos = abs_to_viewpos[abs_idx]
-            row_vals = tuple(self._to_hashable(strata_data[k][view_pos]) for k in strata_data)
+            row_vals = tuple(to_hashable(strata_data[k][view_pos]) for k in strata_data)
             buckets.setdefault(row_vals, []).append(i)
 
         # Number of buckets must be <= batch size
@@ -260,7 +244,11 @@ class Batcher:
         #   - interleave until first group runs out (strict_stratification)
         #       - all batches balanced, but may not use all samples
         exhausted = set()
-        while (len(exhausted) == 0) if self.strict_stratification else (len(exhausted) < len(keys)):
+        while (
+            (len(exhausted) == 0)
+            if self.strict_stratification
+            else (len(exhausted) < len(keys))
+        ):
             # Add next element from each strata into interleaved array
             for k in keys:
                 if k in exhausted:
@@ -282,7 +270,9 @@ class Batcher:
 
             batch_role_idxs = {k: role_indices[k][batch_idxs] for k in role_indices}
             batch_role_weights = (
-                None if role_weights is None else {k: role_weights[k][batch_idxs] for k in role_weights}
+                None
+                if role_weights is None
+                else {k: role_weights[k][batch_idxs] for k in role_weights}
             )
 
             batches.append(
@@ -358,7 +348,7 @@ class Batcher:
         buckets: dict[tuple, list[int]] = {}
         for i, abs_idx in enumerate(abs_indices):
             view_pos = abs_to_viewpos[abs_idx]
-            row_vals = tuple(self._to_hashable(group_data[k][view_pos]) for k in group_data)
+            row_vals = tuple(to_hashable(group_data[k][view_pos]) for k in group_data)
             buckets.setdefault(row_vals, []).append(i)
 
         # Build batches
@@ -377,7 +367,9 @@ class Batcher:
 
                 batch_role_idxs = {k: role_indices[k][batch_idxs] for k in role_indices}
                 batch_role_weights = (
-                    None if role_weights is None else {k: role_weights[k][batch_idxs] for k in role_weights}
+                    None
+                    if role_weights is None
+                    else {k: role_weights[k][batch_idxs] for k in role_weights}
                 )
 
                 batches.append(

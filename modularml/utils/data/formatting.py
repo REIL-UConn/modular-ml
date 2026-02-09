@@ -1,7 +1,7 @@
 import math
 from collections import Counter
 from collections.abc import Iterable, Sequence
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import numpy as np
 
@@ -202,6 +202,29 @@ def ensure_tuple(x):
     if isinstance(x, Iterable) and not isinstance(x, (str, bytes)):
         return tuple(x)
     return (x,)
+
+
+def to_hashable(val: Any):
+    """
+    Convert a value into a hashable representation suitable for grouping keys.
+
+    Description:
+        - Scalars are returned as-is.
+        - NumPy arrays are converted to tuples.
+        - Lists are converted to tuples.
+        - Nested structures are recursively converted.
+    """
+    if isinstance(val, np.ndarray):
+        return tuple(to_hashable(x) for x in val.tolist())
+
+    if isinstance(val, (list, tuple)):
+        return tuple(to_hashable(x) for x in val)
+
+    # NumPy scalar to Python scalar
+    if isinstance(val, np.generic):
+        return val.item()
+
+    return val
 
 
 def find_duplicates(
