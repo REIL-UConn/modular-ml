@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from collections.abc import Iterable
+from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -1793,13 +1794,13 @@ class ModelGraph(Configurable, Stateful):
     def get_state(self) -> dict[str, Any]:
         state = {
             "nodes": {
-                n_id: self.nodes[n_id].get_state()
+                n_id: deepcopy(self.nodes[n_id].get_state())
                 for n_id in self._sorted_node_ids
                 if isinstance(self.nodes[n_id], Stateful)
             },
             "optimizer": None
             if self._optimizer is None
-            else self._optimizer.get_state(),
+            else deepcopy(self._optimizer.get_state()),
             "opt_built_from_node_ids": self._opt_built_from_node_ids,
             "is_built": self.is_built,
         }
