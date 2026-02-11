@@ -45,6 +45,7 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
         *,
         rows: NDArray[np.int64] | None = None,
         columns: list[str] | None = None,
+        label: str | None = None,
     ) -> FeatureSetView:
         if rows is None:
             rows = np.arange(fs.n_samples)
@@ -53,7 +54,12 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
                 include_domain_prefix=True,
                 include_rep_suffix=True,
             )
-        return cls(source=fs, indices=np.asarray(rows, dtype=np.int64), columns=columns)
+        return cls(
+            source=fs,
+            indices=np.asarray(rows, dtype=np.int64),
+            columns=columns,
+            label=label,
+        )
 
     # ================================================
     # Properties & Dunders

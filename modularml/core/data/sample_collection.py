@@ -25,7 +25,11 @@ from modularml.core.data.schema_constants import (
     DOMAIN_TARGETS,
     REP_RAW,
 )
-from modularml.utils.data.conversion import convert_dict_to_format, convert_to_format, stack_nested_numpy
+from modularml.utils.data.conversion import (
+    convert_dict_to_format,
+    convert_to_format,
+    stack_nested_numpy,
+)
 from modularml.utils.data.data_format import DataFormat
 from modularml.utils.data.formatting import ensure_list
 from modularml.utils.data.pyarrow_data import (
@@ -134,7 +138,10 @@ class SampleCollection:
         n_unique = ids.nunique(dropna=False)
         if n_unique < len(ids):
             # Regenerate to ensure unique identifiers
-            unique_ids = pa.array([str(uuid.uuid4()) for _ in range(len(ids))], type=pa.string())
+            unique_ids = pa.array(
+                [str(uuid.uuid4()) for _ in range(len(ids))],
+                type=pa.string(),
+            )
             self.table = self.table.set_column(
                 self.table.schema.get_field_index(DOMAIN_SAMPLE_ID),
                 DOMAIN_SAMPLE_ID,
@@ -157,7 +164,10 @@ class SampleCollection:
 
         # Check for duplicate/non-unique columns
         if len(unique_cols) != len(self.table.column_names):
-            unique, counts = np.unique(np.asarray(self.table.column_names), return_counts=True)
+            unique, counts = np.unique(
+                np.asarray(self.table.column_names),
+                return_counts=True,
+            )
             dups = unique[counts > 1]
             msg = f"Detected duplicate column names: {dups}"
             raise ValueError(msg)
@@ -192,7 +202,9 @@ class SampleCollection:
         meta[METADATA_SCHEMA_VERSION_KEY.encode()] = SCHEMA_VERSION.encode()
 
         # Domain shapes and dtypes
-        for domain in [DOMAIN_FEATURES, DOMAIN_TARGETS] + ([DOMAIN_TAGS] if self.has_tags else []):
+        for domain in [DOMAIN_FEATURES, DOMAIN_TARGETS] + (
+            [DOMAIN_TAGS] if self.has_tags else []
+        ):
             # Get shapes and dtypes
             d_shapes: dict[str, tuple[int, ...]] = self._get_domain_shapes(
                 domain=domain,
@@ -209,13 +221,18 @@ class SampleCollection:
 
             # Update meta data
             for k in d_shapes:
-                for s_dic, suffix in zip((d_shapes, d_dtypes), (SHAPE_SUFFIX, DTYPE_SUFFIX), strict=True):
+                for s_dic, suffix in zip(
+                    (d_shapes, d_dtypes),
+                    (SHAPE_SUFFIX, DTYPE_SUFFIX),
+                    strict=True,
+                ):
                     meta_key = (f"{METADATA_PREFIX}.{domain}.{k}.{suffix}").encode()
                     meta_val = str(s_dic[k]).encode()
                     if meta_key in meta and meta_val != meta[meta_key]:
                         msg = (
-                            f"Meta data already exist for key `{meta_key}` but it does not "
-                            f"match expected value: {meta[meta_key]} != {meta_val}"
+                            f"Meta data already exist for key `{meta_key}` but it "
+                            f"does not match expected value: {meta[meta_key]} "
+                            f"!= {meta_val}."
                         )
                         raise ValueError(msg)
                     meta[meta_key] = meta_val
@@ -610,7 +627,11 @@ class SampleCollection:
             # Decode each row's binary buffer to an ndarray of the correct dtype/shape
             decoded = np.empty((n_rows, *tuple(shape)), dtype=np_dtype)
             for i in range(n_rows):
-                buf = pa_arr[i].as_buffer() if hasattr(pa_arr[i], "as_buffer") else pa_arr[i]
+                buf = (
+                    pa_arr[i].as_buffer()
+                    if hasattr(pa_arr[i], "as_buffer")
+                    else pa_arr[i]
+                )
                 if buf is None:
                     decoded[i] = np.zeros(shape, dtype=np_dtype)
                     continue
@@ -1041,9 +1062,15 @@ class SampleCollection:
 
             domain, key, rep = col.split(".", maxsplit=2)
             col_key = (
-                _ensure_domain_prefix(col, domain) if include_domain_prefix else _remove_domain_prefix(col, domain)
+                _ensure_domain_prefix(col, domain)
+                if include_domain_prefix
+                else _remove_domain_prefix(col, domain)
             )
-            col_key = _ensure_rep_suffix(col_key, rep) if include_rep_suffix else _remove_rep_suffix(col_key, rep)
+            col_key = (
+                _ensure_rep_suffix(col_key, rep)
+                if include_rep_suffix
+                else _remove_rep_suffix(col_key, rep)
+            )
 
             data[col_key] = self._get_rep_data(
                 domain=domain,
@@ -1380,7 +1407,11 @@ class SampleCollection:
 
         # Remove metadata entries for this representation
         meta = dict(self.table.schema.metadata or {})
-        to_delete = [k for k in meta if k.decode().startswith(f"{METADATA_PREFIX}.{domain}.{key}.{rep}.")]
+        to_delete = [
+            k
+            for k in meta
+            if k.decode().startswith(f"{METADATA_PREFIX}.{domain}.{key}.{rep}.")
+        ]
         for k in to_delete:
             del meta[k]
         self.table = self.table.replace_schema_metadata(meta)
@@ -1388,6 +1419,76 @@ class SampleCollection:
     # ================================================
     # Export / conversion
     # ================================================
+    def copy(
+        self,
+        *,
+        raw_only: bool = False,
+        deep: bool = False,
+    ) -> SampleCollection:
+        """
+        Create a copy of this SampleCollection.
+
+        Description:
+            Returns a new SampleCollection instance with controlled
+            duplication of the underlying PyArrow table.
+
+            - If raw_only=True, only REP_RAW representations (and sample_id)
+              are copied. All transformed representations are excluded.
+            - If deep=True, Arrow buffers are duplicated via pandas roundtrip.
+              Otherwise, zero-copy buffer sharing is used.
+
+        Args:
+            raw_only (bool, optional):
+                If True, include only REP_RAW columns and sample_id.
+                Defaults to False.
+
+            deep (bool, optional):
+                If True, perform a deep copy of Arrow buffers.
+                If False, underlying Arrow buffers are shared (zero-copy).
+                Defaults to False.
+
+        Returns:
+            SampleCollection:
+                A new SampleCollection instance.
+
+        """
+        # Determine columns to copy, and build new table
+        if raw_only:
+            cols = []
+            for domain in self.available_domains:
+                if domain == DOMAIN_SAMPLE_ID:
+                    cols.append(DOMAIN_SAMPLE_ID)
+                    continue
+                if (domain == DOMAIN_TAGS) and not self.has_tags:
+                    continue
+
+                # Record all REP_RAW columns
+                for key in self.schema.domain_keys(domain=domain):
+                    if REP_RAW in self.schema.rep_keys(
+                        domain=domain,
+                        key=key,
+                    ):
+                        col_name = self._format_col_str(
+                            domain=domain,
+                            key=key,
+                            rep=REP_RAW,
+                            include_domain_prefix=True,
+                            include_rep_suffix=True,
+                        )
+                        cols.append(col_name)
+
+            new_table = self.table.select(cols)
+
+        else:
+            new_table = self.table
+
+        # Deep copy (if requested)
+        if deep:
+            new_table = pa.Table.from_pandas(new_table.to_pandas())
+
+        # Build new sample collection
+        return SampleCollection(table=new_table)
+
     def select(
         self,
         columns: str | list[str],
@@ -1424,7 +1525,9 @@ class SampleCollection:
         """
         # Gather domain data (flattened)
         all_data: dict[str, np.ndarray] = {}
-        for domain in [DOMAIN_FEATURES, DOMAIN_TARGETS] + ([DOMAIN_TAGS] if self.has_tags else []):
+        for domain in [DOMAIN_FEATURES, DOMAIN_TARGETS] + (
+            [DOMAIN_TAGS] if self.has_tags else []
+        ):
             d_res = self._get_domain_data(
                 domain=domain,
                 fmt=DataFormat.DICT_NUMPY,

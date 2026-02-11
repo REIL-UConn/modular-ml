@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -43,7 +42,7 @@ from modularml.utils.io.cloning import clone_via_serialization
 from modularml.utils.logging.warnings import warn
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
     import pandas as pd
 
@@ -70,13 +69,15 @@ class FeatureSet(
     def __init__(
         self,
         label: str,
-        table: pa.Table,
-        schema: SampleSchema | None = None,
+        collection: SampleCollection,
         **kwargs,
     ):
         super().__init__(label=label, **kwargs)
         # Create SampleCollection attribute
-        self.collection: SampleCollection = SampleCollection(table=table, schema=schema)
+        if not isinstance(collection, SampleCollection):
+            msg = f"Expected SampleCollection. Received: {type(collection)}."
+            raise TypeError(msg)
+        self.collection: SampleCollection = collection
 
         # Store splits & spliiter configs
         self._splits: dict[str, FeatureSetView] = {}
@@ -84,6 +85,38 @@ class FeatureSet(
 
         # Store scaler logs/configs
         self._scaler_recs: list[ScalerRecord] = []
+
+    @classmethod
+    def from_pyarrow_table(
+        cls,
+        label: str,
+        table: pa.Table,
+        schema: SampleSchema | None = None,
+        **kwargs,
+    ) -> FeatureSet:
+        """
+        Construct a new FeatureSet from an existing PyArrow table.
+
+        Args:
+            label (str):
+                Label to assign to this FeatureSet.
+            table (pa.Table):
+                Table to build FeatureSet around.
+            schema (SampleSchema | None):
+                PyArrow schema to use for SampleCollection.
+            kwargs:
+                Additional keyword arguments.
+
+        Returns:
+            FeatureSet: New FeatureSet instance
+
+        """
+        collection: SampleCollection = SampleCollection(table=table, schema=schema)
+        return cls(
+            label=label,
+            collection=collection,
+            **kwargs,
+        )
 
     @classmethod
     def from_dict(
@@ -107,18 +140,18 @@ class FeatureSet(
             already represents a complete sample (i.e., no grouping is applied).
 
         Args:
-        label (str):
-            Label to assign to this FeatureSet.
-        data (dict[str, Sequence[Any]]):
-            A mapping from column names to list-like column data. Each list must \
-            have the same length, corresponding to the total number of samples.
-        feature_keys (str | list[str]):
-            Column name(s) in `data` to be used as features.
-        target_keys (str | list[str]):
-            Column name(s) in `data` to be used as targets.
-        tag_keys (str | list[str] | None, optional):
-            Column name(s) corresponding to identifying or categorical metadata \
-            (e.g., cell ID, protocol, SOC). Defaults to None.
+            label (str):
+                Label to assign to this FeatureSet.
+            data (dict[str, Sequence[Any]]):
+                A mapping from column names to list-like column data. Each list must \
+                have the same length, corresponding to the total number of samples.
+            feature_keys (str | list[str]):
+                Column name(s) in `data` to be used as features.
+            target_keys (str | list[str]):
+                Column name(s) in `data` to be used as targets.
+            tag_keys (str | list[str] | None, optional):
+                Column name(s) corresponding to identifying or categorical metadata \
+                (e.g., cell ID, protocol, SOC). Defaults to None.
 
         Returns:
             FeatureSet:
@@ -164,7 +197,10 @@ class FeatureSet(
         )
 
         # 4. Return new FeatureSet
-        return cls(label=str(label), table=table)
+        return cls.from_pyarrow_table(
+            label=str(label),
+            table=table,
+        )
 
     @classmethod
     def from_pandas(
@@ -270,7 +306,10 @@ class FeatureSet(
         )
 
         # 6. Return new FeatureSet
-        return cls(label=str(label), table=table)
+        return cls.from_pyarrow_table(
+            label=str(label),
+            table=table,
+        )
 
     from_df = from_pandas
 
@@ -1168,6 +1207,106 @@ class FeatureSet(
                 raise
 
     # ================================================
+    # Duplication
+    # ================================================
+    def copy(
+        self,
+        *,
+        label: str | None = None,
+        share_raw_data_buffer: bool = True,
+        restore_splits: bool = False,
+        restore_scalers: bool = False,
+        register: bool = False,
+    ) -> FeatureSet:
+        """
+        Create a copy of this FeatureSet with optional state restoration.
+
+        Description:
+            Constructs a new FeatureSet instance based on this one. By default,
+            the PyArrow buffers of the raw data columns are shared (zero-copy).
+            Splitters and scalers can optionally be re-applied to the new instance,
+            producing non-shared transform data columns.
+
+            This method does not mutate the original FeatureSet.
+
+        Args:
+            label (str | None, optional):
+                Label for the new FeatureSet. If None, appends "_copy"
+                to the current label.
+
+            share_raw_data_buffer (bool, optional):
+                If True, PyArrow buffers of raw data columns are shared between
+                the original and copied FeatureSet (zero-copy). If False,
+                a deep copy of the Arrow table is created.
+
+            restore_splits (bool, optional):
+                If True, all stored SplitterRecords are re-applied to the
+                new FeatureSet to regenerate splits.
+
+            restore_scalers (bool, optional):
+                If True, all ScalerRecords are re-applied in order to
+                regenerate transformed representations.
+
+            register (bool, optional):
+                Whether to register the copied FeatureSet in the
+                ExperimentContext registry. If True, a new node ID will
+                be generated for the copied instance.
+
+        Returns:
+            FeatureSet:
+                A new FeatureSet instance.
+
+        Raises:
+            ValueError:
+                If `restore_scalers=True` but `restore_splits=False` and
+                scalers depend on split-specific fitting.
+
+        """
+        new_label = label if label is not None else f"{self.label}_copy"
+
+        # Copy collection (only REP_RAW columns)
+        new_coll = self.collection.copy(
+            raw_only=True,
+            deep=not share_raw_data_buffer,
+        )
+
+        # Instantiate new FeatureSet
+        new_fs = FeatureSet(
+            label=new_label,
+            collection=new_coll,
+            register=register,
+        )
+
+        # Restore splits (if specified)
+        if restore_splits:
+            for rec in self._split_recs:
+                new_fs.split(splitter=rec.splitter, register=True)
+
+        # Restore scalers (if specified)
+        if restore_scalers:
+            # Check that split dependecies were also restored
+            if not restore_splits:
+                for rec in self._scaler_recs:
+                    if rec.fit_split is not None:
+                        msg = (
+                            "Cannot restore scalers that were fit to splits "
+                            "unless `restore_splits=True`."
+                        )
+                        raise ValueError(msg)
+
+            # Restore scalers
+            for rec in self._scaler_recs:
+                new_fs.fit_transform(
+                    scaler=rec.scaler_obj,
+                    domain=rec.domain,
+                    keys=rec.keys,
+                    fit_to_split=rec.fit_split,
+                    merged_axes=rec.merged_axes,
+                )
+
+        return new_fs
+
+    # ================================================
     # Referencing
     # ================================================
     def reference(
@@ -1353,7 +1492,11 @@ class FeatureSet(
     ) -> FeatureSet:
         """Instantiates a empty FeatureSet."""
         empty_table = pa.table({})
-        return cls(table=empty_table, register=register, **config)
+        return cls.from_pyarrow_table(
+            table=empty_table,
+            register=register,
+            **config,
+        )
 
     # ================================================
     # Stateful

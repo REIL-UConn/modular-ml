@@ -819,7 +819,7 @@ class SampleCollectionMixin:
     def to_featureset(self, label: str) -> FeatureSet:
         from modularml.core.data.featureset import FeatureSet
 
-        return FeatureSet(label=label, table=self.to_arrow())
+        return FeatureSet(label=label, collection=self.to_sample_collection())
 
     def to_sample_data(self, fmt: DataFormat = DataFormat.NUMPY) -> SampleData:
         """
