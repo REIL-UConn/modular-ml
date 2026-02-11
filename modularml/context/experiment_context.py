@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from weakref import ref
 
 from matplotlib.pylab import Enum
@@ -103,6 +103,47 @@ class ExperimentContext:
         try:
             yield self
         finally:
+            _ACTIVE_EXPERIMENT_CONTEXT.reset(token)
+
+    @contextmanager
+    def temporary(self):
+        """
+        Create a fully isolated temporary execution scope.
+
+        Description:
+            All modifications to:
+                - registered nodes
+                - model graph
+                - registration policy
+                - experiment binding
+
+            will be reverted when the context exits.
+
+            This is primarily used for cross-validation and
+            other meta-execution procedures.
+
+        Example:
+        ```python
+            ctx = ExperimentContext.get_active()
+            with ctx.temporary():
+                ctx.set_registration_policy("overwrite")
+                ctx.register_experiment_node(new_fs)
+                run_fold()
+            # context fully restored
+        ```
+
+        Yields:
+            ExperimentContext
+
+        """
+        # Record context state
+        old_state = self.get_state()
+        token = _ACTIVE_EXPERIMENT_CONTEXT.set(self)
+        try:
+            yield self
+        finally:
+            # Reset state and active context
+            self.set_state(old_state)
             _ACTIVE_EXPERIMENT_CONTEXT.reset(token)
 
     # ================================================
@@ -298,6 +339,39 @@ class ExperimentContext:
 
         return node
 
+    def update_node_label(
+        self,
+        node_id: str,
+        new_label: str,
+        *,
+        check_label_collision: bool = True,
+    ):
+        """
+        Update the label mapping for a registered node.
+
+        Raises:
+            ValueError if label collision occurs.
+
+        """
+        if node_id not in self._nodes_by_id:
+            msg = f"Node ID '{node_id}' not registered."
+            raise KeyError(msg)
+
+        old_label = self._nodes_by_id[node_id].label
+
+        # If unchanged -> skip
+        if new_label == old_label:
+            return
+
+        # Check collision
+        if check_label_collision and (new_label in self._node_label_to_id):
+            msg = f"ExperimentNode label '{new_label}' already exists."
+            raise ValueError(msg)
+
+        # Update registry mapping
+        self._node_label_to_id.pop(old_label, None)
+        self._node_label_to_id[new_label] = node_id
+
     def register_model_graph(self, graph: ModelGraph):
         """Register a ModelGraph to this context."""
         from modularml.core.topology.model_graph import ModelGraph
@@ -376,8 +450,7 @@ class ExperimentContext:
                 raise ValueError(msg)
             if self.has_node(node_id=val):
                 return self.get_node(node_id=val, enforce_type=enforce_type)
-            if self.has_node(label=val):
-                return self.get_node(label=val, enforce_type=enforce_type)
+            return self.get_node(label=val, enforce_type=enforce_type)
 
         # Get node from node_id
         if node_id is not None:
@@ -508,3 +581,37 @@ class ExperimentContext:
     def model_graph(self) -> ModelGraph | None:
         """The active ModelGraph instance in this context."""
         return self._mg
+
+    # ================================================
+    # Stateful
+    # ================================================
+    def get_state(self) -> dict[str, Any]:
+        return {
+            "nodes": self._nodes_by_id.copy(),  # shallow
+            "node_states": {
+                k: (v.get_state() if hasattr(v, "get_state") else None)
+                for k, v in self._nodes_by_id.items()
+            },
+            "model_graph": self._mg,
+            "model_graph_state": self._mg.get_state() if self._mg is not None else None,
+            "policy": self._policy,
+            "experiment_ref": self._experiment_ref,
+        }
+
+    def set_state(self, state: dict[str, Any]):
+        self.clear_registries()
+        self._experiment_ref = state["experiment_ref"]
+        self._policy = state["policy"]
+
+        # Restore all nodes
+        self._nodes_by_id = state["nodes"]
+        self._node_label_to_id = {}
+        for node_id, n in self._nodes_by_id.items():
+            if hasattr(n, "set_state"):
+                n.set_state(state["node_states"][node_id])
+            self._node_label_to_id[n.label] = node_id
+
+        # Restore model graph
+        self._mg = state["model_graph"]
+        if self.model_graph is not None:
+            self._mg.set_state(state["model_graph_state"])
