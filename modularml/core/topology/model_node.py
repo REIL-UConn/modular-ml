@@ -856,6 +856,7 @@ class ModelNode(ComputeNode):
     # ================================================
     def get_state(self) -> dict[str, Any]:
         state = {
+            "super": super().get_state(),
             "model": self._model.get_state(),
             "optimizer": None
             if self._optimizer is None
@@ -865,6 +866,9 @@ class ModelNode(ComputeNode):
         return state
 
     def set_state(self, state: dict[str, Any]) -> None:
+        # Set parent state first
+        super().set_state(state["super"])
+
         # Model weights can always be restored
         self._model.set_state(state["model"])
 

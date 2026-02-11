@@ -5,7 +5,7 @@ from typing import Any
 
 from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.schema_constants import INVALID_LABEL_CHARACTERS
-from modularml.core.io.protocols import Configurable
+from modularml.core.io.protocols import Configurable, Stateful
 from modularml.core.references.experiment_reference import ExperimentNodeReference
 from modularml.utils.representation.summary import Summarizable
 
@@ -14,7 +14,7 @@ def generate_node_id() -> str:
     return str(uuid.uuid4())
 
 
-class ExperimentNode(Summarizable, Configurable):
+class ExperimentNode(Summarizable, Configurable, Stateful):
     """
     Base class for all nodes within an Experiment.
 
@@ -70,7 +70,16 @@ class ExperimentNode(Summarizable, Configurable):
     def label(self, new_label: str):
         """Get or set the unique label for this node."""
         self._validate_label(label=new_label)
-        ExperimentContext.update_node_label(self, new_label)
+
+        # Check registry (if registered)
+        exp_ctx = ExperimentContext.get_active()
+        if exp_ctx.has_node(node_id=self.node_id):
+            exp_ctx.update_node_label(
+                node_id=self.node_id,
+                new_label=new_label,
+                check_label_collision=True,
+            )
+
         self._label = new_label
 
     # ================================================
@@ -111,3 +120,12 @@ class ExperimentNode(Summarizable, Configurable):
         register: bool = True,
     ) -> ExperimentNode:
         return cls(register=register, **config)
+
+    # ================================================
+    # Stateful
+    # ================================================
+    def get_state(self) -> dict[str, Any]:
+        return {"label": self.label}
+
+    def set_state(self, state: dict[str, Any]):
+        self.label = state["label"]

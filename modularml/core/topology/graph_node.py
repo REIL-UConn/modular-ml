@@ -646,3 +646,19 @@ class GraphNode(ABC, ExperimentNode):
 
         msg = f"Unknown GraphNode subclass: {g_type}."
         raise ValueError(msg)
+
+    # ================================================
+    # Stateful
+    # ================================================
+    def get_state(self) -> dict[str, Any]:
+        state = {
+            "super": super().get_state(),
+            "upstream_refs": self._upstream_refs,
+            "downstream_refs": self._downstream_refs,
+        }
+        return state
+
+    def set_state(self, state: dict[str, Any]):
+        super().set_state(state["super"])
+        self._upstream_refs = state["upstream_refs"]
+        self._downstream_refs = state["downstream_refs"]

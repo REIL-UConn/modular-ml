@@ -50,13 +50,7 @@ if TYPE_CHECKING:
     from modularml.core.data.sample_schema import SampleSchema
 
 
-class FeatureSet(
-    ExperimentNode,
-    SplitMixin,
-    SampleCollectionMixin,
-    Configurable,
-    Stateful,
-):
+class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
     """
     Unified FeatureSet backed by a single SampleCollection.
 
@@ -1504,6 +1498,7 @@ class FeatureSet(
     def get_state(self) -> dict[str, Any]:
         """Runtime state (i.e., PyArrow table and records) of the FeatureSet."""
         return {
+            "super": super().get_state(),
             "sample_collection": self.collection,
             "table_hash": hash_pyarrow_table(self.collection.table),
             "splits": {k: self.get_split(k) for k in self.available_splits},
@@ -1514,6 +1509,9 @@ class FeatureSet(
     def set_state(self, state: dict[str, Any]):
         """Restore FeatureSet from semantic state."""
         from modularml.core.data.featureset_view import FeatureSetView
+
+        # Set parent state first
+        super().set_state(state["super"])
 
         # Clone sample collection (to prevent shared mutation)
         state_coll: SampleCollection = state["sample_collection"]

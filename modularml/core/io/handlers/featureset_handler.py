@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import pickle
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -78,7 +79,7 @@ class FeatureSetHandler(BaseHandler[FeatureSet]):
         # Save SampleCollection
         #  - uses PyArrow file to store data + schema
         # ------------------------------------------------
-        coll: SampleCollection = state["sample_collection"]
+        coll: SampleCollection = state.pop("sample_collection")
         coll_path = coll.save(Path(save_dir) / "sample_collection.arrow")
         file_mapping["sample_collection"] = coll_path.name
 
@@ -87,7 +88,7 @@ class FeatureSetHandler(BaseHandler[FeatureSet]):
         #  - removes source reference
         # ------------------------------------------------
         split_cfgs = {}
-        splits: dict[str, FeatureSetView] = state["splits"]
+        splits: dict[str, FeatureSetView] = state.pop("splits")
         for k, fsv in splits.items():
             split_cfgs[k] = {
                 "indices": fsv.indices.tolist()
@@ -112,7 +113,7 @@ class FeatureSetHandler(BaseHandler[FeatureSet]):
 
         scaler_cfg_files: list[str] = []
         scaler_recs: list[ScalerRecord] = sorted(
-            state["scaler_records"],
+            state.pop("scaler_records"),
             key=lambda x: x.order,
         )
         n_digits = (len(scaler_recs) // 10) + 1
@@ -146,7 +147,7 @@ class FeatureSetHandler(BaseHandler[FeatureSet]):
         dir_splitter_rec.mkdir(exist_ok=True)
 
         splitter_cfg_files: list[str] = []
-        splitter_recs: list[SplitterRecord] = state["splitter_records"]
+        splitter_recs: list[SplitterRecord] = state.pop("splitter_records")
         n_digits = (len(splitter_recs) // 10) + 1
         for i, rec in enumerate(splitter_recs):
             # json-safe conversion of config data
@@ -168,6 +169,18 @@ class FeatureSetHandler(BaseHandler[FeatureSet]):
             splitter_cfg_files.append(cfg_path.name)
 
         file_mapping["splitter_records"] = splitter_cfg_files
+
+        # ------------------------------------------------
+        # Other state values
+        #  - extra arguments (eg, "super") will be handled
+        #    via the default state.pkl
+        # ------------------------------------------------
+        if state:
+            # Save to pickle
+            file_state = Path(save_dir) / self.state_rel_path
+            with Path.open(file_state, "wb") as f:
+                pickle.dump(state, f, protocol=pickle.HIGHEST_PROTOCOL)
+            file_mapping["state"] = self.state_rel_path
 
         return file_mapping
 
@@ -300,13 +313,20 @@ class FeatureSetHandler(BaseHandler[FeatureSet]):
         from modularml.core.splitting.splitter_record import SplitterRecord
         from modularml.core.transforms.scaler_record import ScalerRecord
 
-        state: dict[str, Any] = {}
-        load_dir = Path(load_dir)
-
         # Extract file mapping
+        load_dir = Path(load_dir)
         file_mapping: dict[str, Any] = self._read_json(
             load_dir / "artifact.json",
         )["files"]
+
+        # ------------------------------------------------
+        # Restore basic state props
+        # ------------------------------------------------
+        state: dict[str, Any] = {}
+        if "state" in file_mapping:
+            file_state: Path = load_dir / file_mapping["state"]
+            with Path.open(file_state, "rb") as f:
+                state: dict[str, Any] = pickle.load(f)
 
         # ------------------------------------------------
         # Restore SampleCollection
