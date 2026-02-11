@@ -192,33 +192,23 @@ class RandomSplitter(BaseSplitter):
         # ================================================
         # Case 3: Group by tag(s)
         # ================================================
-        coll = view.source.collection
-
-        # Extract raw tag arrays as numpy, aligned with the FULL FeatureSet
-        tag_data: dict[str, np.ndarray] = coll._get_domain_data(
-            domain=DOMAIN_TAGS,
-            keys=self.group_by,
+        # Extract raw tag arrays as numpy for the grouping keys
+        tag_data: dict[str, np.ndarray] = view.get_tags(
             fmt=DataFormat.DICT_NUMPY,
+            tags=self.group_by,
             rep=REP_RAW,
             include_rep_suffix=False,
             include_domain_prefix=False,
         )
-        # Restrict to the *samples inside this view*
-        view_abs_indices = view.indices  # absolute sample indices
-        tag_cols_view: list[np.ndarray] = [
-            tag_data[k][view_abs_indices] for k in self.group_by
-        ]
 
         # Build group keys
         # Example:
         #   if grouping by ["cell_id", "cycle_number"]
         #   then group_keys[i] = ("A1", 45)
         group_keys = np.array(
-            [tuple(col[i] for col in tag_cols_view) for i in range(n)],
+            [tuple(col[i] for col in tag_data.values()) for i in range(n)],
             dtype=object,
         )
-
-        # Map unique tuple to group ID
         unique_groups, inv = np.unique(group_keys, return_inverse=True)
 
         # Build mapping: group_id to list of relative indices
@@ -258,6 +248,11 @@ class RandomSplitter(BaseSplitter):
         """
         Compute index boundaries for each split given n total elements.
 
+        Uses the Largest Remainder Method to ensure:
+        - Total count equals `n`
+        - Allocation is proportional to `self.ratios`
+        - No systematic bias toward the last group
+
         Args:
             n (int):
                 The total number of samples.
@@ -268,14 +263,51 @@ class RandomSplitter(BaseSplitter):
                 the start and end indices for each subset.
 
         """
+        if n <= 0:
+            raise ValueError("Cannot split zero samples.")
+
+        labels = list(self.ratios.keys())
+        ratios = list(self.ratios.values())
+
+        # 1. Compute raw allocations (can be fractional)
+        raw = [r * n for r in ratios]
+
+        # 2. Allocate floor
+        base = [int(x) for x in raw]
+        allocated = sum(base)
+
+        # 3. Distribute remaining
+        remainders = [raw[i] - base[i] for i in range(len(raw))]
+        n_remaining = int(n - allocated)
+        if n_remaining > 0:
+            order = sorted(
+                np.arange(len(remainders)),
+                key=lambda i: remainders[i],
+                reverse=True,
+            )
+            for i in order[:n_remaining]:
+                base[i] += 1
+
+        # 4. Enforce all groups have at least one sample
+        for i, cnt in enumerate(base):
+            if cnt < 1:
+                closure = "."
+                if self.group_by is not None:
+                    closure = ", or adjust your grouping conditions."
+                elif self.stratify_by is not None:
+                    closure = ", or adjust your stratification conditions."
+                msg = (
+                    f"Split '{labels[i]}' would receive zero samples. "
+                    f"Increase split ratio{closure}"
+                )
+                raise ValueError(msg)
+
+        # 5. Build boundaries
         boundaries = {}
         current = 0
-        for i, (label, ratio) in enumerate(self.ratios.items()):
-            count = int(ratio * n)
-            if i == len(self.ratios) - 1:
-                count = n - current
-            boundaries[label] = (current, current + count)
-            current += count
+        for lbl, cnt in zip(labels, base, strict=True):
+            boundaries[lbl] = (current, current + cnt)
+            current += cnt
         return boundaries
 
     # ================================================
