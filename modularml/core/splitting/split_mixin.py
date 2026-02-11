@@ -605,13 +605,20 @@ class SplitMixin:
             # Record this splitter configuration
             # Splitter is cloned to prevent user from modifying state outside of ModularML
             cloned_splitter: BaseSplitter = clone_via_serialization(obj=splitter)
+            order = (
+                max([rec.order for rec in source._split_recs]) + 1
+                if len(source._split_recs) > 0
+                else 0
+            )
             rec = SplitterRecord(
+                order=order,
                 splitter=cloned_splitter,
                 applied_to=FeatureSetSplitReference(
                     node_label=source.label,
                     node_id=source.node_id,
                     split_name=self.label if is_view else None,
                 ),
+                produced_splits=list(results.keys()),
             )
             source._split_recs.append(rec)
 
