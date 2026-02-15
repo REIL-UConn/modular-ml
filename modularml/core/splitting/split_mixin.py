@@ -4,13 +4,13 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
-from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.schema_constants import (
     DOMAIN_FEATURES,
     DOMAIN_SAMPLE_ID,
     DOMAIN_TAGS,
     DOMAIN_TARGETS,
 )
+from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.references.experiment_reference import ResolutionError
 from modularml.core.references.featureset_reference import (
     FeatureSetColumnReference,

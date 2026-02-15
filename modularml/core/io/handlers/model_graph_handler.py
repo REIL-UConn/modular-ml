@@ -57,7 +57,7 @@ class ModelGraphHandler(BaseHandler[ModelGraph]):
             ModelGraph: The re-instantiated object.
 
         """
-        from modularml.context.experiment_context import ExperimentContext
+        from modularml.core.experiment.experiment_context import ExperimentContext
         from modularml.core.topology.graph_node import GraphNode
         from modularml.core.training.optimizer import Optimizer
 

@@ -1,6 +1,6 @@
 from typing import Any, TypeAlias
 
-from modularml.context.execution_context import ExecutionContext
+from modularml.core.data.execution_context import ExecutionContext
 from modularml.core.references.experiment_reference import ExperimentReference
 
 TensorLike: TypeAlias = Any

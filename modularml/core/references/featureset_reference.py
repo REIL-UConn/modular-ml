@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, get_args
 
-from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.schema_constants import (
     DOMAIN_FEATURES,
     DOMAIN_SAMPLE_ID,
@@ -13,6 +12,7 @@ from modularml.core.data.schema_constants import (
     T_ALL_DOMAINS,
     T_ALL_REPS,
 )
+from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.references.experiment_reference import (
     ExperimentNodeReference,
     ExperimentReference,

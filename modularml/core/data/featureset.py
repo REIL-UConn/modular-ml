@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -19,7 +20,6 @@ from modularml.core.data.schema_constants import (
     REP_TRANSFORMED,
 )
 from modularml.core.experiment.experiment_node import ExperimentNode
-from modularml.core.io.protocols import Configurable, Stateful
 from modularml.core.references.experiment_reference import ResolutionError
 from modularml.core.references.featureset_reference import (
     FeatureSetColumnReference,
@@ -1502,8 +1502,8 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
             "sample_collection": self.collection,
             "table_hash": hash_pyarrow_table(self.collection.table),
             "splits": {k: self.get_split(k) for k in self.available_splits},
-            "splitter_records": self._split_recs,
-            "scaler_records": self._scaler_recs,
+            "splitter_records": deepcopy(self._split_recs),
+            "scaler_records": deepcopy(self._scaler_recs),
         }
 
     def set_state(self, state: dict[str, Any]):

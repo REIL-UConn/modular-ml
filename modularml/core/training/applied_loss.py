@@ -5,9 +5,9 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.sample_schema import DOMAIN_TARGETS
 from modularml.core.data.schema_constants import DOMAIN_OUTPUTS
+from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.references.experiment_reference import ResolutionError
 from modularml.core.references.featureset_reference import FeatureSetColumnReference
 from modularml.core.references.model_io_reference import ModelOutputReference
@@ -21,9 +21,9 @@ from modularml.utils.nn.backend import Backend
 from modularml.utils.representation.summary import Summarizable
 
 if TYPE_CHECKING:
-    from modularml.context.execution_context import ExecutionContext
     from modularml.core.data.batch import Batch
     from modularml.core.data.batch_view import BatchView
+    from modularml.core.data.execution_context import ExecutionContext
     from modularml.core.references.execution_reference import TensorLike
     from modularml.core.references.reference_like import ReferenceLike
     from modularml.core.topology.graph_node import GraphNode

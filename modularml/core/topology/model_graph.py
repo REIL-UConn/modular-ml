@@ -6,7 +6,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from modularml.context.experiment_context import ExperimentContext
+from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.io.checkpoint import Checkpoint
 from modularml.core.io.protocols import Configurable, Stateful
 from modularml.core.references.featureset_reference import FeatureSetReference
@@ -36,8 +36,8 @@ from modularml.utils.topology.graph_search_utils import (
 )
 
 if TYPE_CHECKING:
-    from modularml.context.execution_context import ExecutionContext
     from modularml.core.data.batch import Batch
+    from modularml.core.data.execution_context import ExecutionContext
     from modularml.core.data.sample_data import SampleData
     from modularml.core.references.experiment_reference import (
         ExperimentNodeReference,

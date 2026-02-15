@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Any
 
-from modularml.context.experiment_context import ExperimentContext
+from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.io.protocols import Configurable
 from modularml.core.references.reference_like import ReferenceLike
 

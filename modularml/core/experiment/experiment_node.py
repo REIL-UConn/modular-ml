@@ -3,8 +3,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.schema_constants import INVALID_LABEL_CHARACTERS
+from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.io.protocols import Configurable, Stateful
 from modularml.core.references.experiment_reference import ExperimentNodeReference
 from modularml.utils.representation.summary import Summarizable

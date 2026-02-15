@@ -308,7 +308,7 @@ class BaseHandler(Generic[T]):
                 with new object
                 - Fork = generate new node_id for reloaded object and register
         """
-        from modularml.context.experiment_context import ExperimentContext
+        from modularml.core.experiment.experiment_context import ExperimentContext
         from modularml.core.experiment.experiment_node import (
             ExperimentNode,
             generate_node_id,
@@ -408,7 +408,7 @@ class BaseHandler(Generic[T]):
                 with new object
                 - Fork = generate new node_id for reloaded object and register
         """
-        from modularml.context.experiment_context import ExperimentContext
+        from modularml.core.experiment.experiment_context import ExperimentContext
         from modularml.core.experiment.experiment_node import (
             ExperimentNode,
             generate_node_id,

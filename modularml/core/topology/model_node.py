@@ -26,7 +26,7 @@ from modularml.utils.representation.summary import safe_cast_to_summary_rows
 from modularml.utils.topology.graph_search_utils import find_upstream_featuresets
 
 if TYPE_CHECKING:
-    from modularml.context.execution_context import ExecutionContext
+    from modularml.core.data.execution_context import ExecutionContext
     from modularml.core.training.applied_loss import AppliedLoss
 
 tf = check_tensorflow()

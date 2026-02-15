@@ -1,5 +1,5 @@
 from contextvars import ContextVar
-from modularml.context.experiment_context import ExperimentContext
+from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.featureset_view import FeatureSetView
 

@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from modularml.context.execution_context import ExecutionContext
-    from modularml.context.experiment_context import ExperimentContext
+    from modularml.core.data.execution_context import ExecutionContext
+    from modularml.core.experiment.experiment_context import ExperimentContext
 
 
 @runtime_checkable

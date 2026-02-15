@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pyarrow as pa
 
-from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.sample_collection_mixin import SampleCollectionMixin
 from modularml.core.data.schema_constants import (
     DOMAIN_FEATURES,
@@ -14,6 +13,7 @@ from modularml.core.data.schema_constants import (
     DOMAIN_TAGS,
     DOMAIN_TARGETS,
 )
+from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.io.protocols import Configurable
 from modularml.core.splitting.split_mixin import SplitMixin
 from modularml.utils.representation.summary import Summarizable

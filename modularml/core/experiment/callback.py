@@ -7,10 +7,10 @@ from modularml.core.experiment.callback_result import CallbackResult, PayloadRes
 from modularml.utils.nn.training import preserve_frozen_state
 
 if TYPE_CHECKING:
-    from modularml.context.execution_context import ExecutionContext
+    from modularml.core.data.execution_context import ExecutionContext
     from modularml.core.experiment.experiment import Experiment
     from modularml.core.experiment.phases.phase import ExperimentPhase
-    from modularml.core.experiment.phases.phase_result import PhaseResults
+    from modularml.core.experiment.results.phase_result import PhaseResults
 
 
 class Callback(ABC):
@@ -634,7 +634,6 @@ class Callback(ABC):
         ...
 
     @classmethod
-    @abstractmethod
     def from_config(cls, config: dict) -> Callback:
         """
         Construct a callback from a configuration dictionary.
@@ -647,4 +646,13 @@ class Callback(ABC):
             Callback: Reconstructed callback.
 
         """
-        ...
+        cb_cls_name = config.get("callback_type")
+        if cb_cls_name == "Evaluation":
+            from modularml.callbacks.evaluation import Evaluation
+
+            return Evaluation.from_config(config=config)
+
+        msg = (
+            f"Unsupported callback class for parent class construction: {cb_cls_name}."
+        )
+        raise ValueError(msg)

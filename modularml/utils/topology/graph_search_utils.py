@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal
 
-from modularml.context.experiment_context import ExperimentContext
+from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.references.featureset_reference import FeatureSetReference
 from modularml.core.topology.graph_node import GraphNode
 from modularml.utils.errors.error_handling import ErrorMode

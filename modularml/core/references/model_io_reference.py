@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from modularml.context.execution_context import ExecutionContext
+from modularml.core.data.execution_context import ExecutionContext
 from modularml.core.references.execution_reference import ExecutionReference
 from modularml.core.references.experiment_reference import ResolutionError
 

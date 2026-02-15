@@ -1,4 +1,3 @@
-from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.batch import Batch
 from modularml.core.data.sample_data import RoleData, SampleData
 from modularml.core.data.schema_constants import (
@@ -6,6 +5,7 @@ from modularml.core.data.schema_constants import (
     DOMAIN_TARGETS,
     REP_TRANSFORMED,
 )
+from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.topology.graph_node import GraphNode
 from modularml.utils.data.data_format import DataFormat
 from modularml.utils.topology.graph_search_utils import (

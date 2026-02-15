@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.featureset_view import FeatureSetView
 from modularml.core.data.schema_constants import ROLE_ANCHOR, STREAM_DEFAULT
+from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.references.featureset_reference import FeatureSetColumnReference
 from modularml.core.sampling.base_sampler import BaseSampler, SamplerStreamSpec, Samples
 from modularml.utils.data.data_format import DataFormat

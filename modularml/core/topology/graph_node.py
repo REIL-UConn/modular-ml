@@ -3,8 +3,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Literal
 
-from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.schema_constants import STREAM_DEFAULT
+from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.experiment.experiment_node import ExperimentNode
 from modularml.core.experiment.phases.phase import InputBinding
 from modularml.core.references.experiment_reference import (

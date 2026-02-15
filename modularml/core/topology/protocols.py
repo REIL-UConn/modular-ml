@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
 from modularml.utils.data.data_format import DataFormat
 
 if TYPE_CHECKING:
-    from modularml.context.execution_context import ExecutionContext
+    from modularml.core.data.execution_context import ExecutionContext
     from modularml.core.references.experiment_reference import ExperimentNodeReference
     from modularml.core.references.featureset_reference import FeatureSetReference
     from modularml.core.training.applied_loss import AppliedLoss

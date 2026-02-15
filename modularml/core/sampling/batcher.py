@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.batch_view import BatchView
+from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.references.featureset_reference import FeatureSetColumnReference
 from modularml.utils.data.data_format import DataFormat
 from modularml.utils.data.formatting import ensure_list, to_hashable
