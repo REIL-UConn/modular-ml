@@ -464,10 +464,11 @@ class SplitMixin:
         )
 
     def take_intersection(
-        self,
+        self: FeatureSet | FeatureSetView,
         other: FeatureSet | FeatureSetView,
         *,
         order: Literal["self", "other"] = "self",
+        label: str | None = None,
     ) -> FeatureSetView:
         """
         Return a view containing rows of `self` that also appear in `other`.
@@ -482,6 +483,9 @@ class SplitMixin:
             order (str):
                 Whether the intersecting view should use the indice order defined
                 in `'self'` or `'other'`. Defaults to `'self'`.
+            label (str, optional):
+                Label assigned to the returned FeatureSetView.
+                Defaults to "<self.label>_intersection".
 
         """
         if not isinstance(other, SplitMixin):
@@ -489,16 +493,22 @@ class SplitMixin:
             raise TypeError(msg)
 
         # Get indices of caller
-        _, self_is_view = self._get_split_context()
-        self_idxs = (
-            self.indices if self_is_view else np.arange(self.collection.n_samples)
-        )
+        self_src, self_is_view = self._get_split_context()
+        self_idxs = self.indices if self_is_view else np.arange(self_src.n_samples)
 
         # Get indices of other
-        _, other_is_view = other._get_split_context()
+        other_src, other_is_view = other._get_split_context()
         other_idxs = (
             other.indices if other_is_view else np.arange(other.collection.n_samples)
         )
+
+        # Ensure both are from the same source
+        if self_src is not other_src:
+            msg = (
+                "Cannot perform intersection on two views that reference different "
+                f"FeatureSets. {self_src!r} != {other_src!r}."
+            )
+            raise ValueError(msg)
 
         # Map self idxs to ordering idx
         abs_to_rel = {abs_idx: rel_idx for rel_idx, abs_idx in enumerate(self_idxs)}
@@ -510,7 +520,84 @@ class SplitMixin:
             common_abs = [i for i in other_idxs if i in abs_set]
 
         rel = [abs_to_rel[i] for i in common_abs]
-        return self.take(rel, label="intersection")
+        return self.take(rel, label=label or f"{self.label}_intersection")
+
+    def take_difference(
+        self: FeatureSet | FeatureSetView,
+        other: FeatureSet | FeatureSetView,
+        *,
+        label: str | None = None,
+    ) -> FeatureSetView:
+        """
+        Return a view containing rows of `self` that do not appear in `other`.
+
+        Description:
+            Computes the set difference between this object and another
+            FeatureSet or FeatureSetView. Any sample whose absolute index
+            appears in `other` will be removed from the returned view.
+
+            The resulting view preserves:
+                - The column selection of the calling object
+                - The ordering of `self`
+
+            This operation is equivalent to a set subtraction:
+                `result = self - other`
+
+        Args:
+            other (FeatureSet | FeatureSetView):
+                The object whose samples should be removed from this one.
+
+            label (str, optional):
+                Label assigned to the returned FeatureSetView.
+                Defaults to "<self.label>_difference".
+
+        Returns:
+            FeatureSetView:
+                A new view containing only samples from `self`
+                that do not overlap with `other`.
+
+        Raises:
+            TypeError:
+                If `other` is not a FeatureSet or FeatureSetView.
+
+        """
+        if not isinstance(other, SplitMixin):
+            msg = (
+                "Difference is only possible between FeatureSets or "
+                f"FeatureSetViews. Received: {type(other)}."
+            )
+            raise TypeError(msg)
+
+        # Get indices of caller
+        self_src, self_is_view = self._get_split_context()
+        self_idxs = self.indices if self_is_view else np.arange(self_src.n_samples)
+
+        # Get indices of other
+        other_src, other_is_view = other._get_split_context()
+        other_idxs = other.indices if other_is_view else np.arange(other_src.n_samples)
+
+        # Ensure both are from the same source
+        if self_src is not other_src:
+            msg = (
+                "Cannot perform difference on two views that reference different "
+                f"FeatureSets. {self_src!r} != {other_src!r}."
+            )
+            raise ValueError(msg)
+
+        # Build set of indices to remove
+        other_set = set(other_idxs)
+
+        # Preserve self ordering
+        remaining_abs = [i for i in self_idxs if i not in other_set]
+
+        # Map absolute -> relative indices
+        abs_to_rel = {abs_idx: rel_idx for rel_idx, abs_idx in enumerate(self_idxs)}
+        rel = [abs_to_rel[i] for i in remaining_abs]
+
+        return self.take(
+            rel_indices=rel,
+            label=label or f"{self.label}_difference",
+        )
 
     def take_sample_uuids(
         self,
