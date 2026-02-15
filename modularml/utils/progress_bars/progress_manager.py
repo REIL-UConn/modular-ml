@@ -51,7 +51,8 @@ class ProgressManager:
         self._live: Live | None = None
 
         self._active_tasks: set[ProgressTask] = set()
-        self._progress: dict[str, Progress] = {}
+        self._progress: dict[int, Progress] = {}
+        self._task_counter: int = 0
 
         self._styles: dict[str, ProgressStyle] = {
             style_sampling.name: style_sampling,
@@ -141,26 +142,31 @@ class ProgressManager:
         # Clear task & progress state
         self._active_tasks.clear()
         self._progress.clear()
+        self._task_counter = 0
 
     def _attach_task(self, task: ProgressTask):
         style = self._styles[task.style_name]
         base_fields = dict(style.default_fields or {})
         base_fields.update(task.fields or {})
 
-        if task.style_name not in self._progress:
-            self._progress[task.style_name] = Progress(
-                *style.columns,
-                auto_refresh=False,
-            )
+        # Each task gets its own Progress instance, keyed by insertion order
+        key = self._task_counter
+        self._task_counter += 1
+
+        self._progress[key] = Progress(
+            *style.columns,
+            auto_refresh=False,
+        )
 
         self._ensure_live()
 
-        progress = self._progress[task.style_name]
+        progress = self._progress[key]
         task._task_id = progress.add_task(
             task.description,
             total=task.total,
             **base_fields,
         )
+        task._progress_key = key
 
         self._active_tasks.add(task)
         self._refresh_layout()
@@ -168,11 +174,11 @@ class ProgressManager:
     def _mark_task_finished(self, task: ProgressTask):
         self._active_tasks.discard(task)
 
-        progress = self._progress[task.style_name]
+        progress = self._progress[task._progress_key]
 
         if not task.persist:
-            # Remove immediately
             progress.remove_task(task._task_id)
+            del self._progress[task._progress_key]
 
         self._refresh_layout()
 

@@ -26,6 +26,7 @@ class ProgressTask:
         self._started = False
         self._finished = False
         self._task_id = None
+        self._progress_key: int | None = None
 
     def start(self):
         """Start this task in the Live display."""
@@ -47,7 +48,7 @@ class ProgressTask:
 
         # Advance task from global manager
         mgr = ProgressManager.get_active()
-        progress = mgr._progress[self.style_name]
+        progress = mgr._progress[self._progress_key]
 
         progress.advance(self._task_id, n)
         if fields:
@@ -65,7 +66,7 @@ class ProgressTask:
 
         # Update task from global manager
         mgr = ProgressManager.get_active()
-        progress = mgr._progress[self.style_name]
+        progress = mgr._progress[self._progress_key]
         progress.update(self._task_id, total=total)
         mgr._refresh_layout()
 
@@ -76,7 +77,7 @@ class ProgressTask:
 
         # Update task from global manager
         mgr = ProgressManager.get_active()
-        progress = mgr._progress[self.style_name]
+        progress = mgr._progress[self._progress_key]
 
         # Update fields one last time
         if fields:
@@ -95,4 +96,5 @@ class ProgressTask:
         self._started = False
         self._finished = False
         self._task_id = None
+        self._progress_key = None
         self.fields.clear()
