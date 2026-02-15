@@ -62,6 +62,9 @@ class RandomSplitter(BaseSplitter):
                 Random seed for reproducibility. Default is 13.
 
         """
+        if not all((v >= 0) and (v <= 1) for v in ratios.values()):
+            msg = "Ratios values must be between 0 and 1."
+            raise ValueError(msg)
         total = float(sum(ratios.values()))
         if not np.isclose(total, 1.0):
             msg = f"ratios must sum to 1.0. Received: {total})."
