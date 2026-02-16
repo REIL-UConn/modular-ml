@@ -276,6 +276,18 @@ class Batch(Summarizable):
         """
         return self.to_format(get_data_format_for_backend(backend=backend))
 
+    def detach_tensors(self):
+        """
+        Detach all tensors from their computation graphs, in-place.
+
+        Description:
+            Applies backend-agnostic detachment to every tensor stored in
+            the underlying RoleData. Weights and masks are NumPy arrays
+            and are left untouched.
+
+        """
+        self.role_data.detach_tensors()
+
     # ================================================
     # Concatenation
     # ================================================

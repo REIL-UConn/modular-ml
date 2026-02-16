@@ -196,6 +196,23 @@ class SampleData(Summarizable):
         new_data.as_format(fmt=fmt)
         return new_data
 
+    def detach_tensors(self):
+        """
+        Detach all tensors from their computation graphs, in-place.
+
+        Description:
+            Applies backend-agnostic detachment to every tensor in this
+            SampleData. PyTorch tensors are detached and cloned, TensorFlow
+            tensors are copied via ``tf.identity``, and NumPy arrays are
+            copied. Non-tensor values are left unchanged.
+
+        """
+        from modularml.utils.nn.training import detach_tensor
+
+        for k, v in self.data.items():
+            if v is not None:
+                self.data[k] = detach_tensor(v)
+
     def as_backend(self, backend: Backend):
         """
         Casts the data to a DataFormat compatible with specified backend.
@@ -629,6 +646,18 @@ class RoleData(Mapping[str, SampleData], Summarizable):
         new_rd = self.copy()
         new_rd.as_format(fmt=fmt)
         return new_rd
+
+    def detach_tensors(self):
+        """
+        Detach all tensors from their computation graphs, in-place.
+
+        Description:
+            Delegates to each underlying SampleData's ``detach_tensors``
+            method for every role.
+
+        """
+        for sd in self._data.values():
+            sd.detach_tensors()
 
     def as_backend(self, backend: Backend):
         """

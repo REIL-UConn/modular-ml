@@ -107,6 +107,15 @@ class PhaseResults:
     # ================================================
     def add_execution_context(self, ctx: ExecutionContext):
         """Record a new execution context."""
+        # Ensure all tensors are detached/copied
+        for k in ctx.outputs:
+            # Detached in-place
+            ctx.outputs[k].detach_tensors()
+
+        # Break any loss links too
+        ctx.losses = {k: lc.to_float() for k, lc in ctx.losses.items()}
+
+        # Record cleaned ctx
         self._execution.append(ctx)
         self._series_cache.clear()
 
