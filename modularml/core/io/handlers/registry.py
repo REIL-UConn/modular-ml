@@ -9,8 +9,12 @@ from modularml.core.topology.model_graph import ModelGraph
 from modularml.core.io.checkpoint import Checkpoint
 from modularml.core.io.handlers.checkpoint_handler import CheckpointHandler
 
+from modularml.core.experiment.experiment import Experiment
+from modularml.core.io.handlers.experiment_handler import ExperimentHandler
+
 
 handler_registry = HandlerRegistry()
 handler_registry.register(cls=FeatureSet, handler=FeatureSetHandler())
 handler_registry.register(cls=ModelGraph, handler=ModelGraphHandler())
 handler_registry.register(cls=Checkpoint, handler=CheckpointHandler())
+handler_registry.register(cls=Experiment, handler=ExperimentHandler())

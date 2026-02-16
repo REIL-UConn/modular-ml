@@ -251,7 +251,7 @@ class FeatureSetHandler(BaseHandler[FeatureSet]):
         # ------------------------------------------------
         # Collision Checking
         # ------------------------------------------------
-        fs_obj = self.handle_node_collision(obj=fs_obj, ctx=ctx)
+        fs_obj: FeatureSet = self.handle_node_collision(obj=fs_obj, ctx=ctx)
 
         # ------------------------------------------------
         # Re-fit Scalers
