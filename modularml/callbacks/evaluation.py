@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from modularml.core.experiment.callback import Callback, CallbackResult
 from modularml.core.experiment.phases.eval_phase import EvalPhase
 
 if TYPE_CHECKING:
-    from modularml.context.execution_context import ExecutionContext
+    from modularml.core.data.execution_context import ExecutionContext
     from modularml.core.experiment.experiment import Experiment
-    from modularml.core.experiment.phases.eval_results import EvalResults
     from modularml.core.experiment.phases.phase import ExperimentPhase
-    from modularml.core.experiment.phases.phase_result import PhaseResults
+    from modularml.core.experiment.results.eval_results import EvalResults
+    from modularml.core.experiment.results.phase_results import PhaseResults
     from modularml.core.references.execution_reference import TensorLike
     from modularml.core.topology.graph_node import GraphNode
     from modularml.core.training.loss_record import LossCollection
@@ -39,6 +39,7 @@ class Evaluation(Callback):
         every_n_epochs: int = 1,
         run_on_start: bool = False,
         label: str | None = None,
+        role: Literal["evaluation", "validation"] = "evaluation",
     ):
         """
         Initialize an Evaluation callback.
@@ -58,6 +59,11 @@ class Evaluation(Callback):
                 Stable identifier for this callback within a results container.
                 If None, defaults to the class name.
 
+            role (Literal["evaluation", "validation"], optional):
+                Optional identifier for this Evaluation callback. Typically used
+                for general evaluation of some dataset, or as a validation metric
+                during training.
+
         """
         super().__init__(label=label)
         if every_n_epochs < 1:
@@ -65,6 +71,7 @@ class Evaluation(Callback):
         self.eval_phase = eval_phase
         self.every_n_epochs = every_n_epochs
         self.run_on_start = run_on_start
+        self._role = role
 
     # ================================================
     # Lifecycle Hooks
@@ -95,10 +102,7 @@ class Evaluation(Callback):
 
         return EvaluationCallbackResult(
             callback_label=self.label,
-            eval_results=experiment.run_evaluation(
-                phase=self.eval_phase,
-                record=True,  # TODO: add eval execution to Experiment history?
-            ),
+            eval_results=experiment.run_evaluation(phase=self.eval_phase),
         )
 
     def on_epoch_end(
@@ -135,10 +139,7 @@ class Evaluation(Callback):
 
         return EvaluationCallbackResult(
             callback_label=self.label,
-            eval_results=experiment.run_evaluation(
-                phase=self.eval_phase,
-                record=True,  # TODO: add eval execution to Experiment history?
-            ),
+            eval_results=experiment.run_evaluation(phase=self.eval_phase),
         )
 
     # ================================================
@@ -154,10 +155,12 @@ class Evaluation(Callback):
 
         """
         return {
+            "callback_type": self.__class__.__qualname__,
             "eval_phase": self.eval_phase.get_config(),
             "every_n_epochs": self.every_n_epochs,
             "run_on_start": self.run_on_start,
             "label": self.label,
+            "role": self._role,
         }
 
     @classmethod
@@ -173,11 +176,16 @@ class Evaluation(Callback):
             Evaluation: Reconstructed callback.
 
         """
+        if config.get("callback_type") != cls.__qualname__:
+            msg = f"Invalid config data for {cls.__qualname__} callback."
+            raise ValueError(msg)
+
         return cls(
             eval_phase=EvalPhase.from_config(config=config["eval_phase"]),
             every_n_epochs=config["every_n_epochs"],
             run_on_start=config["run_on_start"],
             label=config["label"],
+            role=config["role"],
         )
 
 
