@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
-from modularml.core.data.featureset import FeatureSet
 from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.topology.graph_node import GraphNode
 from modularml.utils.data.data_format import DataFormat, normalize_format
@@ -18,6 +17,7 @@ if TYPE_CHECKING:
 
     from modularml.core.data.batch import Batch
     from modularml.core.data.execution_context import ExecutionContext
+    from modularml.core.data.featureset import FeatureSet
     from modularml.core.data.featureset_view import FeatureSetView
     from modularml.core.data.sample_data import SampleData
     from modularml.core.experiment.callback import CallbackResult

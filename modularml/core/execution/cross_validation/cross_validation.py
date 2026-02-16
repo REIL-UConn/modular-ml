@@ -298,7 +298,7 @@ class CrossValidation(ExecutionStrategy):
                 )
 
                 # Run `self.phase_template`
-                fold_res = self.experiment.run_phase_group(
+                fold_res = self.experiment.run_group(
                     group=self.phase_template,
                     **kwargs,
                 )

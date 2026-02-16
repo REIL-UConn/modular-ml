@@ -102,7 +102,7 @@ class Evaluation(Callback):
 
         return EvaluationCallbackResult(
             callback_label=self.label,
-            eval_results=experiment.run_evaluation(phase=self.eval_phase),
+            eval_results=experiment.preview_phase(phase=self.eval_phase),
         )
 
     def on_epoch_end(
@@ -139,7 +139,7 @@ class Evaluation(Callback):
 
         return EvaluationCallbackResult(
             callback_label=self.label,
-            eval_results=experiment.run_evaluation(phase=self.eval_phase),
+            eval_results=experiment.preview_phase(phase=self.eval_phase),
         )
 
     # ================================================
@@ -229,7 +229,13 @@ class EvaluationCallbackResult(CallbackResult):
         """
         if self.eval_results is None:
             raise ValueError("This callback results has no recorded results.")
-        return self.eval_results.get_node_outputs(node=node, fmt=fmt, unscale=unscale)
+        return self.eval_results.stacked_tensors(
+            node=node,
+            domain="outputs",
+            role="default",
+            fmt=fmt,
+            unscale=unscale,
+        )
 
     def get_node_targets(
         self,
@@ -261,7 +267,13 @@ class EvaluationCallbackResult(CallbackResult):
         """
         if self.eval_results is None:
             raise ValueError("This callback results has no recorded results.")
-        return self.eval_results.get_node_targets(node=node, fmt=fmt, unscale=unscale)
+        return self.eval_results.stacked_tensors(
+            node=node,
+            domain="targets",
+            role="default",
+            fmt=fmt,
+            unscale=unscale,
+        )
 
     def get_node_losses(
         self,
@@ -295,4 +307,4 @@ class EvaluationCallbackResult(CallbackResult):
         """
         if self.eval_results is None:
             raise ValueError("This callback results has no recorded results.")
-        return self.eval_results.get_node_losses(node=node)
+        return self.eval_results.losses(node=node)
