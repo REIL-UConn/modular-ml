@@ -173,6 +173,25 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
         return list(ids_self.intersection(ids_other))
 
     # ================================================
+    # Convenience Methods
+    # ================================================
+    def expand_columns(self, label: str | None = None) -> FeatureSetView:
+        """
+        Creates a new view without column filtering.
+
+        Description:
+            A new view is created with the same indices, but without
+            any filters over which columns to include. The returned
+            view will include all columns of the source FeatureSet.
+        """
+        return FeatureSetView.from_featureset(
+            fs=self.source,
+            rows=self.indices,
+            columns=None,
+            label=label or f"{self.label}_expanded",
+        )
+
+    # ================================================
     # Configurable
     # ================================================
     def get_config(self) -> dict[str, Any]:
