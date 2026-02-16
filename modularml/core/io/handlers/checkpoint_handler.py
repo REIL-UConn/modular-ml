@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import pickle
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
@@ -32,7 +33,7 @@ class CheckpointHandler(BaseHandler[Checkpoint]):
     # ================================================
     # Encoding
     # ================================================
-    def encode_state(
+    def encode(
         self,
         obj: Checkpoint,
         save_dir: Path,
@@ -40,7 +41,7 @@ class CheckpointHandler(BaseHandler[Checkpoint]):
         ctx: SaveContext,
     ) -> dict[str, str]:
         """
-        Encodes Checkpoint state.
+        Encodes Checkpoint data.
 
         Args:
             obj (Checkpoint):
@@ -51,38 +52,55 @@ class CheckpointHandler(BaseHandler[Checkpoint]):
                 Additional serialization context.
 
         Returns:
-            dict[str, str]: Mapping of state to saved pkl file
+            dict[str, str]: File mapping of encoded data.
 
         """
-        data = {}
+        save_dir = Path(save_dir)
+        file_mapping: dict[str, Any] = {}
+
+        # Encode meta data (use pickle)
+        dir_meta = save_dir / "meta"
+        dir_meta.mkdir(exist_ok=True)
+        file_meta = dir_meta / "ckpt_meta.pkl"
+        with Path.open(file_meta, "wb") as f:
+            pickle.dump(obj.meta, f, protocol=pickle.HIGHEST_PROTOCOL)
+        file_mapping["meta"] = str(file_meta.relative_to(save_dir))
+
+        # Encode entries (stateful objects)
+        # Each entry has its state written using its own handler (if defined)
+        # Then we serialize the entry class as well
+        dir_entries = save_dir / "entries"
+        dir_entries.mkdir(exist_ok=True)
+
+        entry_cls_data = {}
         for key, entry in obj.entries.items():
             handler = ctx.serializer.handler_registry.resolve(entry.entry_cls)
 
             # Each entry separately encodes its state
             # The file where the entry state is saved is returned
-            subdir = Path(save_dir) / key.replace(":", "~")
-            subdir.mkdir(parents=True, exist_ok=True)
+            dir_k = dir_entries / key.replace(":", "~")
+            dir_k.mkdir(parents=True, exist_ok=True)
             _ = handler.encode_state(
                 obj=entry.entry_obj,
-                save_dir=subdir,
+                save_dir=dir_k,
                 ctx=ctx,
             )
 
             # Stores the class and path to saved state of this entry
-            data[key] = {
+            entry_cls_data[key] = {
                 "class": handler.get_symbol_spec(
                     entry.entry_obj,
                     ctx=ctx,
                 ).to_dict(),
-                "state_dir": str(subdir.relative_to(save_dir)),
+                "state_dir": str(dir_k.relative_to(save_dir)),
             }
-
-        # Write all checkpointed path to a json config
         save_path = self._write_json(
-            data=data,
-            save_path=Path(save_dir) / self.state_rel_path,
+            data=entry_cls_data,
+            save_path=dir_entries / "entry_class_config.json",
         )
-        return {"state": str(save_path.relative_to(save_dir))}
+        file_mapping["entry_cls_data"] = str(save_path.relative_to(save_dir))
+
+        return file_mapping
 
     # ================================================
     # Decoding
@@ -109,13 +127,33 @@ class CheckpointHandler(BaseHandler[Checkpoint]):
             Checkpoint: The re-instantiated checkpoint.
 
         """
-        # Reload entries from state
-        state = self.decode_state(
-            load_dir=load_dir,
-            ctx=ctx,
-        )
+        load_dir = Path(load_dir)
+
+        # Read file mapping from artifact.json
+        artifact_data = self._read_json(load_dir / "artifact.json")
+        file_mapping: dict[str, Any] = artifact_data["files"]
+
+        # Reload meta data
+        file_meta = load_dir / file_mapping["meta"]
+        if not file_meta.exists():
+            msg = f"Could not find meta-data file in directory: '{file_meta}'."
+            raise FileNotFoundError(msg)
+        with Path.open(file_meta, "rb") as f:
+            meta: dict[str, Any] = pickle.load(f)
+
+        # Reload entries
+        # 1. Reload class data
+        file_cls_data = load_dir / file_mapping["entry_cls_data"]
+        if not file_cls_data.exists():
+            msg = (
+                f"Could not find entry class data file in directory: '{file_cls_data}'."
+            )
+            raise FileNotFoundError(msg)
+        entry_cls_data = self._read_json(file_cls_data)
+
+        # 2. Reload entries
         entries: dict[str, CheckpointEntry] = {}
-        for k, v in state.items():
+        for k, v in entry_cls_data.items():
             # Resolve class for this entry
             k_cls = symbol_registry.resolve_symbol(
                 spec=SymbolSpec.from_dict(v["class"]),
@@ -127,8 +165,8 @@ class CheckpointHandler(BaseHandler[Checkpoint]):
                 ),
             )
 
-            # Decode the saved state for this entry
-            k_state_path = Path(load_dir) / v["state_dir"]
+            # Decode saved state
+            k_state_path = load_dir / v["state_dir"]
             handler = ctx.serializer.handler_registry.resolve(k_cls)
             k_state = handler.decode_state(load_dir=k_state_path, ctx=ctx)
 
@@ -138,27 +176,8 @@ class CheckpointHandler(BaseHandler[Checkpoint]):
                 entry_obj=None,  # can't restore object since never saved config
             )
 
-        # Create Checkpoint instance
-        return cls(entries=entries)
-
-    def decode_state(
-        self,
-        load_dir: Path,
-        *,
-        ctx: LoadContext,  # noqa: ARG002
-    ) -> dict[str, Any]:
-        """
-        Decodes state from a pkl file.
-
-        Args:
-            load_dir (Path):
-                Directory to decode from.
-            ctx (LoadContext, optional):
-                Additional de-serialization context.
-
-        Returns:
-            dict[str, Any]: The decoded state data.
-
-        """
-        ckpt_data = self._read_json(Path(load_dir) / self.state_rel_path)
-        return ckpt_data
+        # Create checkpoint instance
+        return cls(
+            entries=entries,
+            meta=meta,
+        )

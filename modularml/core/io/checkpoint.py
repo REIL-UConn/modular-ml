@@ -21,6 +21,9 @@ class Checkpoint:
     # E.g., {"node:encoder": CheckpointEntry}
     entries: dict[str, CheckpointEntry] = field(default_factory=dict)
 
+    # Additional meta data to assign to this checkpoint
+    meta: dict[str, Any] = field(default_factory=dict)
+
     def add_entry(self, key: str, obj: Stateful):
         """
         Adds a checkpoint entry for a given object.
@@ -47,3 +50,20 @@ class Checkpoint:
             entry_obj=obj,
             entry_state=obj.get_state(),
         )
+
+    def add_meta(self, key: str, value: Any):
+        """
+        Attach a meta data entry to this checkpoint.
+
+        Args:
+            key (str):
+                A unique label to assign to this meta data value.
+            value (Any):
+                The meta data value to attach. Must be a pickle-able
+                object.
+
+        """
+        if key in self.meta:
+            msg = f"Meta data key '{key}' already exists."
+            raise ValueError(msg)
+        self.meta[key] = value
