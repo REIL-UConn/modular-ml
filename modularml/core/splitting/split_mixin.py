@@ -632,7 +632,7 @@ class SplitMixin:
         all_sids = source.get_sample_uuids(fmt=DataFormat.NUMPY)[idxs]
 
         # Get rel indices of subsamples
-        take_sids = np.asarray(sample_uuids, dtype=str)
+        take_sids = np.asarray(list(sample_uuids), dtype=str)
         rel_idxs = np.where(all_sids[:, None] == take_sids)[0]
         return self.take(rel_indices=rel_idxs, label=label)
 

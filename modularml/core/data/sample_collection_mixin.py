@@ -787,7 +787,7 @@ class SampleCollectionMixin:
         self,
         *,
         include_padded: bool = False,
-        include_mask: bool = True,
+        include_mask: bool = False,
     ) -> pd.DataFrame:
         # Case 1: no padding requested or no mask exists
         if not include_padded or self.sample_mask is None:
