@@ -4,9 +4,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from modularml.core.data.batch import Batch
-from modularml.core.experiment.phases.phase_result import PhaseResults
+from modularml.core.experiment.results.phase_results import PhaseResults
 
 if TYPE_CHECKING:
+    from modularml.core.data.featureset_view import FeatureSetView
     from modularml.core.references.execution_reference import TensorLike
     from modularml.core.topology.graph_node import GraphNode
     from modularml.core.training.loss_record import LossCollection
@@ -39,9 +40,19 @@ class EvalResults(PhaseResults):
 
         # Get total loss across all batches
         total_loss = eval_results.aggregated_losses(node="output_node")
+
+        # Get all source data utilized in evaluation
+        source_view = eval_results.source_view(node="output_node")
         ```
 
     """
+
+    # ================================================
+    # Representation
+    # ================================================
+    def __repr__(self):
+        n_batches = self.n_batches if self._execution else 0
+        return f"EvalResults(label='{self.label}', batches={n_batches})"
 
     # ================================================
     # Properties
@@ -257,3 +268,95 @@ class EvalResults(PhaseResults):
         # Collapse label axis to get single LossCollection
         label_collapsed = batch_collapsed.collapse(axis="label", reducer=reducer)
         return label_collapsed.one()
+
+    # ================================================
+    # Source Data Access
+    # ================================================
+    def source_views(
+        self,
+        node: str | GraphNode,
+        *,
+        role: str = "default",
+        batch: int | None = None,
+    ) -> dict[str, FeatureSetView]:
+        """
+        Get the source FeatureSetViews that contributed data to the given node.
+
+        Description:
+            Traces the node back to its upstream FeatureSets, collects all
+            unique sample UUIDs from execution results, and returns a view
+            of each upstream FeatureSet filtered to only the samples used.
+
+            Note that the returned views contain only unique sample UUIDs used
+            in generating these phase results. They are not a 1-to-1 mapping
+            of result sample to source sample. Use `tensors()` to get exact
+            execution data.
+
+        Args:
+            node (str | GraphNode):
+                The node to trace upstream from. Can be the node instance,
+                its ID, or its label.
+            role (str, optional):
+                Restrict to samples from this role only. Defaults to "default".
+            batch (int | None, optional):
+                Restrict to samples from this batch only.
+
+        Returns:
+            dict[str, FeatureSetView]:
+                A mapping of FeatureSet label to FeatureSetView containing
+                only the samples used during execution.
+
+        """
+        return super().source_views(
+            node=node,
+            role=role,
+            epoch=None,
+            batch=batch,
+        )
+
+    def source_view(
+        self,
+        node: str | GraphNode,
+        *,
+        role: str = "default",
+        batch: int | None = None,
+    ) -> FeatureSetView:
+        """
+        Get the single source FeatureSetView for the given node.
+
+        Description:
+            Convenience method for the common case where a node has exactly
+            one upstream FeatureSet. Raises `ValueError` if multiple
+            upstream FeatureSets exist.
+
+            Note that the returned views contain only unique sample UUIDs used
+            in generating these phase results. They are not a 1-to-1 mapping
+            of result sample to source sample. Use `tensors()` to get exact
+            execution data.
+
+        Args:
+            node (str | GraphNode):
+                The node to trace upstream from.
+            role (str, optional):
+                Restrict to samples from this role only. Defaults to "default".
+            batch (int | None, optional):
+                Restrict to samples from this batch only.
+
+        Returns:
+            FeatureSetView:
+                A view of the single upstream FeatureSet filtered to only
+                the samples used during execution.
+
+        Raises:
+            ValueError:
+                If the node has multiple upstream FeatureSets.
+
+        """
+        views = self.source_views(node=node, role=role, batch=batch)
+        if len(views) != 1:
+            msg = (
+                f"Node has {len(views)} upstream FeatureSets: "
+                f"{list(views.keys())}. Use source_views() instead."
+            )
+            raise ValueError(msg)
+        return next(iter(views.values()))

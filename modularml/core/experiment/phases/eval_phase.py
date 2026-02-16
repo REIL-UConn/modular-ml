@@ -4,11 +4,12 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from modularml.context.execution_context import ExecutionContext
-from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.batch_view import BatchView
+from modularml.core.data.execution_context import ExecutionContext
 from modularml.core.data.featureset_view import FeatureSetView
 from modularml.core.data.schema_constants import ROLE_DEFAULT
+from modularml.core.experiment.callback import Callback
+from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.experiment.phases.phase import ExperimentPhase, InputBinding
 from modularml.core.training.applied_loss import AppliedLoss
 from modularml.utils.environment.environment import IN_NOTEBOOK
@@ -18,8 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from modularml.core.data.featureset import FeatureSet
-    from modularml.core.experiment.callback import Callback
-    from modularml.core.experiment.phases.phase_result import EvalResults
+    from modularml.core.experiment.results.eval_results import EvalResults
     from modularml.core.references.featureset_reference import FeatureSetReference
     from modularml.core.topology.graph_node import GraphNode
 
@@ -34,7 +34,6 @@ class EvalPhase(ExperimentPhase):
         active_nodes: list[GraphNode] | None = None,
         batch_size: int | None = None,
         callbacks: list[Callback] | None = None,
-        show_eval_progress: bool = False,
     ):
         """
         Initiallizes a new evaluation phase for the experiment.
@@ -67,9 +66,6 @@ class EvalPhase(ExperimentPhase):
             callbacks (list[Callback] | None, optional):
                 An optional list of Callbacks to run during phase execution.
 
-            show_eval_progress (bool, optional):
-                Whether to show a progress bar for eval execution. Defaults to False.
-
         """
         super().__init__(
             label=label,
@@ -79,7 +75,6 @@ class EvalPhase(ExperimentPhase):
             callbacks=callbacks,
         )
         self.batch_size = batch_size
-        self.show_eval_progress = show_eval_progress
         self._inp_fsv: FeatureSetView | None = None
         self._validate_single_featureset()
 
@@ -96,7 +91,6 @@ class EvalPhase(ExperimentPhase):
         active_nodes: list[GraphNode] | None = None,
         batch_size: int | None = None,
         callbacks: list[Callback] | None = None,
-        show_eval_progress: bool = False,
     ) -> EvalPhase:
         """
         Initiallizes a new evaluation phase for a given FeatureSet split.
@@ -126,9 +120,6 @@ class EvalPhase(ExperimentPhase):
             callbacks (list[Callback] | None, optional):
                 An optional list of Callbacks to run during phase execution.
 
-            show_eval_progress (bool, optional):
-                Whether to show a progress bar for eval execution. Defaults to False.
-
         """
         input_sources = cls._build_input_sources_from_split(
             split=split,
@@ -142,7 +133,6 @@ class EvalPhase(ExperimentPhase):
             active_nodes=active_nodes,
             batch_size=batch_size,
             callbacks=callbacks,
-            show_eval_progress=show_eval_progress,
         )
 
     # ================================================
@@ -193,6 +183,8 @@ class EvalPhase(ExperimentPhase):
         self,
         *,
         results: EvalResults | None = None,
+        show_eval_progress: bool = False,
+        persist_progress: bool = IN_NOTEBOOK,
     ) -> Iterator[ExecutionContext]:
         """
         Iterate over execution steps for this evaluation phase.
@@ -205,6 +197,14 @@ class EvalPhase(ExperimentPhase):
         Args:
             results (EvalResults | None, optional):
                 Optional container in which results will be registered.
+
+            show_eval_progress (bool, optional):
+                Whether to show a progress bar for eval batches. Defaults to False.
+
+            persist_progress (bool, optional):
+                Whether to leave all eval progress bars shown after they complete.
+                Defaults to `IN_NOTEBOOK` (True if working in a notebook, False if in
+                a Python script).
 
         Yields:
             ExecutionContext:
@@ -226,6 +226,8 @@ class EvalPhase(ExperimentPhase):
             raise RuntimeError(msg)
         batch_size = self.batch_size if self.batch_size is not None else n
         n_batches = int(n // batch_size)
+        if (n / batch_size) - n_batches > 0:
+            n_batches += 1
 
         # ------------------------------------------------
         # Progress Bar: batches
@@ -234,8 +236,8 @@ class EvalPhase(ExperimentPhase):
             style="evaluation",
             description=f"Evaluating ['{self.label}']",
             total=n_batches,
-            enabled=self.show_eval_progress,
-            persist=IN_NOTEBOOK,
+            enabled=show_eval_progress,
+            persist=persist_progress,
         )
         eval_ptask.start()
 
@@ -330,7 +332,6 @@ class EvalPhase(ExperimentPhase):
             {
                 "phase_type": "EvalPhase",
                 "batch_size": self.batch_size,
-                "show_eval_progress": self.show_eval_progress,
             },
         )
         return cfg
@@ -368,8 +369,7 @@ class EvalPhase(ExperimentPhase):
             losses=losses,
             active_nodes=config["active_nodes"],
             batch_size=config["batch_size"],
-            callbacks=config["callbacks"],
-            show_eval_progress=config["show_eval_progress"],
+            callbacks=[Callback.from_config(cfg) for cfg in config["callbacks"]],
         )
 
 

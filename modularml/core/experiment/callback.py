@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from modularml.core.data.execution_context import ExecutionContext
     from modularml.core.experiment.experiment import Experiment
     from modularml.core.experiment.phases.phase import ExperimentPhase
-    from modularml.core.experiment.results.phase_result import PhaseResults
+    from modularml.core.experiment.results.phase_results import PhaseResults
 
 
 class Callback(ABC):

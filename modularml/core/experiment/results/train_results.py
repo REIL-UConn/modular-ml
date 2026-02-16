@@ -4,11 +4,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from modularml.callbacks.evaluation import EvaluationCallbackResult
-from modularml.core.experiment.phases.phase_result import PhaseResults
+from modularml.core.experiment.results.phase_results import PhaseResults
 from modularml.utils.data.multi_keyed_data import AxisSeries
 
 if TYPE_CHECKING:
-    from modularml.core.experiment.phases.eval_results import EvalResults
+    from modularml.core.experiment.results.eval_results import EvalResults
     from modularml.core.references.execution_reference import TensorLike
     from modularml.core.topology.graph_node import GraphNode
     from modularml.core.training.loss_record import LossCollection
@@ -51,6 +51,18 @@ class TrainResults(PhaseResults):
     """
 
     validation_callback_labels: list[str] | None = None
+
+    # ================================================
+    # Representation
+    # ================================================
+    def __repr__(self):
+        n_epochs = self.n_epochs if self._execution else 0
+        val_labels = self.validation_callback_labels or []
+        return (
+            f"TrainResults(label='{self.label}', "
+            f"epochs={n_epochs}, "
+            f"validation_callbacks={val_labels})"
+        )
 
     # ================================================
     # Properties

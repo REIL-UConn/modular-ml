@@ -4,8 +4,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.schema_constants import STREAM_DEFAULT
+from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.references.featureset_reference import FeatureSetReference
 from modularml.core.sampling.base_sampler import BaseSampler
 from modularml.utils.data.formatting import ensure_list, find_duplicates
@@ -14,12 +14,12 @@ from modularml.utils.errors.error_handling import ErrorMode
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from modularml.context.execution_context import ExecutionContext
     from modularml.core.data.batch_view import BatchView
+    from modularml.core.data.execution_context import ExecutionContext
     from modularml.core.data.featureset import FeatureSet
     from modularml.core.data.featureset_view import FeatureSetView
     from modularml.core.experiment.callback import Callback
-    from modularml.core.experiment.phases.phase_result import PhaseResults
+    from modularml.core.experiment.results.phase_results import PhaseResults
     from modularml.core.topology.graph_node import GraphNode
     from modularml.core.training.applied_loss import AppliedLoss
 
@@ -476,12 +476,15 @@ class ExperimentPhase(ABC):
         """
         self.label = label
         self.input_sources = self._normalize_input_sources(sources=input_sources)
-        self.losses = ensure_list(losses)
+        self.losses: list[AppliedLoss] = ensure_list(losses)
         self._validate_losses()
-        self.callbacks = ensure_list(callbacks)
+        self.callbacks: list[Callback] = ensure_list(callbacks)
         self._validate_callbacks()
         self.active_nodes = self._resolve_active_nodes(active_nodes)
         self._validate_inputs_for_head_nodes()
+
+    def __repr__(self):
+        return f"ExperimentPhase(label={self.label})"
 
     # ================================================
     # Convenience Constructors
@@ -720,6 +723,7 @@ class ExperimentPhase(ABC):
         self,
         *,
         results: PhaseResults | None = None,
+        **kwargs,
     ) -> Iterator[ExecutionContext]:
         """Iterate over execution steps for this phase."""
         ...
@@ -745,7 +749,7 @@ class ExperimentPhase(ABC):
             "input_sources": [inp.get_config() for inp in self.input_sources],
             "losses": losses_cfg,
             "active_nodes": self.active_nodes,
-            "callbacks": self.callbacks,
+            "callbacks": [cb.get_config() for cb in ensure_list(self.callbacks)],
         }
 
     @classmethod

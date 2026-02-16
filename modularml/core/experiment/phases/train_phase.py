@@ -3,19 +3,22 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
-from modularml.callbacks.evaluation import Evaluation
-from modularml.context.execution_context import ExecutionContext
-from modularml.context.experiment_context import ExperimentContext
+from modularml.callbacks.evaluation import Evaluation, EvaluationCallbackResult
 from modularml.core.data.batch_view import BatchView
+from modularml.core.data.execution_context import ExecutionContext
 from modularml.core.data.featureset_view import FeatureSetView
+from modularml.core.experiment.callback import Callback
+from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.experiment.phases.eval_phase import EvalPhase
 from modularml.core.experiment.phases.phase import ExperimentPhase, InputBinding
 from modularml.core.training.applied_loss import AppliedLoss
+from modularml.utils.data.formatting import ensure_list
 from modularml.utils.environment.environment import IN_NOTEBOOK
+from modularml.utils.logging.warnings import warn
 from modularml.utils.progress_bars.progress_task import ProgressTask
 
 if TYPE_CHECKING:
@@ -24,11 +27,11 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from modularml.core.data.sampled_view import SampledView
-    from modularml.core.experiment.callback import Callback
-    from modularml.core.experiment.phases.phase_result import TrainResults
+    from modularml.core.experiment.results.train_results import TrainResults
     from modularml.core.references.featureset_reference import FeatureSetReference
     from modularml.core.sampling.base_sampler import BaseSampler
     from modularml.core.topology.graph_node import GraphNode
+    from modularml.core.training.loss_record import LossCollection
 
 
 class BatchSchedulingPolicy(Enum):
@@ -137,9 +140,6 @@ class TrainPhase(ExperimentPhase):
         active_nodes: list[str | GraphNode] | None = None,
         batch_schedule: BatchSchedulingPolicy | str = BatchSchedulingPolicy.ZIP_STRICT,
         callbacks: list[Callback] | None = None,
-        show_sampler_progress: bool = True,
-        show_training_progress: bool = True,
-        persist_epoch_progress: bool = False,
     ):
         """
         Initiallizes a new training phase for the experiment.
@@ -163,11 +163,12 @@ class TrainPhase(ExperimentPhase):
                 None, all nodes comprising the ModelGraph are used. Defaults to None.
 
             batch_schedule (str | BatchSchedulingPolicy, optional):
-                Defines how batches from multiple samplers are scheduled during training.
-                This is only relevant if more than one sampler is defined in
-                `input_sources`.
+                Defines how batches from multiple samplers are scheduled during
+                training. This is only relevant if more than one sampler is defined
+                in `input_sources`.
 
-                Let samplers `S1` and `S2` produce: `S1 = [b1, b2, b3]` and  `S2 = [c1, c2]`
+                Let samplers `S1` and `S2` produce: `S1 = [b1, b2, b3]` and
+                `S2 = [c1, c2]`
 
                 The outputs of each policy is given below:
 
@@ -183,16 +184,6 @@ class TrainPhase(ExperimentPhase):
             callbacks (list[Callback] | None, optional):
                 An optional list of Callbacks to run during phase execution.
 
-            show_sampler_progress (bool, optional):
-                Whether to show a progress bar for sampler batching. Defaults to True.
-
-            show_training_progress (bool, optional):
-                Whether to show a progress bar for training execution. Defaults to True.
-
-            persist_epoch_progress (bool, optional):
-                Whether to leave all per-epoch training bars shown after the complete.
-                Otherwise, only the last epoch is persisted. Defaults to False.
-
         """
         if losses is None:
             raise ValueError("Training requires at least once defined loss.")
@@ -205,10 +196,6 @@ class TrainPhase(ExperimentPhase):
             callbacks=callbacks,
         )
         self.batch_schedule = BatchSchedulingPolicy.from_value(batch_schedule)
-        self.show_sampler_progress = show_sampler_progress
-        self.show_training_progress = show_training_progress
-        self.persist_epoch_progress = persist_epoch_progress
-
         if n_epochs < 1:
             raise ValueError("n_epochs must be >= 1")
         self.n_epochs = n_epochs
@@ -222,8 +209,8 @@ class TrainPhase(ExperimentPhase):
             dtype=int,
         )
 
-        # Track a list of validation callback labels
-        self._validation_labels: list[str] = []
+        # Progress bar optional fields (val loss display)
+        self._show_validation_props = None
 
     # ================================================
     # Convenience Constructors
@@ -240,9 +227,6 @@ class TrainPhase(ExperimentPhase):
         active_nodes: list[str | GraphNode] | None = None,
         batch_schedule: BatchSchedulingPolicy | str = BatchSchedulingPolicy.ZIP_STRICT,
         callbacks: list[Callback] | None = None,
-        show_sampler_progress: bool = True,
-        show_training_progress: bool = True,
-        persist_epoch_progress: bool = False,
         validation_split: str | None = None,
     ) -> TrainPhase:
         """
@@ -294,16 +278,6 @@ class TrainPhase(ExperimentPhase):
             callbacks (list[Callback] | None, optional):
                 An optional list of Callbacks to run during phase execution.
 
-            show_sampler_progress (bool, optional):
-                Whether to show a progress bar for sampler batching. Defaults to True.
-
-            show_training_progress (bool, optional):
-                Whether to show a progress bar for training execution. Defaults to True.
-
-            persist_epoch_progress (bool, optional):
-                Whether to leave all per-epoch training bars shown after the complete.
-                Otherwise, only the last epoch is persisted. Defaults to False.
-
             validation_split (str | None, optional):
                 If provided, automatically attaches validation monitoring on this split.
                 Equivalent to calling `phase.add_validation(split=validation_split)` after
@@ -324,9 +298,6 @@ class TrainPhase(ExperimentPhase):
             active_nodes=active_nodes,
             batch_schedule=batch_schedule,
             callbacks=callbacks,
-            show_sampler_progress=show_sampler_progress,
-            show_training_progress=show_training_progress,
-            persist_epoch_progress=persist_epoch_progress,
         )
         if validation_split is not None:
             phase.add_validation(split=validation_split)
@@ -361,8 +332,26 @@ class TrainPhase(ExperimentPhase):
     # ================================================
     # Callback Convenience
     # ================================================
+    @property
+    def validation_callbacks(self) -> list[Evaluation]:
+        """List of attached Evaluation callbacks being used for validation."""
+        return [
+            cb
+            for cb in self.callbacks
+            if isinstance(cb, Evaluation) and cb._role == "validation"
+        ]
+
     def add_callback(self, callback: Callback):
         """Add a callback to this training phase."""
+        similar_callbacks = [
+            cb for cb in ensure_list(self.callbacks) if type(callback) is type(cb)
+        ]
+        if callback.label in [cb.label for cb in similar_callbacks]:
+            msg = (
+                f"Another {type(callback).__qualname__} callback already "
+                f"exists with label '{callback.label}'. "
+            )
+            raise ValueError(msg)
         self.callbacks.append(callback)
 
     def add_evaluation(
@@ -397,6 +386,7 @@ class TrainPhase(ExperimentPhase):
             every_n_epochs=every_n_epochs,
             run_on_start=run_on_start,
             label=label,
+            role="evaluation",
         )
         self.add_callback(cb)
 
@@ -409,6 +399,8 @@ class TrainPhase(ExperimentPhase):
         every_n_epochs: int = 1,
         run_on_start: bool = False,
         label: str | None = None,
+        show_in_progress: bool = True,
+        reducer: Literal["sum", "mean"] = "mean",
     ):
         """
         Attach validation to this training phase.
@@ -446,6 +438,16 @@ class TrainPhase(ExperimentPhase):
                 A name to assign to these callback results. If None, a default
                 identifier will be assigned. Defaults to None.
 
+            show_in_progress (bool, optional):
+                Whether to show validation loss in the training progress bars. Note that
+                this is only possible when `losses` contains a single loss. Defaults to
+                True.
+
+            reducer (Literal["sum", "mean"], optional):
+                If `show_in_progress=True`, the shown validation loss is aggregated
+                over all eval batches in a single epoch. This specifies how per-batch
+                loss values are aggregated. Defaults to "mean".
+
         """
         # Validate split vs input_sources
         if ((split is None) and (input_sources is None)) or (
@@ -481,22 +483,78 @@ class TrainPhase(ExperimentPhase):
                 active_nodes=self.active_nodes,
             )
 
-        # Check uniqueness of cb_labl
-        if cb_label in self._validation_labels:
-            msg = (
-                f"Another validation set exists with label '{cb_label}'. "
-                "Provide a unique `label` for this callback."
-            )
-            raise ValueError(msg)
-
         # Attach callback and record label
-        self.add_evaluation(
+        cb = Evaluation(
             eval_phase=eval_phase,
             every_n_epochs=every_n_epochs,
             run_on_start=run_on_start,
             label=cb_label,
+            role="validation",
         )
-        self._validation_labels.append(cb_label)
+        self.add_callback(cb)
+
+        # Update display properties
+        if (len(eval_losses) != 1) and show_in_progress:
+            msg = (
+                f"Multiple losses are defined in this validation set: {eval_losses}. "
+                "An aggregated validation loss cannot be displayed during training."
+            )
+            warn(message=msg, category=UserWarning, stacklevel=2)
+            show_in_progress = False
+
+        self._show_validation_props = {
+            "show_in_pb": show_in_progress,
+            "reducer": reducer,
+            "on_node_id": eval_losses[0].node_id,
+        }
+
+    # ================================================
+    # Validation Loss Extraction
+    # ================================================
+    def _extract_validation_loss(
+        self,
+        results: TrainResults | None,
+        epoch_idx: int,
+    ) -> float | None:
+        """Extract total validation loss from callback results for this epoch."""
+        # Check if have results to show / want to show
+        if results is None:
+            return None
+        val_cbs = self.validation_callbacks
+        if not val_cbs:
+            return None
+        if (self._show_validation_props is None) or (
+            not self._show_validation_props.get("show_in_pb", False)
+        ):
+            return None
+
+        # More than one val callback not supported
+        if len(val_cbs) != 1:
+            return None
+
+        # Get aggregated loss
+        total_val_loss = None
+        cb_results = results._callbacks.get(val_cbs[0].label, [])
+
+        # Find the result from this epoch
+        for cb_res in reversed(cb_results):
+            if cb_res.epoch_idx == epoch_idx and cb_res.edge == "end":
+                if isinstance(cb_res, EvaluationCallbackResult):
+                    # Get losses from EvalResults
+                    eval_res = cb_res.eval_results
+                    if (eval_res is not None) and eval_res._execution:
+                        # Aggregate over batches
+                        agg_lc: LossCollection = eval_res.aggregated_losses(
+                            node=self._show_validation_props["on_node_id"],
+                            reducer=self._show_validation_props["reducer"],
+                            by_label=False,
+                        )
+
+                        # Indicate found a val loss
+                        total_val_loss = agg_lc.to_float().total
+                break
+
+        return total_val_loss
 
     # ================================================
     # Execution
@@ -515,7 +573,11 @@ class TrainPhase(ExperimentPhase):
             role_indice_weights=None,
         )
 
-    def _build_sampler_executions(self) -> list[SamplerExecution]:
+    def _build_sampler_executions(
+        self,
+        *,
+        show_sampler_progress: bool = True,
+    ) -> list[SamplerExecution]:
         """
         Groups `self.input_sources` into SamplerExecution objects.
 
@@ -599,10 +661,10 @@ class TrainPhase(ExperimentPhase):
                 )
                 # Materialize batches once
                 binding.sampler.bind_sources(sources=[sampler_src])
-                binding.sampler.show_progress = self.show_sampler_progress
-                binding.sampler._progress_task.enabled = self.show_sampler_progress
+                binding.sampler.show_progress = show_sampler_progress
+                binding.sampler._progress_task.enabled = show_sampler_progress
                 binding.sampler.materialize_batches(
-                    show_progress=self.show_sampler_progress,
+                    show_progress=show_sampler_progress,
                 )
 
                 # Capture the sampled output
@@ -683,6 +745,10 @@ class TrainPhase(ExperimentPhase):
         self,
         *,
         results: TrainResults | None = None,
+        show_sampler_progress: bool = True,
+        show_training_progress: bool = True,
+        persist_progress: bool = IN_NOTEBOOK,
+        persist_epoch_progress: bool = IN_NOTEBOOK,
     ) -> Iterator[ExecutionContext]:
         """
         Iterate over all execution steps for this training phase.
@@ -730,6 +796,20 @@ class TrainPhase(ExperimentPhase):
         Args:
             results (TrainResults | None, optional):
                 Optional container in which results will be registered.
+            show_sampler_progress (bool, optional):
+                Whether to show a progress bar for sampler batching.
+                Defaults to True.
+            show_training_progress (bool, optional):
+                Whether to show a progress bar for training execution.
+                Defaults to True.
+            persist_progress (bool, optional):
+                Whether to leave all progress bars shown after they complete. Note that
+                overrides all nested progress bar persist settings. Defaults to
+                `IN_NOTEBOOK` (True if working in a notebook, False if in a script).
+            persist_epoch_progress (bool, optional):
+                Whether to leave per-epoch training bars shown after they complete.
+                Defaults to `IN_NOTEBOOK` (True if working in a notebook, False if in
+                a Python script).
 
         Yields:
             ExecutionContext:
@@ -739,7 +819,9 @@ class TrainPhase(ExperimentPhase):
         """
         # Samplers may be repeated over input bindings
         # We group by unique samplers (same sampler cfg, same FeatureSet + split)
-        sampler_execs = self._build_sampler_executions()
+        sampler_execs = self._build_sampler_executions(
+            show_sampler_progress=show_sampler_progress,
+        )
         sampler_lens = [se.sampled.num_batches for se in sampler_execs]
         if any(x == 0 for x in sampler_lens):
             msg = (
@@ -761,8 +843,8 @@ class TrainPhase(ExperimentPhase):
             style="training",
             description=f"Training ['{self.label}']",
             total=self.n_epochs,
-            enabled=self.show_training_progress,
-            persist=IN_NOTEBOOK,
+            enabled=show_training_progress,
+            persist=persist_progress,
         )
         epoch_ptask.start()
 
@@ -787,11 +869,11 @@ class TrainPhase(ExperimentPhase):
             # ------------------------------------------------
             per_epoch_ptask = ProgressTask(
                 style="training_loss",
-                description=f"Epoch {epoch_idx + 1}",
+                description=f"Epoch {epoch_idx}",
                 total=step_cnt,
-                enabled=self.show_training_progress,
-                persist=self.persist_epoch_progress
-                or ((epoch_idx == self.n_epochs - 1) and IN_NOTEBOOK),
+                enabled=show_training_progress,
+                persist=(persist_epoch_progress and persist_progress)
+                or ((epoch_idx == self.n_epochs - 1) and persist_progress),
             )
 
             # Determine scheduling from self.batch_schedule
@@ -899,12 +981,22 @@ class TrainPhase(ExperimentPhase):
                         )
 
                 # Increment batch progress bar
-                per_epoch_ptask.tick(
-                    n=1,
-                    loss_total=avg_total,
-                    loss_train=avg_train,
-                    loss_aux=avg_aux,
-                )
+                tick_fields = {
+                    "loss_total": avg_total,
+                    "loss_train": avg_train,
+                    "loss_aux": avg_aux,
+                }
+
+                # Show val_loss on final step if validation ran this epoch
+                if step_idx == step_cnt - 1:
+                    val_loss = self._extract_validation_loss(
+                        results=results,
+                        epoch_idx=epoch_idx,
+                    )
+                    if val_loss is not None:
+                        tick_fields["val_loss"] = val_loss
+
+                per_epoch_ptask.tick(n=1, **tick_fields)
 
             per_epoch_ptask.finish()
             epoch_ptask.tick(n=1)
@@ -941,9 +1033,7 @@ class TrainPhase(ExperimentPhase):
                 "phase_type": "TrainPhase",
                 "n_epochs": self.n_epochs,
                 "batch_schedule": self.batch_schedule.value,
-                "show_sampler_progress": self.show_sampler_progress,
-                "show_training_progress": self.show_training_progress,
-                "persist_epoch_progress": self.persist_epoch_progress,
+                "show_validation_props": self._show_validation_props,
             },
         )
         return cfg
@@ -973,7 +1063,7 @@ class TrainPhase(ExperimentPhase):
         losses = None
         if config["losses"] is not None:
             losses = [AppliedLoss.from_config(cfg) for cfg in config["losses"]]
-        return cls(
+        obj = cls(
             label=config["label"],
             input_sources=[
                 InputBinding.from_config(cfg) for cfg in config["input_sources"]
@@ -982,11 +1072,10 @@ class TrainPhase(ExperimentPhase):
             n_epochs=config["n_epochs"],
             active_nodes=config["active_nodes"],
             batch_schedule=config["batch_schedule"],
-            callbacks=config["callbacks"],
-            show_sampler_progress=config["show_sampler_progress"],
-            show_training_progress=config["show_training_progress"],
-            persist_epoch_progress=config["persist_epoch_progress"],
+            callbacks=[Callback.from_config(cfg) for cfg in config["callbacks"]],
         )
+        obj._show_validation_props = config.get("show_validation_props")
+        return obj
 
 
 # TODO: add on_exception callback hook
