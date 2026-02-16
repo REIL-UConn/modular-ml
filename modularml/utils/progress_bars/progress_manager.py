@@ -5,11 +5,17 @@ from typing import TYPE_CHECKING, ClassVar
 
 from rich.console import Console, Group
 from rich.live import Live
+from rich.padding import Padding
 from rich.progress import Progress
 
 from modularml.utils.environment.environment import IN_NOTEBOOK
 
-from .progress_styles import style_sampling, style_training, style_training_loss
+from .progress_styles import (
+    style_cv,
+    style_sampling,
+    style_training,
+    style_training_loss,
+)
 
 if TYPE_CHECKING:
     from .progress_styles import ProgressStyle
@@ -54,10 +60,16 @@ class ProgressManager:
         self._progress: dict[int, Progress] = {}
         self._task_counter: int = 0
 
+        # Indentation: style-based nesting
+        self._style_indent: dict[str, int] = {}
+        self._progress_indent: dict[int, int] = {}
+        self._next_indent_level: int = 0
+
         self._styles: dict[str, ProgressStyle] = {
             style_sampling.name: style_sampling,
             style_training.name: style_training,
             style_training_loss.name: style_training_loss,
+            style_cv.name: style_cv,
         }
 
     # ================================================
@@ -97,7 +109,14 @@ class ProgressManager:
     def _render_group(self):
         if not self._progress:
             return None
-        return Group(*self._progress.values())
+        renderables = []
+        for key, progress in self._progress.items():
+            indent = self._progress_indent.get(key, 0)
+            if indent > 0:
+                renderables.append(Padding(progress, (0, 0, 0, indent * 2)))
+            else:
+                renderables.append(progress)
+        return Group(*renderables)
 
     def _ensure_live(self):
         if self._live is not None:
@@ -143,6 +162,9 @@ class ProgressManager:
         self._active_tasks.clear()
         self._progress.clear()
         self._task_counter = 0
+        self._style_indent.clear()
+        self._progress_indent.clear()
+        self._next_indent_level = 0
 
     def _attach_task(self, task: ProgressTask):
         style = self._styles[task.style_name]
@@ -152,6 +174,12 @@ class ProgressManager:
         # Each task gets its own Progress instance, keyed by insertion order
         key = self._task_counter
         self._task_counter += 1
+
+        # Assign indent level based on first-seen style order
+        if task.style_name not in self._style_indent:
+            self._style_indent[task.style_name] = self._next_indent_level
+            self._next_indent_level += 1
+        self._progress_indent[key] = self._style_indent[task.style_name]
 
         self._progress[key] = Progress(
             *style.columns,
@@ -179,6 +207,7 @@ class ProgressManager:
         if not task.persist:
             progress.remove_task(task._task_id)
             del self._progress[task._progress_key]
+            self._progress_indent.pop(task._progress_key, None)
 
         self._refresh_layout()
 

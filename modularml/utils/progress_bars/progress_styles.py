@@ -96,3 +96,16 @@ style_evaluation = ProgressStyle(
         TimeRemainingColumn(),
     ),
 )
+
+style_cv = ProgressStyle(
+    name="cross_validation",
+    columns=(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TextColumn("|"),
+        TimeElapsedColumn(),
+        TextColumn("|"),
+        TimeRemainingColumn(),
+    ),
+)
