@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from modularml.core.experiment.phases.eval_phase import EvalPhase
 from modularml.core.experiment.phases.phase import ExperimentPhase, InputBinding
@@ -563,3 +563,62 @@ class PhaseGroup:
 
     add_evaluation = add_eval_phase
     add_eval = add_eval_phase
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return configuration details required to reconstruct this phase group.
+
+        Returns:
+            dict[str, Any]:
+                Configuration used to reconstruct the phase group.
+
+        """
+        items_cfg = []
+        for entry in self._data:
+            if isinstance(entry, PhaseGroup):
+                items_cfg.append(
+                    {
+                        "item_type": "PhaseGroup",
+                        "config": entry.get_config(),
+                    },
+                )
+            elif isinstance(entry, ExperimentPhase):
+                items_cfg.append(
+                    {
+                        "item_type": "ExperimentPhase",
+                        "config": entry.get_config(),
+                    },
+                )
+            else:
+                msg = f"Unexpected item type in PhaseGroup: {type(entry)}."
+                raise TypeError(msg)
+        return {"label": self.label, "items": items_cfg}
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> PhaseGroup:
+        """
+        Construct a phase group from a configuration dictionary.
+
+        Args:
+            config (dict[str, Any]):
+                Configuration details. Keys must be strings.
+
+        Returns:
+            PhaseGroup: Reconstructed phase group.
+
+        """
+        items = []
+        for item_cfg in config.get("items", []):
+            item_type = item_cfg["item_type"]
+            inner_cfg = item_cfg["config"]
+            if item_type == "PhaseGroup":
+                items.append(cls.from_config(inner_cfg))
+            elif item_type == "ExperimentPhase":
+                items.append(ExperimentPhase.from_config(inner_cfg))
+            else:
+                msg = f"Unknown item_type in PhaseGroup config: {item_type}."
+                raise ValueError(msg)
+        return cls(label=config["label"], phases=items)
