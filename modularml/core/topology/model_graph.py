@@ -1904,6 +1904,7 @@ class ModelGraph(Configurable, Stateful):
         filepath: Path,
         *,
         overwrite: bool = False,
+        meta: dict[str, Any] | None = None,
     ) -> Path:
         """
         Save full ModelGraph state.
@@ -1915,6 +1916,9 @@ class ModelGraph(Configurable, Stateful):
             overwrite (bool, optional):
                 Whether to overwrite any existing file at the save location.
                 Defaults to False.
+            meta (dict[str, Any], optional):
+                Additional meta data to attach to the checkpoint.
+                Must be pickle-able.
 
         Returns:
             Path: Final path of saved ModelGraph checkpoint.
@@ -1924,11 +1928,18 @@ class ModelGraph(Configurable, Stateful):
         from modularml.core.io.serializer import serializer
 
         ckpt = Checkpoint()
+
+        # Attach node and optimizer states
         ckpt.add_entry(key="modelgraph", obj=self)
         for n_id, node in self.nodes.items():
             ckpt.add_entry(key=f"nodes:{n_id}", obj=node)
         if self._optimizer is not None:
             ckpt.add_entry(key="optimizer", obj=self._optimizer)
+
+        # Attach meta data
+        if meta is not None:
+            for k, v in meta.items():
+                ckpt.add_meta(k, v)
 
         return serializer.save(
             ckpt,
@@ -1937,7 +1948,7 @@ class ModelGraph(Configurable, Stateful):
             overwrite=overwrite,
         )
 
-    def load_checkpoint(self, filepath: Path) -> ModelGraph:
+    def restore_checkpoint(self, filepath: Path) -> ModelGraph:
         """
         Restore ModelGraph state from checkpoint.
 
