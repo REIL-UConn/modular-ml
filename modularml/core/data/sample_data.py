@@ -559,9 +559,14 @@ class RoleData(Mapping[str, SampleData], Summarizable):
     # Pseudo-attribute access
     # ================================================
     def __getattr__(self, name: str) -> SampleData:
-        # Called only if attribute not found normally
+        # Guard against recursion
+        if name == "_data":
+            raise AttributeError(name)
+
+        # Try to grab attribute from _data
         if name in self._data:
             return self._data[name]
+
         msg = f"{self.__class__.__name__} has no role '{name}'. Available roles: {self.available_roles}."
         raise AttributeError(msg)
 

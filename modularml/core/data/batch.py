@@ -187,9 +187,14 @@ class Batch(Summarizable):
     # Pseudo-attribute access
     # ================================================
     def __getattr__(self, name: str):
-        # Called only if attribute not found normally
+        # Guard against recursion
+        if name == "role_data":
+            raise AttributeError(name)
+
+        # Try to grab attribute from role+data
         if name in self.role_data.available_roles:
             return self.get_data(role=name)
+
         msg = f"{self.__class__.__name__} has no attribute '{name}'. Available roles: {self.available_roles}."
         raise AttributeError(msg)
 

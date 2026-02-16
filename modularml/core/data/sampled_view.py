@@ -108,8 +108,14 @@ class SampledView(Mapping[str, list[BatchView]], Summarizable):
     # Attribute access
     # ================================================
     def __getattr__(self, name: str) -> list[BatchView]:
+        # Guard against recursion
+        if name == "streams":
+            raise AttributeError(name)
+
+        # Try to grab attribute from stream
         if name in self.streams:
             return self.streams[name]
+
         msg = f"{self.__class__.__name__} has no stream '{name}'. Available streams: {self.stream_names}"
         raise AttributeError(msg)
 
@@ -125,7 +131,9 @@ class SampledView(Mapping[str, list[BatchView]], Summarizable):
     # ================================================
     def _summary_rows(self) -> list[tuple]:
         rows: list[tuple] = []
-        rows.append(("streams", [(k, f"{len(v)} batches") for k, v in self.streams.items()]))
+        rows.append(
+            ("streams", [(k, f"{len(v)} batches") for k, v in self.streams.items()]),
+        )
 
         for name, batches in self.streams.items():
             if batches:
@@ -136,4 +144,6 @@ class SampledView(Mapping[str, list[BatchView]], Summarizable):
         return rows
 
     def __repr__(self) -> str:
-        return f"SampledView(streams={self.stream_names}, num_batches={self.num_batches})"
+        return (
+            f"SampledView(streams={self.stream_names}, num_batches={self.num_batches})"
+        )
