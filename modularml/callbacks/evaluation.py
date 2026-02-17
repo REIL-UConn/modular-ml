@@ -487,6 +487,33 @@ class EvaluationCallbackResult(CallbackResult):
         """
         return self.get_eval_results().stacked_batches(node=node, fmt=fmt)
 
+    def aggregated_losses(
+        self,
+        node: str | GraphNode,
+        *,
+        reducer: Literal["mean", "sum"] = "mean",
+    ) -> dict[str, float]:
+        """
+        Aggregates losses over all batches within this eval phase.
+
+        Args:
+            node (str | GraphNode):
+                The node to filter losses to. Can be the node instance,
+                its ID, or its label.
+
+            reducer (Literal['mean', 'sum']):
+                How losses should be aggregated. Defaults to "mean".
+
+        Returns:
+            dict[str, float]:
+                Aggregated lossed, keyed by the AppliedLoss label.
+
+        """
+        return self.get_eval_results().aggregated_losses(
+            node=node,
+            reducer=reducer,
+        )
+
     # ================================================
     # Source Data Access
     # ================================================

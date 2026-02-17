@@ -190,6 +190,49 @@ class EvalResults(PhaseResults):
 
         return Batch.concat(*batches, fmt=fmt)
 
+    def aggregated_losses(
+        self,
+        node: str | GraphNode,
+        *,
+        reducer: Literal["mean", "sum"] = "mean",
+    ) -> dict[str, float]:
+        """
+        Aggregates losses over all batches within this eval phase.
+
+        Args:
+            node (str | GraphNode):
+                The node to filter losses to. Can be the node instance,
+                its ID, or its label.
+
+            reducer (Literal['mean', 'sum']):
+                How losses should be aggregated. Defaults to "mean".
+
+        Returns:
+            dict[str, float]:
+                Aggregated lossed, keyed by the AppliedLoss label.
+
+        """
+        n_losses = self.losses(node=node)
+
+        # Ensure only one epoch
+        if n_losses.shape["epoch"] != 1:
+            msg = "EvalResults contain more than one epoch. Cannot collapse losses."
+            raise ValueError(msg)
+        n_losses = n_losses.collapse(axis="epoch", reducer="first")
+
+        # Aggregate over batches
+        b_losses = n_losses.collapse(axis="batch", reducer=reducer)
+
+        # Ensure only "label" axis remains
+        if len(b_losses.axes) != 1 or b_losses.axes[0] != "label":
+            msg = (
+                "Failed to collapse losses. Expected only a remaining axis of "
+                f"'label'. Got: {b_losses.axes}."
+            )
+            raise RuntimeError(msg)
+
+        return {k: lr.auxiliary for k, lr in b_losses.items()}
+
     # ================================================
     # Source Data Access
     # ================================================

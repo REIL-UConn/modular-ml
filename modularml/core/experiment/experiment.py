@@ -234,7 +234,7 @@ class Experiment:
             raise ValueError(msg)
 
         # Restore model graph state
-        self.model_graph.load_checkpoint(self._checkpoints[name])
+        self.model_graph.restore_checkpoint(self._checkpoints[name])
 
     # ================================================
     # Execution

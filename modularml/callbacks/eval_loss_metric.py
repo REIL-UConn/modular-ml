@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from modularml.callbacks.metric import EvaluationMetric, MetricResult
 from modularml.core.training.applied_loss import AppliedLoss
@@ -81,10 +81,7 @@ class EvalLossMetric(EvaluationMetric):
             return None
 
         # Get loss records for the defined AppliedLoss
-        lds = eval_res.losses(node=self._loss.node_id).where(
-            label=self._loss.label,
-            epoch=exec_ctx.epoch_idx,
-        )
+        lds = eval_res.losses(node=self._loss.node_id).where(label=self._loss.label)
         if len(lds.values()) == 0:
             return None
 
