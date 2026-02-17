@@ -466,7 +466,7 @@ class AxisSeries(Generic[T]):
 
     def _coord_selectors(
         self,
-        coords: dict[str, Hashable],
+        coords: dict[str, Hashable | Callable],
     ) -> list[tuple[int, Callable]]:
         """
         Build per-axis selector functions.
@@ -489,6 +489,8 @@ class AxisSeries(Generic[T]):
             if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
                 allowed = set(value)
                 selectors.append((idx, lambda x, allowed=allowed: x in allowed))
+            elif isinstance(value, Callable):
+                selectors.append((idx, value))
             else:
                 selectors.append((idx, lambda x, value=value: x == value))
         return selectors

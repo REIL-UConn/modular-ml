@@ -81,6 +81,10 @@ class LossRecord:
     @classmethod
     def merge(cls, *records: LossRecord) -> LossRecord:
         """Merge all records into a new instance."""
+        # Check if passed list instead of separate args
+        if (len(records) == 1) and isinstance(records[0], list):
+            records = records[0]
+
         # Type / value checking
         ref = records[0]
         for lr in records:
@@ -142,24 +146,38 @@ class LossRecord:
             Values are cast to Python floats before averaging.
 
         """
+        # Check if passed list instead of separate args
+        if (len(records) == 1) and isinstance(records[0], list):
+            records = records[0]
+
         # Enforce float casting
         lrs_to_avg = [lr.to_float() for lr in records]
+
+        # Get sum of all records
+        lr_total = LossRecord.merge(*lrs_to_avg)
 
         # Get number of non-null trainable and aux records
         counts = {
             "trainable": len([lr for lr in lrs_to_avg if lr.trainable is not None]),
             "auxiliary": len([lr for lr in lrs_to_avg if lr.auxiliary is not None]),
         }
-
-        # Get sum of all records
-        lr_total = LossRecord.merge(*lrs_to_avg)
+        avg_train = (
+            None
+            if lr_total.trainable is None
+            else (lr_total.trainable / counts["trainable"])
+        )
+        avg_aux = (
+            None
+            if lr_total.auxiliary is None
+            else (lr_total.auxiliary / counts["auxiliary"])
+        )
 
         # Return averaged
         return LossRecord(
             label=lr_total.label,
             node_id=lr_total.node_id,
-            trainable=lr_total.trainable / counts["trainable"],
-            auxiliary=lr_total.auxiliary / counts["auxiliary"],
+            trainable=avg_train,
+            auxiliary=avg_aux,
         )
 
 
@@ -259,42 +277,13 @@ class LossCollection(AxisSeries[LossRecord]):
         """
         Retrieves the total trainable loss value of all records in this collection.
 
-        To get the trainable loss for a specific node or label, use `get_trainable()`.
+        To get the trainable loss for a specific node or label, use:
+        ```python
+            >>> lc = LossCollection(...)
+            >>> lc.where(node=MyMLP, ...).trainable
+        ```
         """
         vals = [lr.trainable for lr in self.values() if lr.trainable is not None]
-        return sum(vals) if vals else 0.0
-
-    def get_trainable(
-        self,
-        node: str | ExperimentNode | None = None,
-        label: str | None = None,
-    ) -> float:
-        """
-        Retrieves the total trainable loss for the specified entry or entries.
-
-        Description:
-            Filtering is first performed with the given `node` and `label` values.
-            The `trainable` attribute of all resulting entries is then summed and
-            returned.
-
-        Args:
-            node (str | ExperimentNode | None, optional):
-                The node to filter records to. Can be the node ID, its label, or
-                the actual node instance. If None, entries across all nodes are
-                summed. Defaults to None.
-            label (str | None, optional):
-                The loss label to filter records to. If None, entries across all
-                loss labels are summed. Defaults to None.
-
-        Returns:
-            float: The summed trainable loss value over the filtered entries.
-
-        """
-        vals = [
-            lr.trainable
-            for lr in self.select(node=node, label=label)
-            if lr.trainable is not None
-        ]
         return sum(vals) if vals else 0.0
 
     @property
@@ -302,42 +291,13 @@ class LossCollection(AxisSeries[LossRecord]):
         """
         Retrieves the total auxiliary loss value of all records in this collection.
 
-        To get the auxiliary loss for a specific node or label, use `get_auxiliary()`.
+        To get the auxiliary loss for a specific node or label, use:
+        ```python
+            >>> lc = LossCollection(...)
+            >>> lc.where(node=MyMLP, ...).auxiliary
+        ```
         """
         vals = [lr.auxiliary for lr in self.values() if lr.auxiliary is not None]
-        return sum(vals) if vals else 0.0
-
-    def get_auxiliary(
-        self,
-        node: str | ExperimentNode | None = None,
-        label: str | None = None,
-    ) -> float:
-        """
-        Retrieves the total auxiliary loss for the specified entry or entries.
-
-        Description:
-            Filtering is first performed with the given `node` and `label` values.
-            The `auxiliary` attribute of all resulting entries is then summed and
-            returned.
-
-        Args:
-            node (str | ExperimentNode | None, optional):
-                The node to filter records to. Can be the node ID, its label, or
-                the actual node instance. If None, entries across all nodes are
-                summed. Defaults to None.
-            label (str | None, optional):
-                The loss label to filter records to. If None, entries across all
-                loss labels are summed. Defaults to None.
-
-        Returns:
-            float: The summed auxiliary loss value over the filtered entries.
-
-        """
-        vals = [
-            lr.auxiliary
-            for lr in self.select(node=node, label=label)
-            if lr.auxiliary is not None
-        ]
         return sum(vals) if vals else 0.0
 
     # ================================================
