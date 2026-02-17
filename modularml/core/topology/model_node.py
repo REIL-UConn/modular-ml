@@ -531,22 +531,22 @@ class ModelNode(ComputeNode):
         ctx.set_output(node_id=self.node_id, batch=out_batch)
 
         # Compute losses
-        if losses is not None:
-            for loss in losses:
-                weighted_raw_loss = loss.compute(ctx=ctx)
-                lr = LossRecord(
-                    value=weighted_raw_loss,
-                    label=loss.label,
-                    contributes_to_update=True,
-                )
-                loss_records.append(lr)
+        for loss in losses:
+            weighted_raw_loss = loss.compute(ctx=ctx)
+            lr = LossRecord(
+                label=loss.label,
+                node_id=loss.node_id,
+                trainable=weighted_raw_loss,
+            )
+            loss_records.append(lr)
 
         # Backward + opt step
         lc = LossCollection(records=loss_records)
         lc.trainable.backward()
         self._optimizer.step()
 
-        ctx.set_losses(node_id=self.node_id, loss=lc)
+        # Record loss collection
+        ctx.add_losses(lc)
 
     def _train_step_tensorflow(
         self,
@@ -578,22 +578,22 @@ class ModelNode(ComputeNode):
             ctx.set_output(node_id=self.node_id, batch=out_batch)
 
         # Compute losses
-        if losses is not None:
-            for loss in losses:
-                weighted_raw_loss = loss.compute(ctx=ctx)
-                lr = LossRecord(
-                    value=weighted_raw_loss,
-                    label=loss.label,
-                    contributes_to_update=True,
-                )
-                loss_records.append(lr)
+        for loss in losses:
+            weighted_raw_loss = loss.compute(ctx=ctx)
+            lr = LossRecord(
+                label=loss.label,
+                node_id=loss.node_id,
+                trainable=weighted_raw_loss,
+            )
+            loss_records.append(lr)
 
         # Backward + opt step
         lc = LossCollection(records=loss_records)
-        grads = tape.gradient(lc.total, self._model.trainable_variables)
+        grads = tape.gradient(lc.trainable, self._model.trainable_variables)
         self._optimizer.step(grads=grads, variables=self._model.trainable_variables)
 
-        ctx.set_losses(node_id=self.node_id, loss=lc)
+        # Record loss collection
+        ctx.add_losses(lc)
 
     def _train_step_scikit(
         self,
@@ -684,15 +684,15 @@ class ModelNode(ComputeNode):
                 for loss in losses:
                     weighted_raw_loss = loss.compute(ctx=ctx)
                     lr = LossRecord(
-                        value=weighted_raw_loss,
                         label=loss.label,
-                        contributes_to_update=False,  # not used in opt. stepping
+                        node_id=loss.node_id,
+                        auxiliary=weighted_raw_loss,
                     )
                     loss_records.append(lr)
 
-        # Record loss records
+        # Record loss collection
         lc = LossCollection(records=loss_records)
-        ctx.set_losses(node_id=self.node_id, loss=lc)
+        ctx.add_losses(lc)
 
     def _eval_step_tensorflow(
         self,
@@ -723,15 +723,15 @@ class ModelNode(ComputeNode):
             for loss in losses:
                 weighted_raw_loss = loss.compute(ctx=ctx)
                 lr = LossRecord(
-                    value=weighted_raw_loss,
                     label=loss.label,
-                    contributes_to_update=False,  # not used in opt. stepping
+                    node_id=loss.node_id,
+                    auxiliary=weighted_raw_loss,
                 )
                 loss_records.append(lr)
 
-        # Record loss records
+        # Record loss collection
         lc = LossCollection(records=loss_records)
-        ctx.set_losses(node_id=self.node_id, loss=lc)
+        ctx.add_losses(lc)
 
     def _eval_step_scikit(
         self,

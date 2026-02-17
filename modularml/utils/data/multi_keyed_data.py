@@ -3,21 +3,21 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable, Hashable, Iterable, Iterator
 from dataclasses import dataclass
-from typing import Generic, TypeVar
+from typing import Any, ClassVar, Generic, TypeVar
 
 import numpy as np
 
-from modularml.core.training.loss_record import LossCollection
 from modularml.utils.data.formatting import ensure_tuple
 from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
 
 torch = check_torch()
 tf = check_tensorflow()
 
-AxisKey = tuple[Hashable, ...]  # eg, (epoch, batch, edge)
-ExternalKey = (
-    Hashable | tuple[Hashable, ...]
-)  # scalar when single axis, tuple otherwise
+# Data keys -> eg, (epoch, batch, edge)
+AxisKey = tuple[Hashable, ...]
+
+# Convenience key -> scalar when single axis, tuple otherwise
+ExternalKey = Hashable | tuple[Hashable, ...]
 T = TypeVar("T")
 
 
@@ -28,20 +28,9 @@ class AxisSeries(Generic[T]):
     axes: tuple[str, ...]
     _data: dict[AxisKey, T]
 
-    # ================================================
-    # Key wrapping/unwrapping (single-axis convenience)
-    # ================================================
-    def _unwrap_key(self, key: AxisKey) -> ExternalKey:
-        """Convert internal tuple key to external key (scalar if single axis)."""
-        if len(self.axes) == 1:
-            return key[0]
-        return key
-
-    def _wrap_key(self, key: ExternalKey) -> AxisKey:
-        """Convert external key to internal tuple key."""
-        if len(self.axes) == 1 and not isinstance(key, tuple):
-            return (key,)
-        return ensure_tuple(key)
+    # Subclasses may override to restrict allowed string reducers
+    # None = all string reducers are allowed
+    supported_reduction_methods: ClassVar[set[str] | None] = None
 
     # ================================================
     # Axes properties
@@ -75,6 +64,7 @@ class AxisSeries(Generic[T]):
 
         return {k: list(v) for k, v in uniq.items()}
 
+    @property
     def shape(self) -> dict[str, int]:
         """Returns the cardinality of each axis."""
         return {k: len(v) for k, v in self.axes_values().items()}
@@ -82,6 +72,11 @@ class AxisSeries(Generic[T]):
     # ================================================
     # Direct access & querying
     # ================================================
+    @property
+    def data(self) -> dict[AxisKey, T]:
+        """The keyed data returned as a normal dictionary."""
+        return {self._unwrap_key(k): v for k, v in self._data.items()}
+
     def at(self, **coords) -> T:
         """
         Retrieve a value at an exact axis location.
@@ -184,12 +179,62 @@ class AxisSeries(Generic[T]):
     # ================================================
     # Views
     # ================================================
-    def first(self) -> T:
-        """Return the first value."""
+    def first(self, *, sort_by: list[AxisKey] | None = None) -> T:
+        """
+        Return the first value.
+
+        Args:
+            sort_by (list[AxisKey], optional):
+                One (or several) of the current axis keys to sort by
+                before selecting the first element. Defaults to None.
+
+        """
+        if len(self.values()) < 1:
+            msg = "Cannot take first element of an empty series."
+            return ValueError(msg)
+
+        # Sort values by `sort_by` keys, then return first
+        if sort_by is not None:
+            if not isinstance(sort_by, list):
+                sort_by = [sort_by]
+            sort_by_idxs = [self.axes.index(x) for x in sort_by]
+            sorted_keys = sorted(
+                self.keys(),
+                key=lambda x: (x[i] for i in sort_by_idxs),
+            )
+            sorted_vals = [self._data[k] for k in sorted_keys]
+            return sorted_vals[0]
+
+        # Return first value of values, as is
         return next(iter(self._data.values()))
 
-    def last(self) -> T:
-        """Return the last value."""
+    def last(self, *, sort_by: list[AxisKey] | None = None) -> T:
+        """
+        Return the last value.
+
+        Args:
+            sort_by (list[AxisKey], optional):
+                One (or several) of the current axis keys to sort by
+                before selecting the last element. Defaults to None.
+
+        """
+        if len(self.values()) < 1:
+            msg = "Cannot take last element of an empty series."
+            return ValueError(msg)
+
+        # Sort values by `sort_by` keys, then return last
+        if sort_by is not None:
+            if not isinstance(sort_by, list):
+                sort_by = [sort_by]
+            sort_by_idxs = [self.axes.index(x) for x in sort_by]
+            sorted_keys = sorted(
+                self.keys(),
+                key=lambda x: (x[i] for i in sort_by_idxs),
+            )
+            sorted_vals = [self._data[k] for k in sorted_keys]
+            return sorted_vals[-1]
+
+        # Return last value of values, as is
         return next(reversed(self._data.values()))
 
     # ================================================
@@ -212,15 +257,27 @@ class AxisSeries(Generic[T]):
         """
 
         def use_attribute(attr: str) -> Callable[[list[T]], T]:
-            # Ensure attribute exists
-            try:
-                reducer_fnc = getattr(data_type, attr)
-            except AttributeError as e:
+            # Validate against supported_reduction_methods if defined
+            supported = getattr(data_type, "supported_reduction_methods", None)
+            if (supported is not None) and (reducer not in supported):
+                msg = (
+                    f"Reducer '{reducer}' is not supported for type "
+                    f"'{data_type.__name__}'. Allowed: {supported}."
+                )
+                raise ValueError(msg)
+
+            # Defaults if not an existing attribute:
+            if not hasattr(data_type, attr):
+                if attr == "sum":
+                    return sum
                 msg = (
                     f"Reducer '{attr}' not found on class '{data_type.__name__}'. "
                     "Expected a class-level reducer accepting Iterable[T]."
                 )
-                raise AttributeError(msg) from e
+                raise AttributeError(msg)
+
+            # Get attribute
+            reducer_fnc = getattr(data_type, attr)
 
             # Ensure attribute is callable
             if not callable(reducer_fnc):
@@ -241,18 +298,8 @@ class AxisSeries(Generic[T]):
         if reducer == "last":
             return lambda xs: xs[-1]
         if reducer == "mean":
-            # LossCollection directly support mean of multiple LCs
-            if issubclass(data_type, LossCollection):
-                return LossCollection.mean
-
-            # Otherwise, class must have "mean" attribute
             return use_attribute(attr=reducer)
         if reducer == "sum":
-            # LossCollection directly support mean of multiple LCs
-            if issubclass(data_type, LossCollection):
-                return LossCollection.merge
-
-            # Otherwise, class must have "mean" attribute
             return use_attribute(attr=reducer)
 
         if reducer == "concat":
@@ -325,10 +372,92 @@ class AxisSeries(Generic[T]):
         new_axes = self.axes[:axis_idx] + self.axes[axis_idx + 1 :]
         return AxisSeries(axes=new_axes, _data=reduced)
 
+    def squeeze(self) -> AxisSeries[T]:
+        """
+        Remove axes that have only one unique value.
+
+        Example:
+        ```python
+            >>> my_series.shape
+            ("epoch": 1, "batch": 32)
+            >> my_series.squeeze().shape
+            ("batch": 32)
+        ```
+
+        """
+        # Get axis labels with cardinality of 1
+        single_axes = {k for k, v in self.shape.items() if v == 1}
+        if not single_axes:
+            return self
+
+        # Get axis labels if new series
+        keep_idxs = [i for i, ax in enumerate(self.axes) if ax not in single_axes]
+        new_axes = tuple(self.axes[i] for i in keep_idxs)
+
+        # All axes squeezed -> exactly one entry remains
+        if not new_axes:
+            value = next(iter(self._data.values()))
+            return AxisSeries(axes=(), _data={(): value})
+
+        # Created squeezed series
+        new_data: dict[AxisKey, T] = {}
+        for k, v in self._data.items():
+            new_key = tuple(k[i] for i in keep_idxs)
+            new_data[new_key] = v
+        return AxisSeries(axes=new_axes, _data=new_data)
+
     # ================================================
     # Helpers
     # ================================================
+    def _interpret_coords(
+        self,
+        coords: dict[str, Any],
+    ) -> dict[str, Hashable]:
+        """
+        Provides a hook for subclasses to allow for flexible axis key values.
+
+        Description:
+            The keys of `coords` can be remapped to the true axes labels as
+            defined in this AxisSeries. For example, a series could be keyed
+            by `ExperimentNode.node_id`. Instead of forcing the user to enter
+            node_id values, it is more convenient to support node instances.
+
+            This method can be overrided like follows:
+            ```python
+            # for `coords: dict[str, ExperimentNode]`
+            return {k: n.node_id for k, v in coords.items()}
+            ```
+
+        Args:
+            coords (dict[Any, Any]):
+                Any coordinate (key:value) mappings to be cast to proper
+                format for AxisSeries internals.
+
+        Returns:
+            dict[str, Hashable]:
+                Proper coordinate keys and values to be used internally by
+                AxisSeries methods.
+
+        """
+        return coords
+
     def _make_key(self, coords: dict[str, Hashable]) -> AxisKey:
+        """
+        Create multi-axis key for dict of values.
+
+        Example:
+        ```python
+            >>> axes = ("epoch", "batch")
+            >>> coords = {"batch": 10, "epoch": 5}
+            >>> _make_key(coords)
+            (5, 10)
+        ```
+
+        """
+        # Pass through hook in case subclassed
+        coords = self._interpret_coords(coords=coords)
+
+        # Ensure all keys defined in coords
         try:
             return tuple(coords[a] for a in self.axes)
         except KeyError as e:
@@ -344,6 +473,9 @@ class AxisSeries(Generic[T]):
 
         Each selector is a callable: value -> bool
         """
+        # Pass through hook in case subclassed
+        coords = self._interpret_coords(coords=coords)
+
         selectors = []
         for axis, value in coords.items():
             # Validate axis keys
@@ -359,11 +491,28 @@ class AxisSeries(Generic[T]):
                 selectors.append((idx, lambda x, allowed=allowed: x in allowed))
             else:
                 selectors.append((idx, lambda x, value=value: x == value))
-
         return selectors
 
+    def _unwrap_key(self, key: AxisKey) -> ExternalKey:
+        """Convert internal tuple key to external key (scalar if single axis)."""
+        if len(self.axes) == 1:
+            return key[0]
+        return key
+
+    def _wrap_key(self, key: ExternalKey) -> AxisKey:
+        """Convert external key to internal tuple key."""
+        if len(self.axes) == 1 and not isinstance(key, tuple):
+            full_key = (key,)
+        else:
+            full_key = ensure_tuple(key)
+
+        # Pass through hook in case subclassed
+        coords = {self.axes[i]: v for i, v in enumerate(full_key)}
+        coords = self._interpret_coords(coords=coords)
+        return tuple(coords[k] for k in self.axes)
+
     # ================================================
-    # Helpers
+    # Representation
     # ================================================
     def __repr__(self):
         return f"AxisSeries(keyed_by={self.axes}, len={len(self)})"

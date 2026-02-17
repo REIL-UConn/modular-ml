@@ -3,11 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from modularml.core.training.loss_record import LossCollection
+
 if TYPE_CHECKING:
     from modularml.core.data.batch import Batch
     from modularml.core.data.batch_view import BatchView
     from modularml.core.references.featureset_reference import FeatureSetReference
-    from modularml.core.training.loss_record import LossCollection
 
 
 @dataclass
@@ -33,8 +34,8 @@ class ExecutionContext:
     # Outputs of GraphNodes (keyed by node ID)
     outputs: dict[str, Batch] = field(default_factory=dict)
 
-    # Losses computed in this batch (keyed by node ID)
-    losses: dict[str, LossCollection] = field(default_factory=dict)
+    # Losses computed in this batch
+    losses: LossCollection | None = None
 
     # ================================================
     # Attribute Updating
@@ -51,7 +52,26 @@ class ExecutionContext:
         self.inputs[(node_id, upstream)] = batch_view
 
     def set_output(self, *, node_id: str, batch: Batch):
+        """
+        Sets the tracked outputs for a given node ID.
+
+        Args:
+            node_id (str): Node ID to set.
+            batch (Batch): Batch data to record.
+
+        """
+        if node_id in self.outputs:
+            msg = f"Data already set for node: '{node_id}'."
+            raise ValueError(msg)
         self.outputs[node_id] = batch
 
-    def set_losses(self, *, node_id: str, loss: LossCollection):
-        self.losses[node_id] = loss
+    def add_losses(self, lc: LossCollection):
+        """Updates the tracked losses with this collection."""
+        if self.losses is None:
+            self.losses = lc
+
+        # Combine collections
+        else:
+            self.losses = LossCollection(
+                records=[*lc.values(), *self.losses.values()],
+            )

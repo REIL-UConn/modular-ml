@@ -1412,27 +1412,23 @@ class ModelGraph(Configurable, Stateful):
             ctx.set_output(node_id=n_id, batch=batch)
 
         # Compute losses
-        lrs_by_node: dict[str, list[LossRecord]] = defaultdict(list)
+        loss_records: list[LossRecord] = []
         for loss in losses:
             weighted_raw_loss = loss.compute(ctx=ctx)
             lr = LossRecord(
-                value=weighted_raw_loss,
                 label=loss.label,
-                contributes_to_update=True,
+                node_id=loss.node_id,
+                trainable=weighted_raw_loss,
             )
-            lrs_by_node[loss.node_id].append(lr)
-        lcs_by_node: dict[str, LossCollection] = {
-            k: LossCollection(records=v) for k, v in lrs_by_node.items()
-        }
+            loss_records.append(lr)
 
         # Optimizer stepping using all trainable losses
-        total_trainable = sum(lc.trainable for lc in lcs_by_node.values())
-        total_trainable.backward()
+        lc = LossCollection(records=loss_records)
+        lc.trainable.backward()
         self._optimizer.step()
 
-        # Update ctx records (group losses by node_id for logging)
-        for n_id, lc in lcs_by_node.items():
-            ctx.set_losses(node_id=n_id, loss=lc)
+        # Record loss collection
+        ctx.add_losses(lc)
 
     def _train_step_tensorflow(
         self,
@@ -1468,27 +1464,23 @@ class ModelGraph(Configurable, Stateful):
                 ctx.set_output(node_id=n_id, batch=batch)
 
         # Compute losses
-        lrs_by_node: dict[str, list[LossRecord]] = defaultdict(list)
+        loss_records: list[LossRecord] = []
         for loss in losses:
             weighted_raw_loss = loss.compute(ctx=ctx)
             lr = LossRecord(
-                value=weighted_raw_loss,
                 label=loss.label,
-                contributes_to_update=True,
+                node_id=loss.node_id,
+                trainable=weighted_raw_loss,
             )
-            lrs_by_node[loss.node_id].append(lr)
-        lcs_by_node: dict[str, LossCollection] = {
-            k: LossCollection(records=v) for k, v in lrs_by_node.items()
-        }
+            loss_records.append(lr)
 
         # Optimizer stepping using all trainable losses
-        total_trainable = sum(lc.trainable for lc in lcs_by_node.values())
-        grads = tape.gradient(total_trainable, opt_info["variables"])
+        lc = LossCollection(records=loss_records)
+        grads = tape.gradient(lc.trainable, opt_info["variables"])
         self._optimizer.step(grads=grads, variables=opt_info["variables"])
 
-        # Update ctx records (group losses by node_id for logging)
-        for n_id, lc in lcs_by_node.items():
-            ctx.set_losses(node_id=n_id, loss=lc)
+        # Record loss collection
+        ctx.add_losses(lc)
 
     def _train_step_scikit(
         self,
@@ -1717,22 +1709,19 @@ class ModelGraph(Configurable, Stateful):
             ctx.set_output(node_id=n_id, batch=batch)
 
         # Compute losses
-        lrs_by_node: dict[str, list[LossRecord]] = defaultdict(list)
+        loss_records: list[LossRecord] = []
         for loss in losses:
             weighted_raw_loss = loss.compute(ctx=ctx)
             lr = LossRecord(
-                value=weighted_raw_loss,
                 label=loss.label,
-                contributes_to_update=False,
+                node_id=loss.node_id,
+                auxiliary=weighted_raw_loss,
             )
-            lrs_by_node[loss.node_id].append(lr)
-        lcs_by_node: dict[str, LossCollection] = {
-            k: LossCollection(records=v) for k, v in lrs_by_node.items()
-        }
+            loss_records.append(lr)
 
-        # Update ctx records
-        for n_id, lc in lcs_by_node.items():
-            ctx.set_losses(node_id=n_id, loss=lc)
+        # Record loss collection
+        lc = LossCollection(records=loss_records)
+        ctx.add_losses(lc)
 
     # ================================================
     # Configurable
