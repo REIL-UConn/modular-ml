@@ -876,5 +876,8 @@ class ModelNode(ComputeNode):
         if self._optimizer is not None and state.get("optimizer") is not None:
             self._optimizer.set_state(state["optimizer"])
 
-        # Restore freeze flag state
-        self._freeze = state.get("frozen", False)
+        # Restore freeze state (must re-apply to sync backend parameters)
+        if state.get("frozen", False):
+            self.freeze()
+        else:
+            self.unfreeze()
