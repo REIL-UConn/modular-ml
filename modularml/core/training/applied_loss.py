@@ -91,6 +91,15 @@ class AppliedLoss(Summarizable):
         else:
             raise TypeError("`inputs` must be list[str] or dict[str, str]")
 
+    def __eq__(self, other: AppliedLoss):
+        if not isinstance(other, AppliedLoss):
+            msg = f"Cannot compare equality between AppliedLoss and {type(other)}."
+            raise TypeError(msg)
+
+        return self.get_config() == other.get_config()
+
+    __hash__ = None
+
     # ================================================
     # Properties
     # ================================================

@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeVar
 
 import numpy as np
 
+from modularml.core.data.batch import Batch
+from modularml.core.data.execution_context import ExecutionContext
+from modularml.core.data.schema_constants import ROLE_DEFAULT
+from modularml.core.experiment.callbacks.callback import CallbackResult
 from modularml.core.experiment.experiment_context import ExperimentContext
+from modularml.core.experiment.results.metric_store import MetricDataSeries, MetricStore
+from modularml.core.references.execution_reference import TensorLike
 from modularml.core.topology.graph_node import GraphNode
+from modularml.core.training.loss_record import LossRecord
 from modularml.utils.data.data_format import DataFormat, normalize_format
 from modularml.utils.data.multi_keyed_data import AxisSeries
 from modularml.utils.data.scaling import unscale_sample_data
@@ -15,16 +22,132 @@ from modularml.utils.topology.graph_search_utils import find_upstream_featureset
 if TYPE_CHECKING:
     from collections.abc import Hashable
 
-    from modularml.core.data.batch import Batch
-    from modularml.core.data.execution_context import ExecutionContext
     from modularml.core.data.featureset import FeatureSet
     from modularml.core.data.featureset_view import FeatureSetView
     from modularml.core.data.sample_data import SampleData
-    from modularml.core.experiment.callback import CallbackResult
-    from modularml.core.references.execution_reference import TensorLike
-    from modularml.core.training.loss_record import LossCollection
+
+T = TypeVar("T")
 
 
+# ================================================
+# AxisSeries Wrappers
+# ================================================
+@dataclass
+class ExecutionDataSeries(AxisSeries[ExecutionContext]):
+    """ExecutionContext objects keyed by (epoch, batch)."""
+
+    supported_reduction_methods: ClassVar[set[str]] = {"first", "last"}
+
+    def __repr__(self):
+        return f"ExecutionDataSeries(keyed_by={self.axes}, len={len(self)})"
+
+
+@dataclass
+class BatchDataSeries(AxisSeries[Batch]):
+    """Batch objects keyed by (epoch, batch)."""
+
+    supported_reduction_methods: ClassVar[set[str]] = {"first", "last"}
+
+    # ================================================
+    # Data Casting
+    # ================================================
+    def to_format(self, fmt: DataFormat) -> BatchDataSeries:
+        """Casts all underlying tensors to the specified format."""
+        data = {k: b.to_format(fmt=fmt) for k, b in self.data.items()}
+        return BatchDataSeries(
+            axes=self.axes,
+            _data=data,
+        )
+
+    # ================================================
+    # Representation
+    # ================================================
+    def __repr__(self):
+        return f"BatchDataSeries(keyed_by={self.axes}, len={len(self)})"
+
+
+@dataclass
+class TensorDataSeries(AxisSeries[TensorLike]):
+    """TensorLike objects keyed by (epoch, batch)."""
+
+    supported_reduction_methods: ClassVar[set[str]] = {"first", "last", "concat"}
+
+    def __repr__(self):
+        return f"TensorDataSeries(keyed_by={self.axes}, len={len(self)})"
+
+
+@dataclass
+class LossDataSeries(AxisSeries[LossRecord]):
+    """Loss records keyed by (epoch, batch, label)."""
+
+    supported_reduction_methods: ClassVar[set[str]] = {
+        "mean",
+        "sum",
+        "first",
+        "last",
+    }
+
+    # ================================================
+    # Data Casting
+    # ================================================
+    def to_float(self) -> LossDataSeries:
+        """Casts all underlying loss record values to floats."""
+        return LossDataSeries(
+            axes=self.axes,
+            _data={k: lr.to_float() for k, lr in self.data.items()},
+        )
+
+    # ================================================
+    # Accessors / Querying
+    # ================================================
+    @property
+    def trainable(self) -> float:
+        """
+        Retrieves the total trainable loss value of all records in this collection.
+
+        To get the trainable loss for a specific epoch/batch/label, use:
+        ```python
+            >>> series = LossDataSeries(...)
+            >>> series.where(epoch=1, ...).trainable
+        ```
+        """
+        vals = [lr.trainable for lr in self.values() if lr.trainable is not None]
+        return sum(vals) if vals else 0.0
+
+    @property
+    def auxiliary(self) -> float:
+        """
+        Retrieves the total auxiliary loss value of all records in this collection.
+
+        To get the auxiliary loss for a specific epoch/batch/label, use:
+        ```python
+            >>> series = LossDataSeries(...)
+            >>> series.where(epoch=1, ...).auxiliary
+        ```
+        """
+        vals = [lr.auxiliary for lr in self.values() if lr.auxiliary is not None]
+        return sum(vals) if vals else 0.0
+
+    # ================================================
+    # Representation
+    # ================================================
+    def __repr__(self):
+        return f"LossDataSeries(keyed_by={self.axes}, len={len(self)})"
+
+
+@dataclass
+class CallbackDataSeries(AxisSeries[CallbackResult]):
+    """CallbackResult objects keyed by (kind, label, epoch, batch, edge)."""
+
+    supported_reduction_methods: ClassVar[set[str]] = {"first", "last"}
+
+    def __repr__(self):
+        return f"CallbackDataSeries(keyed_by={self.axes}, len={len(self)})"
+
+
+# ================================================
+# PhaseResults
+# ================================================
 @dataclass
 class PhaseResults:
     label: str
@@ -33,10 +156,10 @@ class PhaseResults:
     _execution: list[ExecutionContext] = field(default_factory=list, repr=False)
 
     # Results produced by callbacks; keyed by callback label
-    _callbacks: dict[str, list[CallbackResult]] = field(
-        default_factory=dict,
-        repr=False,
-    )
+    _callbacks: list[CallbackResult] = field(default_factory=list, repr=False)
+
+    # Named scalar metrics recorded during execution
+    _metrics: MetricStore = field(default_factory=MetricStore, repr=False)
 
     # Memoized AxisSeries objects (invalidated on mutation)
     _series_cache: dict[tuple[Hashable, ...], Any] = field(
@@ -46,39 +169,26 @@ class PhaseResults:
     )
 
     # ================================================
-    # Representation
+    # Runtime Modifiers
     # ================================================
-    def __repr__(self):
-        n_exec = len(self._execution)
-        cb_labels = list(self._callbacks.keys())
-        return (
-            f"PhaseResults(label='{self.label}', "
-            f"executions={n_exec}, "
-            f"callbacks={cb_labels})"
-        )
+    def add_execution_context(self, ctx: ExecutionContext):
+        """Record a new execution context."""
+        # Ensure all tensors are detached/copied
+        for k in ctx.outputs:
+            # Detached in-place
+            ctx.outputs[k].detach_tensors()
 
-    # ================================================
-    # Discoverability
-    # ================================================
-    @property
-    def node_ids(self) -> list[str]:
-        """Unique node IDs that have recorded outputs in these results."""
-        seen: dict[str, None] = {}
-        for ctx in self._execution:
-            for nid in ctx.outputs:
-                if nid not in seen:
-                    seen[nid] = None
-        return list(seen)
+        # Break any loss links too
+        ctx.losses = ctx.losses.to_float()
 
-    @property
-    def loss_node_ids(self) -> list[str]:
-        """Unique node IDs that have recorded losses in these results."""
-        seen: dict[str, None] = {}
-        for ctx in self._execution:
-            for nid in ctx.losses:
-                if nid not in seen:
-                    seen[nid] = None
-        return list(seen)
+        # Record cleaned ctx
+        self._execution.append(ctx)
+        self._series_cache.clear()
+
+    def add_callback_result(self, cb_res: CallbackResult):
+        """Record a new callback result."""
+        self._callbacks.append(cb_res)
+        self._series_cache.clear()
 
     # ================================================
     # Helpers
@@ -96,41 +206,33 @@ class PhaseResults:
         raise TypeError(msg)
 
     def _cache_get(self, key: tuple[Hashable, ...]):
+        """Get cached data for key."""
         return self._series_cache.get(key)
 
     def _cache_set(self, key: tuple[Hashable, ...], value):
+        """Set cache for key."""
         self._series_cache[key] = value
         return value
 
     # ================================================
-    # Runtime Modifiers
+    # Representation
     # ================================================
-    def add_execution_context(self, ctx: ExecutionContext):
-        """Record a new execution context."""
-        # Ensure all tensors are detached/copied
-        for k in ctx.outputs:
-            # Detached in-place
-            ctx.outputs[k].detach_tensors()
-
-        # Break any loss links too
-        ctx.losses = {k: lc.to_float() for k, lc in ctx.losses.items()}
-
-        # Record cleaned ctx
-        self._execution.append(ctx)
-        self._series_cache.clear()
-
-    def add_callback_result(self, cb_res: CallbackResult):
-        """Record a new callback result."""
-        if cb_res.callback_label not in self._callbacks:
-            self._callbacks[cb_res.callback_label] = []
-        self._callbacks[cb_res.callback_label].append(cb_res)
-        self._series_cache.clear()
+    def __repr__(self):
+        n_exec = len(self._execution)
+        n_cb = len(self._callbacks)
+        return (
+            f"PhaseResults(label='{self.label}', executions={n_exec}, callbacks={n_cb})"
+        )
 
     # ================================================
     # Execution Data & Loss Querying
     # ================================================
-    def execution_contexts(self) -> AxisSeries[ExecutionContext]:
-        """Returns a query interface for execution contexts."""
+    def execution_contexts(self) -> ExecutionDataSeries:
+        """
+        Returns a query interface for execution contexts.
+
+        Data is keyed by `(epoch, batch)`.
+        """
         # Check cache
         cache_key = ("execution_contexts",)
         cached = self._cache_get(cache_key)
@@ -142,22 +244,22 @@ class PhaseResults:
         }
         return self._cache_set(
             cache_key,
-            AxisSeries(axes=("epoch", "batch"), _data=keyed_data),
+            ExecutionDataSeries(axes=("epoch", "batch"), _data=keyed_data),
         )
 
-    def batches(self, node: str | GraphNode) -> AxisSeries[Batch]:
+    def batches(self, node: str | GraphNode) -> BatchDataSeries:
         """
         Returns a query interface for batches on a specific node.
 
         Args:
             node (str | GraphNode):
-                The node to filter batches to. Can be the node instance, its ID, or
-                its label.
+                The node to filter batches to. Can be the node instance, its ID,
+                or its label.
 
         Returns:
-            AxisSeries[Batch]:
+            BatchDataSeries:
                 A keyed iterable over all batches executed on `node`.
-                Keyed by epoch and batch index.
+                Data is keyed by `(epoch, batch)`.
 
         """
         # Resolve node
@@ -176,7 +278,7 @@ class PhaseResults:
         }
         return self._cache_set(
             cache_key,
-            AxisSeries(axes=("epoch", "batch"), _data=keyed_data),
+            BatchDataSeries(axes=("epoch", "batch"), _data=keyed_data),
         )
 
     def tensors(
@@ -184,12 +286,12 @@ class PhaseResults:
         node: str | GraphNode,
         domain: Literal["outputs", "targets", "tags", "sample_uuids"],
         *,
-        role: str = "default",
+        role: str = ROLE_DEFAULT,
         fmt: DataFormat | None = None,
         unscale: bool = False,
-    ) -> AxisSeries[TensorLike]:
+    ) -> TensorDataSeries:
         """
-        Returns a query interface for tensors related to a specific node.
+        Returns a query interface for tensors related to a specific domain.
 
         Args:
             node (str | GraphNode):
@@ -199,12 +301,12 @@ class PhaseResults:
                 The domain of data to return:
                 * outputs: the tensors produced by the node forward pass
                 * targets: the expected output tensors (only meaningful
-                  for tail nodes)
+                    for tail nodes)
                 * tags: any tracked tags during the node's forward pass
             role (str, optional):
                 If the data executed during this phase was produced by a multi-role
                 sampler, the role of the data to returned must be specified.
-                Defaults to `'default'`.
+                Defaults to `ROLE_DEFAULT`.
             fmt (DataFormat, optional):
                 The format to cast the returned tensors to. If None, the as-produced
                 format is used. Defaults to None.
@@ -214,9 +316,9 @@ class PhaseResults:
                 and `domain` is one of `["outputs", "targets"]`.
 
         Returns:
-            AxisSeries[TensorLike]:
+            TensorDataSeries:
                 A keyed iterable over all tensors related to `node`.
-                Keyed by epoch and batch index.
+                Data is keyed by `(epoch, batch)`.
 
         """
         # Resolve node
@@ -240,7 +342,7 @@ class PhaseResults:
         batch_series = self.batches(node=graph_node)
 
         keyed_tensors: dict[tuple[int, int], TensorLike] = {}
-        for ax_key, b in batch_series.items():
+        for ax_key, b in batch_series.data.items():
             # Get sample data for role
             sd: SampleData = b.get_data(role=role)
 
@@ -259,10 +361,10 @@ class PhaseResults:
 
         return self._cache_set(
             cache_key,
-            AxisSeries(axes=("epoch", "batch"), _data=keyed_tensors),
+            TensorDataSeries(axes=("epoch", "batch"), _data=keyed_tensors),
         )
 
-    def losses(self, node: str | GraphNode) -> AxisSeries[LossCollection]:
+    def losses(self, node: str | GraphNode) -> LossDataSeries:
         """
         Returns a query interface for losses applied to a specific node.
 
@@ -272,9 +374,9 @@ class PhaseResults:
                 its ID, or its label.
 
         Returns:
-            AxisSeries[LossCollection]:
-                A keyed iterable over all losses applied to `node`.
-                Keyed by epoch, batch, and loss label.
+            LossDataSeries:
+                A keyed iterable over all loss records.
+                Data is keyed by `(epoch, batch, label)`
 
         """
         # Resolve node
@@ -287,15 +389,21 @@ class PhaseResults:
             return cached
 
         # Key losses by execution scope
-        keyed_lcs: dict[tuple[int, int, str], LossCollection] = {}
+        keyed_lrs: dict[tuple[int, int, str], LossRecord] = {}
         for ctx in self._execution:
-            lbl_lcs = ctx.losses[graph_node.node_id].by_label()
-            for k, lc in lbl_lcs.items():
-                keyed_lcs[(ctx.epoch_idx, ctx.batch_idx, k)] = lc
+            if ctx.losses is None:
+                continue
+            lrs = ctx.losses.select(node=graph_node.node_id)
+            for lr in lrs:
+                key = (ctx.epoch_idx, ctx.batch_idx, lr.label)
+                if key in keyed_lrs:
+                    msg = f"Key already exists for LossRecord: {key}"
+                    raise KeyError(msg)
+                keyed_lrs[key] = lr
 
         return self._cache_set(
             cache_key,
-            AxisSeries(axes=("epoch", "batch", "label"), _data=keyed_lcs),
+            LossDataSeries(axes=("epoch", "batch", "label"), _data=keyed_lrs),
         )
 
     # ================================================
@@ -305,7 +413,7 @@ class PhaseResults:
         self,
         node: str | GraphNode,
         *,
-        role: str = "default",
+        role: str = ROLE_DEFAULT,
         epoch: int | None = None,
         batch: int | None = None,
     ) -> dict[str, FeatureSetView]:
@@ -330,7 +438,7 @@ class PhaseResults:
                 The node to trace upstream from. Can be the node instance,
                 its ID, or its label.
             role (str, optional):
-                Restrict to samples from this role only. Defaults to "default".
+                Restrict to samples from this role only. Defaults to `ROLE_DEFAULT`.
             epoch (int | None, optional):
                 Restrict to samples from this epoch only.
             batch (int | None, optional):
@@ -368,7 +476,7 @@ class PhaseResults:
         upstream_refs = find_upstream_featuresets(node=graph_node)
         exp_ctx = ExperimentContext.get_active()
 
-        views: dict[str, FeatureSetView] = {}
+        views: list[FeatureSetView] = []
         uuid_list = list(all_uuids)
         for ref in upstream_refs:
             fs: FeatureSet = exp_ctx.get_node(
@@ -430,20 +538,14 @@ class PhaseResults:
         return next(iter(views.values()))
 
     # ================================================
-    # Callback Querying
+    # Callback & Metric Querying
     # ================================================
-    @property
-    def callback_labels(self) -> list[str]:
-        """Returns the unique labels of recorded callbacks."""
-        return list(self._callbacks.keys())
+    def callbacks(self) -> CallbackDataSeries:
+        """
+        Returns a query interface for callback results.
 
-    @property
-    def callback_kinds(self) -> list[str]:
-        """Returns the unique kinds of recorded callbacks."""
-        return list({k[1] for k in self.callbacks()})
-
-    def callbacks(self) -> AxisSeries[list[CallbackResult]]:
-        """Returns a query interface for callback results."""
+        Data is keyed by `(kind, label, epoch, batch, edge)`.
+        """
         # Check cache
         cache_key = ("callbacks",)
         cached = self._cache_get(cache_key)
@@ -451,10 +553,40 @@ class PhaseResults:
             return cached
 
         # Key callbacks by label and kind
-        keyed_data: dict[tuple[str, str], list[CallbackResult]] = {
-            (lbl, v[0].kind): v for lbl, v in self._callbacks.items()
-        }
+        keyed_data: dict[tuple, CallbackResult] = {}
+        for cb_res in self._callbacks:
+            key = (
+                cb_res.kind,
+                cb_res.callback_label,
+                cb_res.epoch_idx,
+                cb_res.batch_idx,
+                cb_res.edge,
+            )
+            if key in keyed_data:
+                msg = f"Key already exists for CallbackResult: {key}"
+                raise KeyError(msg)
+            keyed_data[key] = cb_res
+
         return self._cache_set(
             cache_key,
-            AxisSeries(axes=("label", "kind"), _data=keyed_data),
+            CallbackDataSeries(
+                axes=("kind", "label", "epoch", "batch", "edge"),
+                _data=keyed_data,
+            ),
         )
+
+    def metrics(self) -> MetricDataSeries:
+        """
+        Get all metric entries.
+
+        Returns:
+            MetricDataSeries:
+                Entries keyed by `(name, epoch, batch)`.
+                Epoch-level entries have `batch=None`.
+
+        """
+        return self._metrics.entries()
+
+    def metric_names(self) -> list[str]:
+        """All unique metric names recorded in these results."""
+        return self.metrics().axis_values(axis="name")

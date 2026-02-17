@@ -3,7 +3,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from modularml.core.experiment.callback_result import CallbackResult, PayloadResult
+from modularml.core.experiment.callbacks.callback_result import (
+    CallbackResult,
+    PayloadResult,
+)
 from modularml.utils.nn.training import preserve_frozen_state
 
 if TYPE_CHECKING:
@@ -30,7 +33,7 @@ class Callback(ABC):
 
     version: ClassVar[str] = "1.0"
 
-    def __init__(self, label: str | None = None) -> None:
+    def __init__(self, label: str | None = None, execution_order: int = 0) -> None:
         """
         Initialize a new callback instance.
 
@@ -38,10 +41,14 @@ class Callback(ABC):
             label (str | None):
                 Stable identifier for this callback within a phase results container.
                 If None, defaults to the callback class name.
+            execution_order (int, optional):
+                Used for execution ordering or multiple callbacks, where higher values
+                are executed later than lower values.
 
         """
         self._phase: ExperimentPhase | None = None
         self._label = label or self.__class__.__qualname__
+        self._exec_order = int(execution_order)
 
     # ================================================
     # Properties
@@ -69,6 +76,40 @@ class Callback(ABC):
     def phase(self) -> ExperimentPhase | None:
         """Return the currently attached phase (if any)."""
         return self._phase
+
+    # ================================================
+    # Internal Helpers
+    # ================================================
+    def _store_result(
+        self,
+        *,
+        cb_res: CallbackResult,
+        results: PhaseResults | None,
+    ) -> None:
+        """
+        Store a callback result and log metric if applicable.
+
+        Description:
+            Stores the callback result in the phase results container. If the
+            result is a MetricResult, additionally logs the metric value into
+            the MetricStore.
+
+        """
+        if results is None:
+            return
+
+        results.add_callback_result(cb_res=cb_res)
+
+        # If this is a MetricResult, also log to the MetricStore
+        from modularml.callbacks.metric import MetricResult
+
+        if isinstance(cb_res, MetricResult):
+            results._metrics.log(
+                name=cb_res.metric_name,
+                value=cb_res.metric_value,
+                epoch_idx=cb_res.epoch_idx,
+                batch_idx=cb_res.batch_idx,
+            )
 
     # ================================================
     # Internal Lifecycle Hooks
@@ -103,6 +144,7 @@ class Callback(ABC):
             raw_output: Any = self.on_phase_start(
                 experiment=experiment,
                 phase=phase,
+                results=results,
             )
 
         if raw_output is None or results is None:
@@ -120,7 +162,7 @@ class Callback(ABC):
             edge="start",
         )
 
-        results.add_callback_result(cb_res=cb_res)
+        self._store_result(cb_res=cb_res, results=results)
 
     def _on_phase_end(
         self,
@@ -151,6 +193,7 @@ class Callback(ABC):
             raw_output: Any = self.on_phase_end(
                 experiment=experiment,
                 phase=phase,
+                results=results,
             )
         if raw_output is None or results is None:
             return
@@ -167,7 +210,7 @@ class Callback(ABC):
             edge="end",
         )
 
-        results.add_callback_result(cb_res=cb_res)
+        self._store_result(cb_res=cb_res, results=results)
 
     # Epoch lifecycle
     def _on_epoch_start(
@@ -191,10 +234,10 @@ class Callback(ABC):
                 The model graph can be accessed via `experiment.model_graph`.
             phase (ExperimentPhase):
                 The current phase.
-            results (PhaseResults):
-                A result tracker to append callback output to.
             exec_ctx (ExecutionContext):
                 The first execution context of the epoch.
+            results (PhaseResults):
+                A result tracker to append callback output to.
 
         """
         # Preserve trainable state of model graph
@@ -203,6 +246,7 @@ class Callback(ABC):
                 experiment=experiment,
                 phase=phase,
                 exec_ctx=exec_ctx,
+                results=results,
             )
         if raw_output is None or results is None:
             return
@@ -219,7 +263,7 @@ class Callback(ABC):
             edge="start",
         )
 
-        results.add_callback_result(cb_res=cb_res)
+        self._store_result(cb_res=cb_res, results=results)
 
     def _on_epoch_end(
         self,
@@ -242,10 +286,10 @@ class Callback(ABC):
                 The model graph can be accessed via `experiment.model_graph`.
             phase (ExperimentPhase):
                 The current phase.
+            exec_ctx (ExecutionContext):
+                The last execution context of the epoch.
             results (PhaseResults):
                 A result tracker to append callback output to.
-            exec_ctx (ExecutionContext):
-                The first execution context of the epoch.
 
         """
         # Preserve trainable state of model graph
@@ -254,6 +298,7 @@ class Callback(ABC):
                 experiment=experiment,
                 phase=phase,
                 exec_ctx=exec_ctx,
+                results=results,
             )
         if raw_output is None or results is None:
             return
@@ -270,7 +315,7 @@ class Callback(ABC):
             edge="end",
         )
 
-        results.add_callback_result(cb_res=cb_res)
+        self._store_result(cb_res=cb_res, results=results)
 
     # Batch lifecycle
     def _on_batch_start(
@@ -294,10 +339,10 @@ class Callback(ABC):
                 The model graph can be accessed via `experiment.model_graph`.
             phase (ExperimentPhase):
                 The current phase.
+            exec_ctx (ExecutionContext):
+                The execution context corresponding to this batch.
             results (PhaseResults):
                 A result tracker to append callback output to.
-            exec_ctx (ExecutionContext):
-                The first execution context of the epoch.
 
         """
         # Preserve trainable state of model graph
@@ -306,6 +351,7 @@ class Callback(ABC):
                 experiment=experiment,
                 phase=phase,
                 exec_ctx=exec_ctx,
+                results=results,
             )
         if raw_output is None or results is None:
             return
@@ -322,7 +368,7 @@ class Callback(ABC):
             edge="start",
         )
 
-        results.add_callback_result(cb_res=cb_res)
+        self._store_result(cb_res=cb_res, results=results)
 
     def _on_batch_end(
         self,
@@ -345,10 +391,10 @@ class Callback(ABC):
                 The model graph can be accessed via `experiment.model_graph`.
             phase (ExperimentPhase):
                 The current phase.
+            exec_ctx (ExecutionContext):
+                The execution context corresponding to this batch.
             results (PhaseResults):
                 A result tracker to append callback output to.
-            exec_ctx (ExecutionContext):
-                The first execution context of the epoch.
 
         """
         # Preserve trainable state of model graph
@@ -357,6 +403,7 @@ class Callback(ABC):
                 experiment=experiment,
                 phase=phase,
                 exec_ctx=exec_ctx,
+                results=results,
             )
         if raw_output is None or results is None:
             return
@@ -373,7 +420,7 @@ class Callback(ABC):
             edge="end",
         )
 
-        results.add_callback_result(cb_res=cb_res)
+        self._store_result(cb_res=cb_res, results=results)
 
     # Error handling
     def _on_exception(
@@ -413,6 +460,7 @@ class Callback(ABC):
                 phase=phase,
                 exec_ctx=exec_ctx,
                 exception=exception,
+                results=results,
             )
         if raw_output is None or results is None:
             return
@@ -429,7 +477,7 @@ class Callback(ABC):
             edge=None,
         )
 
-        results.add_callback_result(cb_res=cb_res)
+        self._store_result(cb_res=cb_res, results=results)
 
     # ================================================
     # Public Lifecycle Hooks
@@ -440,7 +488,8 @@ class Callback(ABC):
         *,
         experiment: Experiment,  # noqa: ARG002
         phase: ExperimentPhase,  # noqa: ARG002
-    ) -> Any:
+        results: PhaseResults | None,  # noqa: ARG002
+    ) -> CallbackResult | None:
         """
         Run once at the start of a phase.
 
@@ -450,6 +499,8 @@ class Callback(ABC):
                 The model graph can be accessed via `experiment.model_graph`.
             phase (ExperimentPhase):
                 The current phase.
+            results (PhaseResults | None):
+                The results container for this phase, if available.
 
         Returns:
             CallbackResult | None:
@@ -463,6 +514,7 @@ class Callback(ABC):
         *,
         experiment: Experiment,  # noqa: ARG002
         phase: ExperimentPhase,  # noqa: ARG002
+        results: PhaseResults | None,  # noqa: ARG002
     ) -> CallbackResult | None:
         """
         Run once at the end of a phase.
@@ -473,6 +525,8 @@ class Callback(ABC):
                 The model graph can be accessed via `experiment.model_graph`.
             phase (ExperimentPhase):
                 The current phase.
+            results (PhaseResults | None):
+                The results container for this phase, if available.
 
         Returns:
             CallbackResult | None:
@@ -488,6 +542,7 @@ class Callback(ABC):
         experiment: Experiment,  # noqa: ARG002
         phase: ExperimentPhase,  # noqa: ARG002
         exec_ctx: ExecutionContext,  # noqa: ARG002
+        results: PhaseResults | None,  # noqa: ARG002
     ) -> CallbackResult | None:
         """
         Run once at the start of an epoch within a phase.
@@ -500,6 +555,8 @@ class Callback(ABC):
                 The current phase.
             exec_ctx (ExecutionContext):
                 The first execution context of the epoch.
+            results (PhaseResults | None):
+                The results container for this phase, if available.
 
         Returns:
             CallbackResult | None:
@@ -514,6 +571,7 @@ class Callback(ABC):
         experiment: Experiment,  # noqa: ARG002
         phase: ExperimentPhase,  # noqa: ARG002
         exec_ctx: ExecutionContext,  # noqa: ARG002
+        results: PhaseResults | None,  # noqa: ARG002
     ) -> CallbackResult | None:
         """
         Run once at the end of an epoch within a phase.
@@ -526,6 +584,8 @@ class Callback(ABC):
                 The current phase.
             exec_ctx (ExecutionContext):
                 The last execution context of the epoch.
+            results (PhaseResults | None):
+                The results container for this phase, if available.
 
         Returns:
             CallbackResult | None:
@@ -541,6 +601,7 @@ class Callback(ABC):
         experiment: Experiment,  # noqa: ARG002
         phase: ExperimentPhase,  # noqa: ARG002
         exec_ctx: ExecutionContext,  # noqa: ARG002
+        results: PhaseResults | None,  # noqa: ARG002
     ) -> CallbackResult | None:
         """
         Run once at the start of a batch within an epoch.
@@ -553,6 +614,8 @@ class Callback(ABC):
                 The current phase.
             exec_ctx (ExecutionContext):
                 The execution context of this batch.
+            results (PhaseResults | None):
+                The results container for this phase, if available.
 
         Returns:
             CallbackResult | None:
@@ -567,6 +630,7 @@ class Callback(ABC):
         experiment: Experiment,  # noqa: ARG002
         phase: ExperimentPhase,  # noqa: ARG002
         exec_ctx: ExecutionContext,  # noqa: ARG002
+        results: PhaseResults | None,  # noqa: ARG002
     ) -> CallbackResult | None:
         """
         Run once at the end of a batch within an epoch.
@@ -579,6 +643,8 @@ class Callback(ABC):
                 The current phase.
             exec_ctx (ExecutionContext):
                 The execution context of this batch.
+            results (PhaseResults | None):
+                The results container for this phase, if available.
 
         Returns:
             CallbackResult | None:
@@ -595,6 +661,7 @@ class Callback(ABC):
         phase: ExperimentPhase,  # noqa: ARG002
         exec_ctx: ExecutionContext,  # noqa: ARG002
         exception: BaseException,  # noqa: ARG002
+        results: PhaseResults | None,  # noqa: ARG002
     ) -> CallbackResult | None:
         """
         Run when an exception occurs during phase execution.
@@ -609,6 +676,8 @@ class Callback(ABC):
                 The most recent execution context (if available).
             exception (BaseException):
                 The exception that was raised.
+            results (PhaseResults | None):
+                The results container for this phase, if available.
 
         Returns:
             CallbackResult | None:
@@ -651,6 +720,18 @@ class Callback(ABC):
             from modularml.callbacks.evaluation import Evaluation
 
             return Evaluation.from_config(config=config)
+
+        if cb_cls_name == "EarlyStopping":
+            from modularml.callbacks.early_stopping import EarlyStopping
+
+            return EarlyStopping.from_config(config=config)
+
+        if cb_cls_name == "EvalLossMetric":
+            from modularml.callbacks.eval_loss_metric import (
+                EvalLossMetric,
+            )
+
+            return EvalLossMetric.from_config(config=config)
 
         msg = (
             f"Unsupported callback class for parent class construction: {cb_cls_name}."

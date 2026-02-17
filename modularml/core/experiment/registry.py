@@ -6,7 +6,7 @@ from modularml.core.experiment.results.train_results import TrainResults
 from modularml.core.io.symbol_registry import symbol_registry
 from modularml.core.io.conventions import SerializationKind, kind_registry
 
-from modularml.core.experiment.callback import Callback, CallbackResult
+from modularml.core.experiment.callbacks.callback import Callback, CallbackResult
 from modularml.callbacks import callback_naming_fn, callback_registry
 
 from modularml.core.experiment.phases.phase import ExperimentPhase

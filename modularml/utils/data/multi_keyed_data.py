@@ -118,9 +118,6 @@ class AxisSeries(Generic[T]):
             if all(sel(k[idx]) for idx, sel in selectors)
         }
         series = AxisSeries(axes=self.axes, _data=filtered)
-        if len(series) == 0:
-            msg = "The provided filters result in zero returned items."
-            raise ValueError(msg)
         return series
 
     def one(self) -> T:

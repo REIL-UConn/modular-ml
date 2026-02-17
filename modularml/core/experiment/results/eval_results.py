@@ -10,7 +10,6 @@ if TYPE_CHECKING:
     from modularml.core.data.featureset_view import FeatureSetView
     from modularml.core.references.execution_reference import TensorLike
     from modularml.core.topology.graph_node import GraphNode
-    from modularml.core.training.loss_record import LossCollection
     from modularml.utils.data.data_format import DataFormat
 
 
@@ -75,7 +74,7 @@ class EvalResults(PhaseResults):
         return len(self.batch_indices)
 
     # ================================================
-    # Tensor Stacking
+    # Execution Data & Loss Querying
     # ================================================
     def stacked_tensors(
         self,
@@ -190,84 +189,6 @@ class EvalResults(PhaseResults):
             batches = [b.to_format(fmt) for b in batches]
 
         return Batch.concat(*batches, fmt=fmt)
-
-    # ================================================
-    # Loss Aggregation
-    # ================================================
-    def aggregated_losses(
-        self,
-        node: str | GraphNode,
-        *,
-        reducer: Literal["sum", "mean"] = "mean",
-        by_label: bool = False,
-    ) -> LossCollection | dict[str, LossCollection]:
-        """
-        Retrieve losses for a node, aggregated across all batches.
-
-        Description:
-            Collects LossCollection objects from all evaluation batches and
-            reduces them using the specified strategy:
-
-            - "sum": Merges all loss records (LossCollection.merge)
-            - "mean": Computes elementwise average (LossCollection.mean)
-
-            Optionally groups results by loss label.
-
-        Args:
-            node (str | GraphNode):
-                The node to retrieve losses for. Can be the node instance,
-                its ID, or its label.
-            reducer (Literal["sum", "mean"], optional):
-                Reduction strategy for aggregating losses across batches.
-                - "sum": Concatenates all individual loss records
-                - "mean": Computes the mean loss value per label
-                Defaults to "mean".
-            by_label (bool, optional):
-                If True, returns a dict mapping loss labels to their
-                aggregated LossCollection. If False, returns a single
-                aggregated LossCollection. Defaults to False.
-
-        Returns:
-            LossCollection | dict[str, LossCollection]:
-                Aggregated losses. If by_label=True, returns a dict keyed
-                by loss label.
-
-        Examples:
-            ```python
-            # Get total loss across all batches (sum)
-            lc = eval_results.aggregated_losses(node="output_node")
-            print(f"Total loss: {lc.total}")
-
-            # Get mean loss across all batches
-            lc = eval_results.aggregated_losses(node="output_node", reducer="mean")
-            print(f"Mean loss: {lc.total}")
-
-            # Get losses grouped by label
-            lcs_by_label = eval_results.aggregated_losses(
-                node="output_node",
-                by_label=True,
-            )
-            for label, lc in lcs_by_label.items():
-                print(f"{label}: {lc.total}")
-            ```
-
-        """
-        loss_series = self.losses(node=node)
-
-        # Collapse batch axis first
-        batch_collapsed = loss_series.collapse(axis="batch", reducer=reducer)
-
-        if by_label:
-            # Return dict keyed by label
-            # batch_collapsed is keyed by (epoch, label) -> (0, label)
-            result: dict[str, LossCollection] = {}
-            for label in batch_collapsed.axis_values("label"):
-                result[label] = batch_collapsed.where(label=label).one()
-            return result
-
-        # Collapse label axis to get single LossCollection
-        label_collapsed = batch_collapsed.collapse(axis="label", reducer=reducer)
-        return label_collapsed.one()
 
     # ================================================
     # Source Data Access

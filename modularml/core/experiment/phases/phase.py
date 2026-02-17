@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from modularml.core.data.execution_context import ExecutionContext
     from modularml.core.data.featureset import FeatureSet
     from modularml.core.data.featureset_view import FeatureSetView
-    from modularml.core.experiment.callback import Callback
+    from modularml.core.experiment.callbacks.callback import Callback
     from modularml.core.experiment.results.phase_results import PhaseResults
     from modularml.core.topology.graph_node import GraphNode
     from modularml.core.training.applied_loss import AppliedLoss
@@ -605,7 +605,7 @@ class ExperimentPhase(ABC):
             raise ValueError(msg)
 
     def _validate_callbacks(self):
-        from modularml.core.experiment.callback import Callback
+        from modularml.core.experiment.callbacks.callback import Callback
 
         # Validate callback type
         callback_lbls = []
@@ -625,6 +625,9 @@ class ExperimentPhase(ABC):
                 "Callbacks labels must be unique."
             )
             raise ValueError(msg)
+
+        # Ensure callbacks are ordered for execution
+        self.callbacks.sort(key=lambda cb: cb._exec_order)
 
     def _normalize_input_sources(
         self,
@@ -714,6 +717,13 @@ class ExperimentPhase(ABC):
                     f"upstream FeatureSet(s): '{[r.node_label for r in missing]}'."
                 )
                 raise ValueError(msg)
+
+    # ================================================
+    # Stop Control
+    # ================================================
+    def request_stop(self) -> None:
+        """Request early termination of this phase."""
+        raise NotImplementedError
 
     # ================================================
     # Execution

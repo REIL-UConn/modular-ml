@@ -248,6 +248,7 @@ class Experiment:
         show_training_progress: bool = True,
         persist_progress: bool = IN_NOTEBOOK,
         persist_epoch_progress: bool = IN_NOTEBOOK,
+        val_loss_metric: str = "val_loss",
     ) -> TrainResults:
         """
         Executes a training phase on this experiment.
@@ -275,6 +276,11 @@ class Experiment:
                 Whether to leave all per-epoch training bars shown after they complete.
                 Defaults to `IN_NOTEBOOK` (True if working in a notebook, False if in
                 a Python script).
+            val_loss_metric (str, optional):
+                The name of a recorded ValidationLossMetrics to show in the progress
+                bar. Results must be tracked, and `val_loss_metric` must be an existing
+                loss metric. Otherwise, no val_loss field will be shown in the progress
+                bar. Defaults to `"val_loss"`.
 
         Returns:
             TrainResults: Tracked results from training.
@@ -291,6 +297,7 @@ class Experiment:
             show_training_progress=show_training_progress,
             persist_progress=persist_progress,
             persist_epoch_progress=persist_epoch_progress,
+            val_loss_metric=val_loss_metric,
         ):
             self.model_graph.train_step(
                 ctx=ctx,
@@ -299,7 +306,6 @@ class Experiment:
             )
             res.add_execution_context(ctx=ctx)
 
-        res.validation_callback_labels = [cb.label for cb in phase.validation_callbacks]
         return res
 
     def _execute_evaluation(
@@ -372,6 +378,7 @@ class Experiment:
                 "show_training_progress",
                 "persist_progress",
                 "persist_epoch_progress",
+                "val_loss_metric",
             }
             phase_res: TrainResults = self._execute_training(
                 phase,
@@ -470,6 +477,7 @@ class Experiment:
         show_training_progress: bool = True,
         persist_progress: bool = IN_NOTEBOOK,
         persist_epoch_progress: bool = IN_NOTEBOOK,
+        val_loss_metric: str = "val_loss",
     ) -> TrainResults: ...
     @overload
     def run_phase(
@@ -624,6 +632,7 @@ class Experiment:
         show_training_progress: bool = True,
         persist_progress: bool = IN_NOTEBOOK,
         persist_epoch_progress: bool = IN_NOTEBOOK,
+        val_loss_metric: str = "val_loss",
     ) -> TrainResults: ...
     @overload
     def preview_phase(

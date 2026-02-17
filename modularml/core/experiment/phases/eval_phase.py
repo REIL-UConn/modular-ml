@@ -8,7 +8,7 @@ from modularml.core.data.batch_view import BatchView
 from modularml.core.data.execution_context import ExecutionContext
 from modularml.core.data.featureset_view import FeatureSetView
 from modularml.core.data.schema_constants import ROLE_DEFAULT
-from modularml.core.experiment.callback import Callback
+from modularml.core.experiment.callbacks.callback import Callback
 from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.experiment.phases.phase import ExperimentPhase, InputBinding
 from modularml.core.training.applied_loss import AppliedLoss

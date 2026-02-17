@@ -13,7 +13,7 @@ from modularml.utils.data.formatting import ensure_list
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from modularml.core.experiment.callback import Callback
+    from modularml.core.experiment.callbacks.callback import Callback
     from modularml.core.topology.graph_node import GraphNode
     from modularml.core.training.applied_loss import AppliedLoss
 
