@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
 from modularml.core.experiment.experiment_context import (
@@ -20,6 +21,7 @@ from modularml.core.experiment.results.execution_meta import (
 from modularml.core.experiment.results.experiment_run import ExperimentRun
 from modularml.core.experiment.results.group_results import PhaseGroupResults
 from modularml.core.experiment.results.train_results import TrainResults
+from modularml.core.io.checkpoint import Checkpoint
 from modularml.utils.environment.environment import IN_NOTEBOOK
 
 if TYPE_CHECKING:
@@ -67,10 +69,12 @@ class Experiment:
         # Initialize phase registry
         self._exec_plan = PhaseGroup(label=self.label)
 
-        # For recording execution history and checkpoints
+        # For recording execution history
         self._history: list[ExperimentRun] = []
-        self._checkpoints: dict[str, Any] = {}
-        # TODO: should checkpoint be a path or object?
+
+        # For checkpointing model graph state
+        self._checkpoints: dict[str, Path] = {}
+        self._checkpoint_dir: Path | None = None
 
     # ================================================
     # Constructors
@@ -137,6 +141,100 @@ class Experiment:
     def last_run(self) -> ExperimentRun | None:
         """Most recent ExperimentRun."""
         return self._history[-1] if self._history else None
+
+    # ================================================
+    # Checkpointing
+    # ================================================
+    def set_checkpoint_dir(self, path: Path, *, create: bool = True):
+        """
+        Set directory used for storing experiment checkpoints.
+
+        Args:
+            path (Path):
+                Directory path.
+            create (bool, optional):
+                Whether to create directory if it does not exist.
+
+        """
+        path = Path(path)
+        if create:
+            path.mkdir(parents=True, exist_ok=True)
+        if not path.is_dir():
+            msg = f"No directory exists at '{path!r}'."
+            raise FileExistsError(msg)
+        self._checkpoint_dir = path
+
+    def save_checkpoint(
+        self,
+        name: str,
+        *,
+        overwrite: bool = False,
+        meta: dict[str, Any] | None = None,
+    ) -> Path:
+        """
+        Save ModelGraph state to a named checkpoint.
+
+        Args:
+            name (str):
+                Unique name to assign to this checkpoint.
+            overwrite (bool, optional):
+                Whether to overwrite existing checkpoints with this name.
+                Defaults to False.
+            meta (dict[str, Any], optional):
+                Additional meta data to attach to the checkpoint.
+                Must be pickle-able.
+
+        Returns:
+            Path: The saved checkpoint path.
+
+        """
+        from modularml.core.io.serializer import _enforce_file_suffix
+
+        if self._checkpoint_dir is None:
+            msg = "Checkpoint directory not set. Call `set_checkpoint_dir()`."
+            raise RuntimeError(msg)
+
+        # Check checkpoint name
+        if (name in self._checkpoints) and (not overwrite):
+            msg = f"Checkpoint '{name}' already exists."
+            raise ValueError(msg)
+
+        # Check checkpoint path
+        filepath = self._checkpoint_dir / f"{name}"
+        filepath = _enforce_file_suffix(path=filepath, cls=Checkpoint)
+        if filepath.exists() and not overwrite:
+            msg = f"Checkpoint already exists at path: '{filepath!s}'."
+            raise FileExistsError(msg)
+
+        # Save checkpoint
+        save_path = self.model_graph.save_checkpoint(
+            filepath=filepath,
+            overwrite=overwrite,
+            meta=meta,
+        )
+
+        # Record checkpoint path
+        self._checkpoints[name] = save_path
+        return save_path
+
+    def restore_checkpoint(self, name: str):
+        """
+        Restores ModelGraph state to a named checkpoint file.
+
+        Args:
+            name (str):
+                Name of checkpoint to restore to.
+
+        """
+        if name not in self._checkpoints:
+            msg = (
+                f"No checkpoint named '{name}' exists. "
+                f"Available: {list(self._checkpoints.keys())}."
+            )
+            raise ValueError(msg)
+
+        # Restore model graph state
+        self.model_graph.load_checkpoint(self._checkpoints[name])
 
     # ================================================
     # Execution
@@ -665,3 +763,72 @@ class Experiment:
 
         # Restore recorded checkpoints
         self._checkpoints = state.get("checkpoints", {})
+
+    # ================================================
+    # Serialization
+    # ================================================
+    def save(self, filepath: Path, *, overwrite: bool = False) -> Path:
+        """
+        Serializes this experiment to the specified filepath.
+
+        Args:
+            filepath (Path):
+                File location to save to. Note that the suffix may be overwritten
+                to enforce the ModularML file extension schema.
+            overwrite (bool, optional):
+                Whether to overwrite any existing file at the save location.
+                Defaults to False.
+
+        Returns:
+            Path: The actual filepath at which the experiment was saved.
+
+        """
+        from modularml.core.io.serialization_policy import SerializationPolicy
+        from modularml.core.io.serializer import serializer
+
+        return serializer.save(
+            self,
+            filepath,
+            policy=SerializationPolicy.BUILTIN,
+            overwrite=overwrite,
+        )
+
+    @classmethod
+    def load(
+        cls,
+        filepath: Path,
+        *,
+        allow_packaged_code: bool = False,
+        overwrite: bool = False,
+    ) -> Experiment:
+        """
+        Load an Experiment from file.
+
+        Args:
+            filepath (Path):
+                File location of a previously saved Experiment.
+            allow_packaged_code : bool
+                Whether bundled code execution is allowed.
+            overwrite (bool):
+                Whether to replace any colliding node registrations in ExperimentContext
+                If False, new IDs are assigned to the reloaded nodes comprising the
+                graph. Otherwise, any collision are overwritten with the saved nodes.
+                Defaults to False.
+                It is recommended to only reload an Experiment into a new/empty
+                `ExperimentContext`.
+
+        Returns:
+            Experiment: The reloaded Experiment.
+
+        """
+        from modularml.core.io.serializer import _enforce_file_suffix, serializer
+
+        # Append proper sufficx only if no suffix is given
+        if Path(filepath).suffix == "":
+            filepath = _enforce_file_suffix(path=filepath, cls=cls)
+
+        return serializer.load(
+            filepath,
+            allow_packaged_code=allow_packaged_code,
+            overwrite=overwrite,
+        )

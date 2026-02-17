@@ -7,8 +7,8 @@ from .core.data import registry as data_registry
 from .core.topology import registry as topology_registry
 from .core.references import registry as reference_registry
 from .core.models import registry as model_registry
-
 from .core.training import registry as training_registry
+from .core.experiment import registry as experiment_registry
 
 
 def register_all():
@@ -47,3 +47,7 @@ def register_all():
     # Register training module classes
     training_registry.register_builtin()
     training_registry.register_kinds()
+
+    # Register experiment module classes
+    experiment_registry.register_builtin()
+    experiment_registry.register_kinds()
