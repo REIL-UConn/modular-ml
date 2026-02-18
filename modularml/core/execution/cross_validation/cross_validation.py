@@ -1,3 +1,5 @@
+"""Cross-validation execution strategy implementation."""
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -23,6 +25,16 @@ if TYPE_CHECKING:
 
 
 class CrossValidation(ExecutionStrategy):
+    """
+    Cross-validation execution strategy.
+
+    Description:
+        Orchestrates repeated execution of an :class:`Experiment` or
+        :class:`PhaseGroup` by remapping :class:`FeatureSet` nodes to
+        fold-specific train/validation splits defined via :class:`CVBinding`
+        objects.
+    """
+
     def __init__(
         self,
         *,
@@ -33,6 +45,33 @@ class CrossValidation(ExecutionStrategy):
         phase: TrainPhase | PhaseGroup | None = None,
         experiment: Experiment | None = None,
     ):
+        """
+        Initialize the cross-validation strategy.
+
+        Args:
+            label (str, optional):
+                Human-readable label applied to generated fold groups.
+                Defaults to `CV`.
+            bindings (CVBinding | list[CVBinding]):
+                One or more :class:`CVBinding` instances describing how each
+                :class:`FeatureSet` participates in folding.
+            n_folds (int, optional):
+                Number of folds to generate. Must be greater than or equal to 1.
+                Defaults to `5`.
+            seed (int, optional):
+                Random seed forwarded to :class:`RandomSplitter`. Defaults to `13`.
+            phase (TrainPhase | PhaseGroup | None, optional):
+                Optional :class:`TrainPhase` or :class:`PhaseGroup` template to run
+                inside each fold. If omitted, the experiment execution plan is used.
+            experiment (Experiment | None, optional):
+                :class:`Experiment` to execute. Defaults to the active experiment
+                from :class:`ExperimentContext`.
+
+        Raises:
+            TypeError: If no experiment is available or if `phase` has an invalid type.
+            ValueError: If `n_folds` or `val_size` settings are inconsistent.
+
+        """
         self.label = label
         self.seed = int(seed)
 
@@ -86,11 +125,12 @@ class CrossValidation(ExecutionStrategy):
 
     def _generate_fold_views(self) -> dict[int, dict[str, _FoldViews]]:
         """
-        Generates views of each fold's train and val splits.
+        Generate per-fold train/validation views.
 
         Returns:
             dict[int, dict[str, _FoldViews]]:
-                Fold-specific views keyed by fold_idx, then by FeatureSet node id.
+                Fold-specific views keyed first by fold index and then by
+                :class:`FeatureSet` node identifier.
 
         """
         # Precompute all fold views (keyed by fold and FeatureSet.node_id)
@@ -159,14 +199,13 @@ class CrossValidation(ExecutionStrategy):
         ctx: ExperimentContext,
     ):
         """
-        Updates all featuresets in the given context to use the fold splits.
+        Replace context :class:`FeatureSet` nodes with fold-specific splits.
 
         Args:
             fold_views (dict[str, _FoldViews]):
-                Fold splits to use, keyed by FeatureSet.node_id
-
+                Fold splits keyed by :class:`FeatureSet` node identifier.
             ctx (ExperimentContext):
-                The ExperimentContext in which to update FeatureSets.
+                Context whose nodes are replaced temporarily for the fold.
 
         """
         for fs_id, fold_data in fold_views.items():
@@ -249,21 +288,19 @@ class CrossValidation(ExecutionStrategy):
         **kwargs,
     ) -> CVResults:
         """
-        Execute cross-validation over all folds.
+        Execute cross-validation across all folds.
 
         Args:
             show_fold_progress (bool, optional):
-                Whether to show a progress bar over fold execution.
-                Defaults to True.
+                Whether to show a progress bar over fold execution. Defaults to True.
             persist_progress (bool, optional):
-                Whether to leave progress bars (including nested ones) shown after
-                they complete. Defaults to `IN_NOTEBOOK` (True if working in a
-                notebook, False if in a Python script).
+                Whether to keep progress bars visible after completion. Defaults to
+                `IN_NOTEBOOK` (True in notebooks, False in scripts).
             **kwargs:
-                Display flags forwarded to the phase-specific run method.
+                Additional display flags forwarded to :meth:`Experiment.run_group`.
 
         Returns:
-            CVResults: Results for all folds.
+            CVResults: Cross-fold results container.
 
         """
         from modularml.core.execution.cross_validation.cv_results import CVResults

@@ -1,3 +1,5 @@
+"""Binding definitions for cross-validation FeatureSets."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,24 +16,21 @@ if TYPE_CHECKING:
 
 class CVBinding:
     """
-    Configuration for cross validation of a single FeatureSet.
+    Configuration for cross-validation of a single FeatureSet.
 
     Description:
-        Defines how a specified FeatureSet should participate in cross-validation.
-        The head nodes of a ModelGraph are typically bound to a split or FeatureSet.
-        This configuration defines how cross-validation folds should be mapped
-        to those existing head node input bindings. For example, say we have a FeatureSet
-        with existing splits: "my_training" and "my_validation". Since each fold of
-        cross-validation produces two splits, we need to map the returned names to
-        our existing split names. To do this, we would set `train_split_name='my_training'`
-        and `val_split_name='my_validation'`. And that's it. Each fold of cross validation
-        will update the expected split names with only data belonging to the current fold.
+        Defines how a specified :class:`FeatureSet` should participate in
+        cross-validation. The head nodes of a :class:`ModelGraph` are typically
+        bound to a split or :class:`FeatureSet`. This configuration maps
+        fold-specific outputs back onto those bindings (for example, mapping
+        `train_split_name='my_training'`). Each fold then updates the expected
+        split names with data belonging only to the current fold.
 
     Attributes:
-        featureset: The FeatureSet (or its label/node_id) to create folds from.
-        source_splits: List of existing split names to combine as the CV pool.
-        group_by: Column name for group-based splitting (keeps groups together).
-        stratify_by: Column name for stratified splitting (maintains distribution).
+        featureset (FeatureSet): The :class:`FeatureSet` to create folds from.
+        source_splits (list[str]): Existing split names combined to form the pool.
+        group_by (str | list[str] | None): Columns used for group-based splitting.
+        stratify_by (str | list[str] | None): Columns used for stratified splitting.
 
     """
 
@@ -47,40 +46,32 @@ class CVBinding:
         val_size: float | None = None,
     ):
         """
-        Defines cross validation for a single FeatureSet.
+        Configure cross-validation for a single FeatureSet.
 
         Args:
             fs (str | FeatureSet):
-                FeatureSet to apply cross validation to. Can be the node ID, label, or
-                the FeatureSet instance.
-
+                :class:`FeatureSet` (or its node ID/label) to apply cross-validation to.
             source_splits (list[str]):
-                Existing splits of `fs` to use for fold creation. For example, if
-                `source_splits=['train', 'val']`, folds will be created by drawing
-                samples for the merged collection of `'train'` and `'val'`.
-
+                Existing splits of `fs` to pool before folding. For example,
+                `source_splits=['train', 'val']` merges both splits prior to sampling.
             group_by (str | list[str] | None, optional):
-                Optional grouping to be applied during fold generation. Can be one
-                or more tag keys to group samples by before splitting. Mutually
-                exclusive with `stratify_by`. Defaults to None.
-
+                Optional tag keys used for group-based splitting. Mutually exclusive
+                with `stratify_by`. Defaults to None.
             stratify_by (str | list[str] | None, optional):
-                Optional stratification to be applied during fold generation. Can
-                be one or more tag keys to define strata for splitting. Mutually
-                exclusive with `group_by`. Defaults to None.
-
+                Optional tag keys used for stratified splitting. Mutually exclusive
+                with `group_by`. Defaults to None.
             train_split_name (str, optional):
-                Each fold of cross validation produces two splits: "train" and "val".
-                These can be mapped to the split label used in the cross validation
-                template training phase. Defaults to "train".
-
+                Split label that should receive each fold's training partition.
+                Defaults to `train`.
             val_split_name (str, optional):
-                Name to use for "val" split produced for each fold. Defaults to "val".
-
+                Split label that should receive each fold's validation partition.
+                Defaults to `val`.
             val_size (float | None, optional):
-                Optional size of "val" split of each fold. If None, the size will be
-                set via the number of folds (e.g., 5 folds -> val_size=0.2).
-                Defaults to None.
+                Explicit validation proportion for each fold. If None, computed as
+                `1 / n_folds`. Defaults to None.
+
+        Raises:
+            ValueError: If configuration references missing splits or invalid sizes.
 
         """
         # Store FeatureSet node ID

@@ -1,3 +1,5 @@
+"""Cross-validation result containers and helpers."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -22,9 +24,10 @@ class CVResults(PhaseGroupResults):
     Results container for cross-validation.
 
     Description:
-        CVResults extends PhaseGroupResults to provide cross-fold querying.
-        Each top-level entry is a fold's PhaseGroupResults containing
-        TrainResults, EvalResults, etc.
+        :class:`CVResults` extends :class:`PhaseGroupResults` to provide
+        cross-fold querying. Each top-level entry is a fold's
+        :class:`PhaseGroupResults` containing :class:`TrainResults`,
+        :class:`EvalResults`, etc.
 
         Structure:
         ```python
@@ -36,10 +39,11 @@ class CVResults(PhaseGroupResults):
             ...
         ```
 
-        The `collect()` method applies an extractor to each fold and
-        merges results into a single AxisSeries with a `fold` axis,
+        The :meth:`collect` method applies an extractor to each fold and
+        merges results into a single :class:`AxisSeries` with a `fold` axis,
         enabling cross-fold filtering and aggregation via the standard
-        AxisSeries API (`.where()`, `.collapse()`, `.at()`).
+        :class:`AxisSeries` API (:meth:`AxisSeries.where`,
+        :meth:`AxisSeries.collapse`, :meth:`AxisSeries.at`).
 
     Examples:
         ```python
@@ -86,15 +90,14 @@ class CVResults(PhaseGroupResults):
 
         Args:
             fold (int | str):
-                Fold index (int, converted to ``"fold_{i}"``) or fold
-                label (str).
+                Fold index (int, converted to `fold_{i}`) or fold label (str).
 
         Returns:
             PhaseGroupResults: The results for the specified fold.
 
         Raises:
             KeyError: If no fold exists with the given label.
-            TypeError: If the result is not a PhaseGroupResults.
+            TypeError: If the result is not a :class:`PhaseGroupResults`.
 
         """
         if isinstance(fold, int):
@@ -109,19 +112,19 @@ class CVResults(PhaseGroupResults):
         extractor: Callable[[PhaseGroupResults], AxisSeries[T] | T],
     ) -> AxisSeries[T]:
         """
-        Apply an extractor to each fold and merge into one AxisSeries.
+        Apply an extractor to each fold and merge into one :class:`AxisSeries`.
 
         Description:
-            The extractor receives each fold's PhaseGroupResults. The return
+            The extractor receives each fold's :class:`PhaseGroupResults`. The return
             value determines how results are keyed:
 
-            - If the extractor returns an **AxisSeries**, its axes are
-              preserved and `"fold"` is prepended as the first axis.
-              For example, an `AxisSeries[LossCollection]` keyed by
+            - If the extractor returns an :class:`AxisSeries`, its axes are
+              preserved and `fold` is prepended as the first axis.
+              For example, an :class:`AxisSeries` of :class:`LossCollection`
               `(epoch,)` becomes keyed by `(fold, epoch)`.
 
             - If the extractor returns a **scalar value**, the result is
-              an AxisSeries keyed by `(fold,)` only.
+              an :class:`AxisSeries` keyed by `(fold,)` only.
 
         Args:
             extractor (Callable[[PhaseGroupResults], AxisSeries[T] | T]):
@@ -129,7 +132,7 @@ class CVResults(PhaseGroupResults):
 
         Returns:
             AxisSeries[T]:
-                Merged results with `"fold"` as the first axis.
+                Merged results with `fold` as the first axis.
 
         Examples:
             ```python
@@ -175,7 +178,7 @@ class CVResults(PhaseGroupResults):
         """
         Resolve a train phase label from the first fold.
 
-        If `phase` is None, auto-detects the single TrainResults in the
+        If `phase` is None, auto-detects the single :class:`TrainResults` in the
         first fold. Raises if ambiguous.
 
         """
@@ -217,7 +220,7 @@ class CVResults(PhaseGroupResults):
             node (str | GraphNode):
                 The node to retrieve losses for.
             phase (str | None, optional):
-                Training phase label. If None and only one TrainResults
+                Training phase label. If None and only one :class:`TrainResults`
                 exists per fold, it is auto-detected. Defaults to None.
             reducer (Literal["sum", "mean"], optional):
                 How to aggregate losses within each epoch.
@@ -225,7 +228,7 @@ class CVResults(PhaseGroupResults):
 
         Returns:
             AxisSeries[LossCollection]:
-                Losses keyed by ``(fold, epoch)``.
+                Losses keyed by `(fold, epoch)`.
 
         """
         phase_label = self._resolve_train_phase(phase)
@@ -260,7 +263,7 @@ class CVResults(PhaseGroupResults):
 
         Returns:
             AxisSeries[LossCollection]:
-                Validation losses keyed by ``(fold, epoch)``.
+                Validation losses keyed by `(fold, epoch)`.
 
         """
         phase_label = self._resolve_train_phase(phase)
