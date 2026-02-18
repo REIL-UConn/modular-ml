@@ -1,3 +1,5 @@
+"""Evaluation-phase implementation."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -25,6 +27,8 @@ if TYPE_CHECKING:
 
 
 class EvalPhase(ExperimentPhase):
+    """Phase that evaluates model outputs on a fixed FeatureSet split."""
+
     def __init__(
         self,
         label: str,
@@ -246,71 +250,101 @@ class EvalPhase(ExperimentPhase):
         # ------------------------------------------------
         exp_ctx = ExperimentContext.get_active()
         experiment = exp_ctx.get_experiment()
-        for cb in self.callbacks:
-            cb._on_phase_start(
-                experiment=experiment,
-                phase=self,
-                results=results,
-            )
+        last_ctx: ExecutionContext | None = None
 
-        # ------------------------------------------------
-        # Iterate over all batches
-        # ------------------------------------------------
-        for i in range(n_batches):
-            start = i * batch_size
-            end = min((i + 1) * batch_size, n)
-            fsv_batch = self._inp_fsv.take(np.arange(start, end, 1))
-
-            bv = BatchView(
-                source=fsv_batch.source,
-                role_indices={ROLE_DEFAULT: fsv_batch.indices},
-            )
-            inputs: dict[tuple[str, FeatureSetReference], BatchView] = {
-                (binding.node_id, binding.upstream_ref): bv
-                for binding in self.input_sources
-            }
-            exec_ctx = ExecutionContext(
-                phase_label=self.label,
-                epoch_idx=0,
-                batch_idx=i,
-                inputs=inputs,
-            )
+        try:
+            experiment._in_callback = True
+            try:
+                for cb in self.callbacks:
+                    cb._on_phase_start(
+                        experiment=experiment,
+                        phase=self,
+                        results=results,
+                    )
+            finally:
+                experiment._in_callback = False
 
             # ------------------------------------------------
-            # Callbacks: on_batch_start
+            # Iterate over all batches
+            # ------------------------------------------------
+            for i in range(n_batches):
+                start = i * batch_size
+                end = min((i + 1) * batch_size, n)
+                fsv_batch = self._inp_fsv.take(np.arange(start, end, 1))
+
+                bv = BatchView(
+                    source=fsv_batch.source,
+                    role_indices={ROLE_DEFAULT: fsv_batch.indices},
+                )
+                inputs: dict[tuple[str, FeatureSetReference], BatchView] = {
+                    (binding.node_id, binding.upstream_ref): bv
+                    for binding in self.input_sources
+                }
+                exec_ctx = ExecutionContext(
+                    phase_label=self.label,
+                    epoch_idx=0,
+                    batch_idx=i,
+                    inputs=inputs,
+                )
+
+                # ------------------------------------------------
+                # Callbacks: on_batch_start
+                # ------------------------------------------------
+                experiment._in_callback = True
+                try:
+                    for cb in self.callbacks:
+                        cb._on_batch_start(
+                            experiment=experiment,
+                            phase=self,
+                            exec_ctx=exec_ctx,
+                            results=results,
+                        )
+                finally:
+                    experiment._in_callback = False
+
+                yield exec_ctx
+
+                # ------------------------------------------------
+                # Callbacks: on_batch_end
+                # ------------------------------------------------
+                experiment._in_callback = True
+                try:
+                    for cb in self.callbacks:
+                        cb._on_batch_end(
+                            experiment=experiment,
+                            phase=self,
+                            exec_ctx=exec_ctx,
+                            results=results,
+                        )
+                finally:
+                    experiment._in_callback = False
+
+                eval_ptask.tick(n=1)
+
+            # ------------------------------------------------
+            # Callbacks: on_phase_end
             # ------------------------------------------------
             for cb in self.callbacks:
-                cb._on_batch_start(
+                cb._on_phase_end(
                     experiment=experiment,
                     phase=self,
-                    exec_ctx=exec_ctx,
                     results=results,
                 )
 
-            yield exec_ctx
-
-            # ------------------------------------------------
-            # Callbacks: on_batch_end
-            # ------------------------------------------------
-            for cb in self.callbacks:
-                cb._on_batch_end(
-                    experiment=experiment,
-                    phase=self,
-                    exec_ctx=exec_ctx,
-                    results=results,
-                )
-
-            eval_ptask.tick(n=1)
-
-        # ------------------------------------------------
-        # Callbacks: on_phase_end
-        # ------------------------------------------------
-        for cb in self.callbacks:
-            cb._on_phase_end(
-                experiment=experiment,
-                phase=self,
-                results=results,
-            )
+        except BaseException as exc:
+            experiment._in_callback = True
+            try:
+                for cb in self.callbacks:
+                    cb._on_exception(
+                        experiment=experiment,
+                        phase=self,
+                        exec_ctx=last_ctx,
+                        exception=exc,
+                        results=results,
+                    )
+            finally:
+                experiment._in_callback = False
+            raise
 
         # Finish progress bar
         eval_ptask.finish()
@@ -371,6 +405,3 @@ class EvalPhase(ExperimentPhase):
             batch_size=config["batch_size"],
             callbacks=[Callback.from_config(cfg) for cfg in config["callbacks"]],
         )
-
-
-# TODO: add on_exception callback hook
