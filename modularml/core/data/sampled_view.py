@@ -1,3 +1,5 @@
+"""Sampled view container for aligned :class:`BatchView` streams."""
+
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
@@ -13,10 +15,11 @@ class SampledView(Mapping[str, list[BatchView]], Summarizable):
     Immutable container for sampler outputs.
 
     Description:
-        Wraps a mapping of named sampler output streams to lists of BatchView
-        objects. Each stream represents a lazily-evaluated sequence of batches.
+        Wraps a mapping of named sampler output streams to lists of
+        :class:`BatchView` objects. Each stream represents a lazily-evaluated
+        sequence of batches.
 
-        Iteration over SampledView yields *aligned batch groups*:
+        Iteration over :class:`SampledView` yields *aligned batch groups*:
             dict[str, BatchView]  # one BatchView per stream at the same index
 
     Example:
@@ -61,6 +64,7 @@ class SampledView(Mapping[str, list[BatchView]], Summarizable):
     # Mapping interface
     # ================================================
     def __getitem__(self, key: str) -> list[BatchView]:
+        """Return the :class:`BatchView` list for the given stream name."""
         return self.streams[key]
 
     def __iter__(self) -> Iterator[dict[str, BatchView]]:
@@ -79,6 +83,7 @@ class SampledView(Mapping[str, list[BatchView]], Summarizable):
             yield {name: self.streams[name][i] for name in stream_names}
 
     def __len__(self) -> int:
+        """Return the number of streams."""
         return len(self.streams)
 
     # ================================================
@@ -101,7 +106,16 @@ class SampledView(Mapping[str, list[BatchView]], Summarizable):
         return len(first_stream)
 
     def get_stream(self, name: str) -> list[BatchView]:
-        """Explicit stream accessor."""
+        """
+        Explicit stream accessor.
+
+        Args:
+            name (str): Stream name.
+
+        Returns:
+            list[BatchView]: The :class:`BatchView` list for the stream.
+
+        """
         return self.streams[name]
 
     # ================================================
@@ -123,7 +137,7 @@ class SampledView(Mapping[str, list[BatchView]], Summarizable):
     # Utilities
     # ================================================
     def to_dict(self) -> dict[str, list[BatchView]]:
-        """Unwrap to a plain dict."""
+        """Unwrap to a plain ``dict[str, list[BatchView]]``."""
         return dict(self.streams)
 
     # ================================================

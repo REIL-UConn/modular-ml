@@ -1,3 +1,5 @@
+"""Mixin providing a uniform :class:`SampleCollection` accessor API for data views."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -30,12 +32,13 @@ if TYPE_CHECKING:
 
 class SampleCollectionMixin:
     """
-    Mixin providing a uniform SampleCollection accessor API.
+    Mixin providing a uniform :class:`SampleCollection` accessor API.
 
     Description:
-        Exposes read-only access to SampleCollection-backed data for FeatureSet,
-        and FeatureSetViews. The concrete class is responsible for defining
-        where the SampleCollection lives and which row indices are active.
+        Exposes read-only access to :class:`SampleCollection`-backed data for
+        :class:`FeatureSet` and :class:`FeatureSetView`. The concrete class is
+        responsible for defining where the :class:`SampleCollection` lives and
+        which row indices are active.
 
     Required hook:
         _resolve_caller_attributes() -> (SampleCollection, list[str] | None, np.ndarray | None)
@@ -51,7 +54,7 @@ class SampleCollectionMixin:
         raise NotImplementedError
 
     def _resolve_collection(self) -> tuple[SampleCollection, np.ndarray | None]:
-        """Returns SampleColection and mask over callers columns and indices."""
+        """Returns :class:`SampleCollection` and mask over caller's columns and indices."""
         collection, columns, indices = self._resolve_caller_attributes()
         if columns is not None and DOMAIN_SAMPLE_ID not in columns:
             columns.append(DOMAIN_SAMPLE_ID)
@@ -162,6 +165,7 @@ class SampleCollectionMixin:
         return collection.n_samples
 
     def __len__(self) -> int:
+        """Return the number of samples."""
         return self.n_samples
 
     @property
@@ -258,7 +262,7 @@ class SampleCollectionMixin:
             include_rep_suffix (bool):
                 Whether to include the representation suffix in the keys
                 (e.g., "voltage" or "voltage.raw"). Defaults to True.
-            include_domain_prefix (bool): Wether to include the domain prefix in the
+            include_domain_prefix (bool): Whether to include the domain prefix in the
                 keys (e.g., "cell_id" or "tags.cell_id"). Defaults to True.
 
         Returns:
@@ -408,7 +412,7 @@ class SampleCollectionMixin:
             include_rep_suffix (bool):
                 Whether to include representation suffixes (e.g., "raw")
             include_domain_prefix (bool):
-                Whether to include domain prefixes (e.g., "targetss")
+                Whether to include domain prefixes (e.g., "targets")
 
         Returns:
             dict[str, str]:
@@ -774,6 +778,13 @@ class SampleCollectionMixin:
     # Export
     # ================================================
     def to_arrow(self) -> pa.Table:
+        """
+        Export data as a PyArrow :class:`pa.Table`.
+
+        Returns:
+            pa.Table: All columns sorted alphabetically.
+
+        """
         collection, _ = self._resolve_collection()
 
         # Sort columns (not necessary but nicer for manual inspection)
@@ -789,6 +800,19 @@ class SampleCollectionMixin:
         include_padded: bool = False,
         include_mask: bool = False,
     ) -> pd.DataFrame:
+        """
+        Export data as a :class:`pd.DataFrame`.
+
+        Args:
+            include_padded (bool):
+                Whether to include padded (invalid) rows. Defaults to False.
+            include_mask (bool):
+                Whether to append a `__mask__` column. Defaults to False.
+
+        Returns:
+            pd.DataFrame: Exported data.
+
+        """
         # Case 1: no padding requested or no mask exists
         if not include_padded or self.sample_mask is None:
             df = self.to_arrow().to_pandas()
@@ -813,23 +837,43 @@ class SampleCollectionMixin:
         return out
 
     def to_sample_collection(self) -> SampleCollection:
+        """
+        Convert to a :class:`SampleCollection`.
+
+        Returns:
+            SampleCollection: Resolved collection with column and row filtering applied.
+
+        """
         coll, _ = self._resolve_collection()
         return coll
 
     def to_featureset(self, label: str) -> FeatureSet:
+        """
+        Convert to a :class:`FeatureSet`.
+
+        Args:
+            label (str): Label for the new :class:`FeatureSet`.
+
+        Returns:
+            FeatureSet: A new :class:`FeatureSet` from this view's data.
+
+        """
         from modularml.core.data.featureset import FeatureSet
 
         return FeatureSet(label=label, collection=self.to_sample_collection())
 
     def to_sample_data(self, fmt: DataFormat = DataFormat.NUMPY) -> SampleData:
         """
-        Converts all columns referenced by this view to tensor-based SampleData.
+        Converts all columns referenced by this view to tensor-based :class:`SampleData`.
 
         Args:
             fmt (DataFormat, optional):
                 The data format to use for the tensors constructed from the
                 "features" and "targets" columns. `fmt` must be TensorLike
                 (e.g., "torch", "tf", "np"). Defaults to "numpy".
+
+        Returns:
+            SampleData: Tensor-based sample data for all domains.
 
         """
         if not format_is_tensorlike(fmt):

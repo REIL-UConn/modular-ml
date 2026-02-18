@@ -1,3 +1,5 @@
+"""Execution context for a single batch pass through the model graph."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -19,6 +21,15 @@ class ExecutionContext:
     Description:
         Stores all inputs, outputs, losses, and metrics produced during a
         single forward/backward pass through the ModelGraph.
+
+    Attributes:
+        phase_label (str): Label identifying the current phase.
+        epoch_idx (int): Current epoch index.
+        batch_idx (int): Current batch index within the epoch.
+        inputs (dict): Inputs to head nodes, keyed by (node_id, upstream_ref).
+        outputs (dict[str, Batch]): Outputs of graph nodes, keyed by node ID.
+        losses (LossCollection | None): Losses computed in this batch.
+
     """
 
     # Identity
@@ -47,6 +58,15 @@ class ExecutionContext:
         upstream: FeatureSetReference,
         batch_view: BatchView,
     ):
+        """
+        Register an input :class:`BatchView` for a head node.
+
+        Args:
+            node_id (str): Node identifier.
+            upstream (FeatureSetReference): Upstream reference for the node.
+            batch_view (BatchView): The input :class:`BatchView`.
+
+        """
         if node_id not in self.inputs:
             self.inputs[node_id] = {}
         self.inputs[(node_id, upstream)] = batch_view
@@ -66,7 +86,13 @@ class ExecutionContext:
         self.outputs[node_id] = batch
 
     def add_losses(self, lc: LossCollection):
-        """Updates the tracked losses with this collection."""
+        """
+        Update the tracked losses with this collection.
+
+        Args:
+            lc (LossCollection): Loss records to merge.
+
+        """
         if self.losses is None:
             self.losses = lc
 

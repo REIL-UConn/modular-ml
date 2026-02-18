@@ -1,3 +1,5 @@
+"""Immutable, role-structured tensor container produced from a :class:`BatchView`."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -28,16 +30,25 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class Batch(Summarizable):
     """
-    Immutable, role-structured tensor container produced from a single BatchView.
+    Immutable, role-structured tensor container produced from a single :class:`BatchView`.
 
     Description:
-        A Batch represents one sampler's worth of data for a single execution step.
-        It stores role-structured SampleData along with per-role weights and masks.
+        A :class:`Batch` represents one sampler's worth of data for a single
+        execution step. It stores role-structured :class:`SampleData` along with
+        per-role weights and masks.
 
         When exactly one role is present, domain attributes such as `features`,
         `targets`, `tags`, `outputs`, and `sample_uuids` are exposed directly via
-        delegation to the underlying RoleData for convenience. If multiple roles
-        exist, direct domain access is disallowed to prevent ambiguity.
+        delegation to the underlying :class:`RoleData` for convenience. If multiple
+        roles exist, direct domain access is disallowed to prevent ambiguity.
+
+    Attributes:
+        batch_size (int): Number of samples in this batch.
+        role_data (RoleData): Role-keyed :class:`SampleData` storage.
+        shapes (SampleShapes): Per-domain tensor shapes.
+        role_weights (Mapping[str, NDArray[np.float32]]): Per-role sample weights.
+        role_masks (Mapping[str, NDArray[np.int8]]): Per-role validity masks.
+
     """
 
     batch_size: int
@@ -97,6 +108,7 @@ class Batch(Summarizable):
     # ================================================
     @property
     def available_roles(self) -> list[str]:
+        """List of role names present in this batch."""
         return self.role_data.available_roles
 
     def get_data(
@@ -256,8 +268,13 @@ class Batch(Summarizable):
 
         Description:
             Performs an in-place data casting of the underlying tensors
-            for all roles. Only SampleData (features / targets / outputs)
+            for all roles. Only :class:`SampleData` (features / targets / outputs)
             are converted. Weights and masks are left untouched.
+
+        Args:
+            backend (:class:`Backend`):
+                The target backend whose native tensor format will be used.
+
         """
         return self.as_format(get_data_format_for_backend(backend=backend))
 
@@ -266,12 +283,19 @@ class Batch(Summarizable):
         Casts tensor-like data to be compatible with a specified backend.
 
         This is a *non-mutating* conversion. A new copy is returned with the
-        old Batch instance unchanged.
+        old :class:`Batch` instance unchanged.
 
         Description:
             Performs data casting on a copy of the underlying tensors
-            for all roles. Only SampleData (features / targets / outputs)
+            for all roles. Only :class:`SampleData` (features / targets / outputs)
             are converted. Weights and masks are copied, but not re-formatted.
+
+        Args:
+            backend (:class:`Backend`):
+                The target backend whose native tensor format will be used.
+
+        Returns:
+            Batch: A new instance with converted data.
 
         """
         return self.to_format(get_data_format_for_backend(backend=backend))
@@ -293,7 +317,22 @@ class Batch(Summarizable):
     # ================================================
     @classmethod
     def concat(cls, *batches: Batch, fmt: DataFormat | None = None) -> Batch:
-        """Merge all data into a new Batch instance."""
+        """
+        Merge all data into a new :class:`Batch` instance.
+
+        Args:
+            *batches (Batch):
+                One or more :class:`Batch` instances to concatenate.
+            fmt (DataFormat | None, optional):
+                Target tensor format. If None, inferred from inputs.
+
+        Returns:
+            Batch: A new instance with concatenated data.
+
+        Raises:
+            TypeError: If any input is not a :class:`Batch` instance.
+
+        """
         # Validate types
         for b in batches:
             if not isinstance(b, cls):

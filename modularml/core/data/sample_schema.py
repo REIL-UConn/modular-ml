@@ -1,3 +1,11 @@
+"""
+Schema definition and validation for :class:`FeatureSet` sample data.
+
+Provides the :class:`SampleSchema` dataclass for defining and validating the
+column layout of a :class:`FeatureSet` across its three domains (features,
+targets, tags), along with utilities for sample identity and key validation.
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -32,10 +40,10 @@ DTYPE_SUFFIX = "dtype"
 @dataclass
 class SampleSchema:
     """
-    Defines and validates the schema of a FeatureSet.
+    Defines and validates the schema of a :class:`FeatureSet`.
 
     Description:
-        Each FeatureSet is organized into three structured domains:
+        Each :class:`FeatureSet` is organized into three structured domains:
           - **features**: model inputs (e.g., voltage, current)
           - **targets**: supervised outputs (e.g., SOH, capacity)
           - **tags**: metadata or identifiers (e.g., cell_id, SOC)
@@ -79,7 +87,9 @@ class SampleSchema:
             raise ValueError(msg)
 
         # Check for invalid characters and reserved names
-        all_keys = set(self.features.keys()) | set(self.targets.keys()) | set(self.tags.keys())
+        all_keys = (
+            set(self.features.keys()) | set(self.targets.keys()) | set(self.tags.keys())
+        )
         validate_str_list(list(all_keys))
 
     # ================================================
@@ -90,10 +100,10 @@ class SampleSchema:
         Return the list of column names for a given domain.
 
         Args:
-            domain: One of {"features", "targets", "tags"}.
+            domain (str): One of {"features", "targets", "tags"}.
 
         Returns:
-            A list of string column names in that domain.
+            list[str]: Column names in that domain.
 
         Raises:
             ValueError: if the domain name is invalid.
@@ -114,10 +124,11 @@ class SampleSchema:
         Return the {column_name: DataType} mapping for a given domain.
 
         Args:
-            domain: Domain name ("features", "targets", "tags").
+            domain (str): Domain name ("features", "targets", "tags").
 
         Returns:
-            Mapping of column names to representation to Arrow data types.
+            dict[str, dict[str, pa.DataType]]:
+                Mapping of column names to representation to Arrow data types.
 
         """
         domain = domain.lower()
@@ -172,7 +183,14 @@ class SampleSchema:
     @classmethod
     def from_table(cls, table: pa.Table) -> SampleSchema:
         """
-        Infer SampleSchema from a flat Arrow table.
+        Infer :class:`SampleSchema` from a flat Arrow table.
+
+        Args:
+            table (pa.Table): Arrow table with columns following the naming
+                convention ``<domain>.<key>.<representation>``.
+
+        Returns:
+            SampleSchema: Inferred schema instance.
 
         Expected column naming:
             "<domain>.<key>.<representation>"
@@ -216,7 +234,7 @@ class SampleSchema:
 
 def ensure_sample_id(table: pa.Table) -> pa.Table:
     """
-    Ensure that the Arrow table contains a unique DOMAIN_SAMPLE_ID.
+    Ensure that the Arrow table contains a unique `DOMAIN_SAMPLE_ID` column.
 
     Description:
         - If the column exists, validates that it is of type string.
@@ -237,7 +255,10 @@ def ensure_sample_id(table: pa.Table) -> pa.Table:
             raise TypeError(msg)
         return table
 
-    sample_ids = pa.array([str(uuid.uuid4()) for _ in range(table.num_rows)], type=pa.string())
+    sample_ids = pa.array(
+        [str(uuid.uuid4()) for _ in range(table.num_rows)],
+        type=pa.string(),
+    )
     return table.append_column(DOMAIN_SAMPLE_ID, sample_ids)
 
 

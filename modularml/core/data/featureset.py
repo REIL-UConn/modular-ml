@@ -1,3 +1,5 @@
+"""Unified :class:`FeatureSet` backed by a single :class:`SampleCollection`."""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -52,10 +54,10 @@ if TYPE_CHECKING:
 
 class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
     """
-    Unified FeatureSet backed by a single SampleCollection.
+    Unified :class:`FeatureSet` backed by a single :class:`SampleCollection`.
 
     Each representation (e.g., "raw", "transformed") lives within the same \
-    SampleCollection rather than as separate sub-collections. \
+    :class:`SampleCollection` rather than as separate sub-collections. \
     Splits store indices into this collection and may specify \
     which representation(s) to use when retrieving data.
     """
@@ -444,10 +446,12 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
 
     @property
     def splits(self) -> dict[str, FeatureSetView]:
+        """Mapping of split names to their :class:`FeatureSetView` instances."""
         return {k: self.get_split(k) for k in self.available_splits}
 
     @property
     def n_splits(self) -> int:
+        """Number of registered splits."""
         return len(self._splits)
 
     # ================================================
@@ -467,13 +471,16 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
 
     def get_split(self, split_name: str) -> FeatureSetView:
         """
-        Gets the specified split, rebuilding the FeatureSetView if necessary.
+        Gets the specified split, rebuilding the :class:`FeatureSetView` if necessary.
 
         Description:
             If new columns (e.g. transformed representations) have been added to
-            the FeatureSet after the split was defined, the cached FeatureSetView
-            is re-created to include all current columns while preserving row
-            indices.
+            the :class:`FeatureSet` after the split was defined, the cached
+            :class:`FeatureSetView` is re-created to include all current columns
+            while preserving row indices.
+
+        Args:
+            split_name (str): Name of the split to retrieve.
 
         Returns:
             FeatureSetView:
@@ -1484,7 +1491,7 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
         *,
         register: bool = True,
     ) -> FeatureSet:
-        """Instantiates a empty FeatureSet."""
+        """Instantiate an empty :class:`FeatureSet`."""
         empty_table = pa.table({})
         return cls.from_pyarrow_table(
             table=empty_table,
@@ -1507,7 +1514,13 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
         }
 
     def set_state(self, state: dict[str, Any]):
-        """Restore FeatureSet from semantic state."""
+        """
+        Restore :class:`FeatureSet` from semantic state.
+
+        Args:
+            state (dict[str, Any]): State dictionary produced by :meth:`get_state`.
+
+        """
         from modularml.core.data.featureset_view import FeatureSetView
 
         # Set parent state first

@@ -1,3 +1,5 @@
+"""Tensor-like data containers for sample data, role-keyed access, and shape specifications."""
+
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
@@ -34,9 +36,9 @@ class SampleData(Summarizable):
 
     Description:
         Represents the runtime data (features, targets, and tags) associated with \
-        a single role within a Batch. Each SampleData instance stores tensors or \
-        array-like objects under standardized domain keys defined in \
-        `SampleSchema`, including:
+        a single role within a :class:`Batch`. Each :class:`SampleData` instance \
+        stores tensors or array-like objects under standardized domain keys defined \
+        in :class:`SampleSchema`, including:
           - DOMAIN_FEATURES
           - DOMAIN_TARGETS
           - DOMAIN_TAGS
@@ -98,6 +100,7 @@ class SampleData(Summarizable):
     # ================================================
     @property
     def shapes(self) -> SampleShapes:
+        """Per-domain tensor shapes (excluding batch dimension)."""
         return self._shapes
 
     # ================================================
@@ -125,13 +128,26 @@ class SampleData(Summarizable):
 
     @property
     def outputs(self):
+        """Tensor-like model output data (alias for features when kind is ``"output"``)."""
         if self._kind != "output":
             msg = "`outputs` is only defined for SampleData produced by a model."
             raise AttributeError(msg)
         return self.features
 
     def get_domain_data(self, domain: str) -> TensorLike:
-        """Retrieves the tensor-like data stored in the specified domain."""
+        """
+        Retrieves the tensor-like data stored in the specified domain.
+
+        Args:
+            domain (str): Domain name (e.g., "features", "targets", "tags").
+
+        Returns:
+            TensorLike: Tensor-like data for the requested domain.
+
+        Raises:
+            KeyError: If `domain` is not a valid domain name.
+
+        """
         valid_attrs = ("sample_uuids", "features", "targets", "tags", "outputs")
         if domain not in valid_attrs:
             msg = f"Invalid domain: '{domain}'. Available: {valid_attrs}."
@@ -187,9 +203,12 @@ class SampleData(Summarizable):
             construction.
 
         Args:
-            fmt (DataFormat):s
+            fmt (DataFormat):
                 The format to cast to. `fmt` must be TensorLike
                 (e.g., "torch", "tf", "np").
+
+        Returns:
+            SampleData: A new instance with converted data.
 
         """
         new_data = SampleData(data=dict(self.data), kind=self._kind)
@@ -215,28 +234,29 @@ class SampleData(Summarizable):
 
     def as_backend(self, backend: Backend):
         """
-        Casts the data to a DataFormat compatible with specified backend.
+        Casts the data to a :class:`DataFormat` compatible with specified backend.
 
         This is an *in-place* conversion. If copying is needed,
-        use `to_format`.
+        use :meth:`to_format`.
 
-        Description:
-            Performs an in-place data casting of the underlying tensors.
-            Reformats the features and targets, but not the tags.
+        Args:
+            backend (Backend): Target backend (e.g., ``Backend.TORCH``).
 
         """
         return self.as_format(get_data_format_for_backend(backend=backend))
 
     def to_backend(self, backend: Backend) -> SampleData:
         """
-        Casts the data to a DataFormat compatible with specified backend.
+        Casts the data to a :class:`DataFormat` compatible with specified backend.
 
         This is a *non-mutating* conversion. A new copy is returned
-        with the old SampleData isntance unchanged.
+        with the old :class:`SampleData` instance unchanged.
 
-        Description:
-            Performs a data casting on a copy of the underlying tensors.
-            Reformats the features and targets, but not the tags.
+        Args:
+            backend (Backend): Target backend (e.g., ``Backend.TORCH``).
+
+        Returns:
+            SampleData: A new instance with converted data.
 
         """
         return self.to_format(get_data_format_for_backend(backend=backend))
@@ -246,7 +266,22 @@ class SampleData(Summarizable):
     # ================================================
     @classmethod
     def concat(cls, *sds: SampleData, fmt: DataFormat | None = None) -> SampleData:
-        """Merge all data into a new SampleData instance."""
+        """
+        Merge multiple :class:`SampleData` instances along the batch axis.
+
+        Args:
+            *sds (SampleData): Instances to concatenate.
+            fmt (DataFormat | None): Target format. If None, the backend
+                is inferred. Defaults to None.
+
+        Returns:
+            SampleData: A new instance containing concatenated data.
+
+        Raises:
+            TypeError: If any input is not a :class:`SampleData`.
+            ValueError: If instances are structurally incompatible.
+
+        """
         # Validate types
         for sd in sds:
             if not isinstance(sd, cls):
@@ -439,11 +474,11 @@ class SampleData(Summarizable):
 
 class RoleData(Mapping[str, SampleData], Summarizable):
     """
-    Immutable, role-keyed container for SampleData objects.
+    Immutable, role-keyed container for :class:`SampleData` objects.
 
     Description:
-        RoleData is a lightweight wrapper around a mapping of role names to
-        SampleData instances. It provides role introspection, attribute-style
+        :class:`RoleData` is a lightweight wrapper around a mapping of role
+        names to :class:`SampleData` instances. It provides role introspection, attribute-style
         access, readable summaries, and a stable return type for model forward
         passes.
 
@@ -591,7 +626,7 @@ class RoleData(Mapping[str, SampleData], Summarizable):
     # Utilities
     # ================================================
     def copy(self) -> RoleData:
-        """Returns new RoleData instance with copied data."""
+        """Returns a new :class:`RoleData` instance with shallow-copied data."""
         new_rd = {}
         for k, v in self._data.items():
             new_rd[k] = SampleData(data=dict(v.data), kind=v._kind)
@@ -638,9 +673,12 @@ class RoleData(Mapping[str, SampleData], Summarizable):
             tags and sample IDs are left untouched.
 
         Args:
-            fmt (DataFormat):s
+            fmt (DataFormat):
                 The format to cast to. `fmt` must be TensorLike
                 (e.g., "torch", "tf", "np").
+
+        Returns:
+            RoleData: A new instance with converted data.
 
         """
         new_rd = self.copy()
@@ -669,6 +707,10 @@ class RoleData(Mapping[str, SampleData], Summarizable):
             Performs an in-place data casting of the underlying tensors.
             Reformats the features and targets, but not the tags.
 
+        Args:
+            backend (:class:`Backend`):
+                The target backend whose native tensor format will be used.
+
         """
         return self.as_format(get_data_format_for_backend(backend=backend))
 
@@ -677,11 +719,18 @@ class RoleData(Mapping[str, SampleData], Summarizable):
         Casts the data to a DataFormat compatible with the specified backend.
 
         This is a *non-mutating* conversion. A new copy is returned with the
-        old SampleData instance unchanged.
+        old :class:`RoleData` instance unchanged.
 
         Description:
             Performs a data casting on a copy of the underlying tensors.
             Reformats the features and targets, but not the tags.
+
+        Args:
+            backend (:class:`Backend`):
+                The target backend whose native tensor format will be used.
+
+        Returns:
+            RoleData: A new instance with converted data.
 
         """
         return self.to_format(get_data_format_for_backend(backend=backend))
@@ -691,7 +740,23 @@ class RoleData(Mapping[str, SampleData], Summarizable):
     # ================================================
     @classmethod
     def concat(cls, *rds: RoleData, fmt: DataFormat | None = None) -> RoleData:
-        """Merge all data into a new RoleData instance."""
+        """
+        Merge all data into a new :class:`RoleData` instance.
+
+        Args:
+            *rds (RoleData):
+                One or more :class:`RoleData` instances to concatenate.
+            fmt (DataFormat | None, optional):
+                Target tensor format. If None, inferred from inputs.
+
+        Returns:
+            RoleData: A new instance with concatenated data per role.
+
+        Raises:
+            TypeError: If any input is not a :class:`RoleData` instance.
+            ValueError: If role sets differ across inputs.
+
+        """
         # Validate types
         for rd in rds:
             if not isinstance(rd, cls):
@@ -791,11 +856,11 @@ class SampleShapes(Summarizable):
             Dictionary mapping each schema domain name
             (DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS) to a shape
             tuple (excluding batch dimension).
-        features_shape (tuple[int, ...]]):
+        features_shape (tuple[int, ...]):
             Tuple of ints representing feature shape.
-        targets_shape (tuple[int, ...]]):
+        targets_shape (tuple[int, ...]):
             Tuple of ints representing target shape.
-        tags_shape (tuple[int, ...]]):
+        tags_shape (tuple[int, ...]):
             Tuple of ints representing tag shape.
 
     """
@@ -827,13 +892,20 @@ class SampleShapes(Summarizable):
                 self.shapes[DOMAIN_TAGS] = tags_shape
 
     def __getitem__(self, domain: str) -> tuple[int, ...]:
-        """The shape tuple corresponding to a given schema domain."""
+        """
+        The shape tuple corresponding to a given schema domain.
+
+        Args:
+            domain (str): Schema domain name (e.g., `DOMAIN_FEATURES`).
+
+        """
         return self.shapes[domain]
 
     def __repr__(self):
         return f"SampleShapes({self.shapes})"
 
     def __eq__(self, other):
+        """Check equality by comparing shape dictionaries."""
         if not isinstance(other, SampleShapes):
             msg = f"Cannot compare equality between SampleShapes and {type(other)}."
             raise TypeError(msg)
@@ -841,6 +913,7 @@ class SampleShapes(Summarizable):
         return self.shapes == other.shapes
 
     def __hash__(self):
+        """Hash based on the shape dictionary."""
         return hash(self.shapes)
 
     @property

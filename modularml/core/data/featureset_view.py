@@ -1,3 +1,5 @@
+"""Immutable row and column projection of a :class:`FeatureSet`."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -28,9 +30,16 @@ if TYPE_CHECKING:
 @dataclass
 class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurable):
     """
-    Immutable row+column projection of a FeatureSet.
+    Immutable row and column projection of a :class:`FeatureSet`.
 
     Intended for inspection, export, and analysis.
+
+    Attributes:
+        source (FeatureSet): The parent :class:`FeatureSet` this view projects.
+        indices (NDArray[np.int64]): Row indices into the source.
+        columns (list[str]): Column names included in this view.
+        label (str | None): Optional label for this view.
+
     """
 
     source: FeatureSet
@@ -47,6 +56,21 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
         columns: list[str] | None = None,
         label: str | None = None,
     ) -> FeatureSetView:
+        """
+        Create a :class:`FeatureSetView` from a :class:`FeatureSet`.
+
+        Args:
+            fs (FeatureSet): Source :class:`FeatureSet`.
+            rows (NDArray[np.int64] | None): Row indices to include.
+                Defaults to all rows.
+            columns (list[str] | None): Column names to include.
+                Defaults to all columns.
+            label (str | None): Optional label for the view.
+
+        Returns:
+            FeatureSetView: A new view over the given :class:`FeatureSet`.
+
+        """
         if rows is None:
             rows = np.arange(fs.n_samples)
         if columns is None:
@@ -68,7 +92,7 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
         return f"FeatureSetView(source='{self.source.label}', n_samples={self.n_samples}, label='{self.label}')"
 
     def __eq__(self, other):
-        """Compares source and indicies. Label is ignored."""
+        """Compare source and indices. Label is ignored."""
         if not isinstance(other, FeatureSetView):
             msg = f"Cannot compare equality between FeatureSetView and {type(other)}"
             raise TypeError(msg)
@@ -114,9 +138,17 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
         Check if this view has no overlapping samples.
 
         Description:
-            - If both views share the same source FeatureSet, comparison is based on indices.
-            - If they originate from different sources, comparison falls back to `DOMAIN_SAMPLE_ID` \
-                to ensure identity consistency across saved or merged datasets.
+            If both views share the same source :class:`FeatureSet`, comparison
+            is based on indices. If they originate from different sources,
+            comparison falls back to `DOMAIN_SAMPLE_ID` to ensure identity
+            consistency across saved or merged datasets.
+
+        Args:
+            other (FeatureSetView): The other view to compare against.
+
+        Returns:
+            bool: True if the views share no common samples.
+
         """
         if not isinstance(other, FeatureSetView):
             msg = f"Comparison only valid between FeatureSetViews, not {type(other)}"
@@ -140,12 +172,15 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
         }
         return ids_self.isdisjoint(ids_other)
 
-    def get_overlap_with(self, other: FeatureSetView) -> list[int]:
+    def get_overlap_with(self, other: FeatureSetView) -> list[str]:
         """
-        Get overlapping sample identifiers between two FeatureSetViews.
+        Get overlapping sample identifiers between two :class:`FeatureSetView` instances.
+
+        Args:
+            other (FeatureSetView): The other view to compare against.
 
         Returns:
-            list[str]: A list of overlapping SAMPLE_ID values.
+            list[str]: A list of overlapping `DOMAIN_SAMPLE_ID` values.
 
         """
         if not isinstance(other, FeatureSetView):
@@ -177,12 +212,20 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
     # ================================================
     def expand_columns(self, label: str | None = None) -> FeatureSetView:
         """
-        Creates a new view without column filtering.
+        Create a new view without column filtering.
 
         Description:
             A new view is created with the same indices, but without
             any filters over which columns to include. The returned
-            view will include all columns of the source FeatureSet.
+            view will include all columns of the source :class:`FeatureSet`.
+
+        Args:
+            label (str | None): Optional label for the expanded view.
+                Defaults to `"{self.label}_expanded"`.
+
+        Returns:
+            FeatureSetView: A new view with all columns included.
+
         """
         return FeatureSetView.from_featureset(
             fs=self.source,

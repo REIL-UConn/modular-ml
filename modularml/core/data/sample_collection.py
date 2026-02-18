@@ -1,3 +1,5 @@
+"""Arrow-backed container for sample-level data across all domains."""
+
 from __future__ import annotations
 
 import ast
@@ -58,8 +60,8 @@ class SampleCollection:
             - tags
             - sample identifiers
 
-        Data are stored internally as a `pyarrow.Table` whose column schema
-        follows the `SampleSchema` contract:
+        Data are stored internally as a :class:`pa.Table` whose column schema
+        follows the :class:`SampleSchema` contract:
 
             <domain>.<key>.<representation>
 
@@ -241,6 +243,7 @@ class SampleCollection:
         self.table = self.table.replace_schema_metadata(meta)
 
     def __eq__(self, other):
+        """Compare equality by underlying Arrow table content."""
         if not isinstance(other, SampleCollection):
             msg = f"Cannot compare equality between SampleCollection and {type(other)}"
             raise TypeError(msg)
@@ -384,7 +387,7 @@ class SampleCollection:
         *,
         include_rep_suffix: bool,
         include_domain_prefix: bool,
-    ) -> dict[str, tuple[int, ...]]:
+    ) -> dict[str, str]:
         """
         Retrieve per-representation data types for a domain.
 
@@ -425,17 +428,17 @@ class SampleCollection:
 
         Args:
             domain (str):
-                domain (str): One of {"features", "targets", "tags"}.
+                One of {"features", "targets", "tags"}.
             fmt (DataFormat): Desired output format (see :class:`DataFormat`). \
                 Defaults to a single dictionary of numpy arrays.
             keys (str | list[str] | None): Optional subset of domain keys to return. \
                 If None, all feature keys are returned. Defaults to None.
             rep (str, optional): The representation (e.g., "raw" or "transformed") of the domain keys to \
                 return. If None, all representations are returned and `include_rep_suffix` is set to True. \
-                If specfiied, `keys` must all have matching representations. Defaults to None.
+                If specified, `keys` must all have matching representations. Defaults to None.
             include_rep_suffix (bool): Whether to include the representation suffix in the \
                 domain keys (e.g., "voltage" or "voltage.raw"). Defaults to False.
-            include_domain_prefix (bool): Wether to include the domain prefix in the \
+            include_domain_prefix (bool): Whether to include the domain prefix in the \
                 domain keys (e.g., "voltage" or "features.voltage"). Defaults to False.
 
         Returns:
@@ -667,6 +670,7 @@ class SampleCollection:
 
     @property
     def available_domains(self) -> list[str]:
+        """List of all domain names present in this collection."""
         return [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS, DOMAIN_SAMPLE_ID]
 
     @property
@@ -785,12 +789,12 @@ class SampleCollection:
             include_rep_suffix (bool):
                 Whether to include the representation suffix in the keys
                 (e.g., "voltage" or "voltage.raw"). Defaults to True.
-            include_domain_prefix (bool): Wether to include the domain prefix in the
+            include_domain_prefix (bool): Whether to include the domain prefix in the
                 keys (e.g., "cell_id" or "tags.cell_id"). Defaults to True.
 
         Returns:
             list[str]:
-                All unique columns in the SampleCollection.
+                All unique columns in the :class:`SampleCollection`.
 
         """
         keys = []
@@ -963,7 +967,7 @@ class SampleCollection:
             include_rep_suffix (bool):
                 Whether to include representation suffixes (e.g., "raw")
             include_domain_prefix (bool):
-                Whether to include domain prefixes (e.g., "targetss")
+                Whether to include domain prefixes (e.g., "targets")
 
         Returns:
             dict[str, str]:
@@ -1040,6 +1044,9 @@ class SampleCollection:
                 Whether to include representation suffixes (e.g., "raw").
                 Automatically included if multiple representations are included in
                 the selected columns. Defaults to True.
+
+        Returns:
+            Column data in the requested format.
 
         """
         # Enforce domain/rep in naming if more than 1 in selected columns
@@ -1158,7 +1165,7 @@ class SampleCollection:
                 target keys (e.g., "voltage" or "targets.voltage"). Defaults to False.
 
         Returns:
-            Feature data in the requested format.
+            Target data in the requested format.
 
         """
         return self._get_domain_data(
@@ -1201,7 +1208,7 @@ class SampleCollection:
                 tag keys (e.g., "voltage" or "tags.voltage"). Defaults to False.
 
         Returns:
-            Feature data in the requested format.
+            Tag data in the requested format.
 
         """
         return self._get_domain_data(

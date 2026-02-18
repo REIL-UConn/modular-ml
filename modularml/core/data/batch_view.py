@@ -1,3 +1,5 @@
+"""Multi-role, zero-copy grouped view over a parent :class:`FeatureSet`."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -30,11 +32,18 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class BatchView(Summarizable):
     """
-    A multi-role, zero-copy grouped view over a parent FeatureSet.
+    A multi-role, zero-copy grouped view over a parent :class:`FeatureSet`.
 
-    Roles:
-        A batch can contain one or more roles, each defined by a set of \
-        row indices into the parent FeatureSet.
+    Description:
+        A batch can contain one or more roles, each defined by a set of
+        row indices into the parent :class:`FeatureSet`.
+
+    Attributes:
+        source (FeatureSet): The parent :class:`FeatureSet`.
+        role_indices (dict[str, NDArray[np.int64]]): Per-role row indices.
+        role_indice_weights (dict[str, NDArray[np.float32]] | None):
+            Optional per-role sample weights.
+
     """
 
     source: FeatureSet
@@ -76,6 +85,7 @@ class BatchView(Summarizable):
     # ==========================================
     @property
     def roles(self) -> list[str]:
+        """List of role names in this batch view."""
         return list(self.role_indices.keys())
 
     @property
@@ -99,6 +109,16 @@ class BatchView(Summarizable):
     # Data Accessors
     # ==========================================
     def get_role_mask(self, role: str) -> NDArray[np.int8]:
+        """
+        Return the binary validity mask for a given role.
+
+        Args:
+            role (str): Role name.
+
+        Returns:
+            NDArray[np.int8]: 1 for valid samples, 0 for padded.
+
+        """
         fsv = self.get_role_view(role=role)
         mask = fsv.sample_mask.astype(np.int8)
         if mask is None:
@@ -179,7 +199,7 @@ class BatchView(Summarizable):
         Description:
             Builds a runtime-ready :class:`Batch` object from the current BatchView
             by converting all role-based subsets into backend-specific tensor formats.
-            Each role (e.g., "anchor", "pair") is materializedindependently based
+            Each role (e.g., "anchor", "pair") is materialized independently based
             on its assigned sample indices and selected feature/target/tag columns.
 
             By default, all columns (and all representations) are used in batch creation.

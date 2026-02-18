@@ -1,3 +1,12 @@
+"""
+Constants defining domain, representation, sampler, and naming vocabularies.
+
+This module provides the canonical string constants used throughout ModularML
+for referencing schema domains (features, targets, tags, sample_id, outputs),
+data representations (raw, transformed), sampler roles, and label validation
+rules.
+"""
+
 from typing import Final, Literal
 
 # ======================================================
