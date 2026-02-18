@@ -1,3 +1,5 @@
+"""Experiment context registry and lifecycle helpers."""
+
 from __future__ import annotations
 
 import os
@@ -35,7 +37,19 @@ class RegistrationPolicy(Enum):
 
     @classmethod
     def from_value(cls, value):
-        """Cast a string or enum value to RegistrationPolicy."""
+        """
+        Cast a string or enum value to :class:`RegistrationPolicy`.
+
+        Args:
+            value (str | RegistrationPolicy): Source value.
+
+        Returns:
+            RegistrationPolicy: Normalized policy value.
+
+        Raises:
+            ValueError: If the provided value cannot be mapped to a policy.
+
+        """
         if isinstance(value, cls):
             return value
         if isinstance(value, str):
@@ -78,7 +92,19 @@ class ExperimentContext:
 
     @classmethod
     def get_active(cls) -> ExperimentContext:
-        """Returns the active ExperimentContext, if exists."""
+        """
+        Return the active :class:`ExperimentContext`.
+
+        Args:
+            cls (type[ExperimentContext]): Ignored class reference.
+
+        Returns:
+            ExperimentContext: Currently active context.
+
+        Raises:
+            RuntimeError: If no active context is set.
+
+        """
         ctx = _ACTIVE_EXPERIMENT_CONTEXT.get()
         if ctx is None:
             raise RuntimeError("There is no active ExperimentContext.")
@@ -171,12 +197,27 @@ class ExperimentContext:
         return RegistrationPolicy.ERROR
 
     def set_registration_policy(self, policy: str | RegistrationPolicy):
-        """Permanently set the registration policy."""
+        """
+        Permanently set the registration policy.
+
+        Args:
+            policy (str | RegistrationPolicy): Policy name or enum.
+
+        """
         self._policy = RegistrationPolicy.from_value(policy)
 
     @contextmanager
     def use_policy(self, policy: str | RegistrationPolicy):
-        """Temporarily override the registration policy inside a context."""
+        """
+        Temporarily override the registration policy inside a context.
+
+        Args:
+            policy (str | RegistrationPolicy): Policy to use within the scope.
+
+        Yields:
+            None: Control returns to the caller once the context exits.
+
+        """
         old = self._policy
         self._policy = RegistrationPolicy.from_value(policy)
         try:
@@ -215,13 +256,21 @@ class ExperimentContext:
         *,
         reset_registries: bool = False,
     ):
-        """Set the experiment reference for this context."""
+        """
+        Set the experiment reference for this context.
+
+        Args:
+            experiment (Experiment): Experiment to associate.
+            reset_registries (bool, optional):
+                Whether to clear node registries prior to association.
+
+        """
         self._experiment_ref = ref(experiment)
         if reset_registries:
             self.clear_registries()
 
     def get_experiment(self) -> Experiment | None:
-        """Returns the Experimetn active in this context, if defined."""
+        """Return the Experiment active in this context, if defined."""
         return None if self._experiment_ref is None else self._experiment_ref()
 
     # ================================================
@@ -238,6 +287,21 @@ class ExperimentContext:
         *,
         check_label_collision: bool = True,
     ):
+        """
+        Register a node with optional collision handling.
+
+        Args:
+            node (ExperimentNode):
+                Node to register in this context.
+            check_label_collision (bool, optional):
+                Whether to enforce uniqueness for labels. Defaults to True.
+
+        Raises:
+            TypeError: If `node` is not an :class:`ExperimentNode`.
+            ValueError: If duplicates are encountered under
+                :attr:`RegistrationPolicy.ERROR`.
+
+        """
         from modularml.core.experiment.experiment_node import ExperimentNode
 
         # Validate node
@@ -349,8 +413,15 @@ class ExperimentContext:
         """
         Update the label mapping for a registered node.
 
+        Args:
+            node_id (str): Identifier of the node whose label is updated.
+            new_label (str): Replacement label.
+            check_label_collision (bool, optional):
+                Whether to enforce uniqueness of labels. Defaults to True.
+
         Raises:
-            ValueError if label collision occurs.
+            KeyError: If the node ID is not registered.
+            ValueError: If a collision occurs and `check_label_collision` is True.
 
         """
         if node_id not in self._nodes_by_id:
@@ -373,7 +444,17 @@ class ExperimentContext:
         self._node_label_to_id[new_label] = node_id
 
     def register_model_graph(self, graph: ModelGraph):
-        """Register a ModelGraph to this context."""
+        """
+        Register a ModelGraph to this context.
+
+        Args:
+            graph (ModelGraph): Model graph instance to associate.
+
+        Raises:
+            TypeError: If `graph` is not a :class:`ModelGraph`.
+            ValueError: If overwrite is disallowed and a graph already exists.
+
+        """
         from modularml.core.topology.model_graph import ModelGraph
 
         # Validate graph
@@ -586,6 +667,13 @@ class ExperimentContext:
     # Stateful
     # ================================================
     def get_state(self) -> dict[str, Any]:
+        """
+        Capture the current registration state for restoration.
+
+        Returns:
+            dict[str, Any]: Snapshot that can be supplied to :meth:`set_state`.
+
+        """
         return {
             "nodes": self._nodes_by_id.copy(),  # shallow
             "node_states": {
@@ -599,6 +687,13 @@ class ExperimentContext:
         }
 
     def set_state(self, state: dict[str, Any]):
+        """
+        Restore the context from a serialized state snapshot.
+
+        Args:
+            state (dict[str, Any]): Snapshot produced by :meth:`get_state`.
+
+        """
         self.clear_registries()
         self._experiment_ref = state["experiment_ref"]
         self._policy = state["policy"]

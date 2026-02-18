@@ -1,3 +1,5 @@
+"""Registration helpers for experiment symbols and serialization kinds."""
+
 from modularml.core.experiment.experiment import Experiment
 from modularml.core.experiment.phases.phase_group import PhaseGroup
 from modularml.core.experiment.results.eval_results import EvalResults
@@ -16,6 +18,7 @@ from modularml.core.experiment.results.phase_results import PhaseResults
 
 
 def register_builtin():
+    """Register built-in experiment symbols for serialization/deserialization."""
     # Callbacks
     symbol_registry.register_builtin_class(
         key="Callback",
@@ -75,6 +78,7 @@ def register_builtin():
 
 
 def register_kinds():
+    """Register experiment serialization kinds."""
     kind_registry.register(
         cls=Experiment,
         kind=SerializationKind(name="Experiment", kind="exp"),

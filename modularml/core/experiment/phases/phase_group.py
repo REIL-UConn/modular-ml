@@ -1,3 +1,5 @@
+"""Grouping utilities for sequencing experiment phases."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any

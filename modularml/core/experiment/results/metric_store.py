@@ -1,3 +1,5 @@
+"""Storage helpers for metrics recorded during phase execution."""
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -9,7 +11,16 @@ from modularml.utils.data.multi_keyed_data import AxisSeries
 
 @dataclass
 class MetricEntry:
-    """A single recorded metric value with its execution scope."""
+    """
+    A single recorded metric value with its execution scope.
+
+    Attributes:
+        name (str): Metric identifier.
+        value (float): Recorded scalar value.
+        epoch_idx (int): Epoch index at which the metric was logged.
+        batch_idx (int | None): Batch index if the metric is per-batch.
+
+    """
 
     name: str
     value: float
@@ -21,7 +32,21 @@ class MetricEntry:
     # ================================================
     @classmethod
     def sum(cls, *entries: MetricEntry) -> MetricEntry:
-        """Sum all entries into a new instance."""
+        """
+        Sum all entries into a new instance.
+
+        Args:
+            *entries (MetricEntry | list[MetricEntry]):
+                Metric entries to aggregate. Accepts splatted entries or a list.
+
+        Returns:
+            MetricEntry: New entry with summed value.
+
+        Raises:
+            TypeError: If any entry is not a :class:`MetricEntry`.
+            ValueError: If metric names differ across entries.
+
+        """
         # Check if passed list instead of separate args
         if (len(entries) == 1) and isinstance(entries[0], list):
             entries = entries[0]
@@ -64,7 +89,17 @@ class MetricEntry:
 
     @classmethod
     def mean(cls, *entries: MetricEntry) -> MetricEntry:
-        """Compute the mean of all metric entries."""
+        """
+        Compute the mean of all metric entries.
+
+        Args:
+            *entries (MetricEntry | list[MetricEntry]):
+                Metric entries to average. Accepts splatted entries or a list.
+
+        Returns:
+            MetricEntry: New entry representing the mean value.
+
+        """
         # Check if passed list instead of separate args
         if (len(entries) == 1) and isinstance(entries[0], list):
             entries = entries[0]
@@ -79,7 +114,16 @@ class MetricEntry:
 
 @dataclass
 class MetricDataSeries(AxisSeries[MetricEntry]):
-    """MetricEntry objects keyed by (name, epoch, batch)."""
+    """
+    MetricEntry objects keyed by (name, epoch, batch).
+
+    Attributes:
+        axes (tuple[str, ...]): Axis labels describing the series dimensions.
+        _data (dict[tuple, MetricEntry]): Underlying mapping of axis keys to entries.
+        supported_reduction_methods (ClassVar[set[str]]):
+            Allowed reducers for :meth:`AxisSeries.collapse`.
+
+    """
 
     supported_reduction_methods: ClassVar[set[str]] = {
         "first",

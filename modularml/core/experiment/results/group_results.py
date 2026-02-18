@@ -1,3 +1,5 @@
+"""Results tree mirroring :class:`PhaseGroup` execution structure."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -42,6 +44,11 @@ class PhaseGroupResults:
         for label, result in group_results.items():
             print(label, type(result).__name__)
         ```
+
+    Attributes:
+        label (str): Phase-group label associated with this result tree.
+        _results (dict[str, PhaseResults | PhaseGroupResults]):
+            Ordered mapping of labels to phase or nested group results.
 
     """
 
@@ -91,7 +98,13 @@ class PhaseGroupResults:
     # ================================================
     @property
     def labels(self) -> list[str]:
-        """All top-level result labels in insertion order."""
+        """
+        All top-level result labels in insertion order.
+
+        Returns:
+            list[str]: Ordered labels.
+
+        """
         return list(self._results.keys())
 
     @property
@@ -186,9 +199,9 @@ class PhaseGroupResults:
         """
         Iterate over label-result pairs in execution order.
 
-        Yields:
-            tuple[str, PhaseResults | PhaseGroupResults]:
-                Label and result for each top-level entry.
+        Returns:
+            Iterator[tuple[str, PhaseResults | PhaseGroupResults]]:
+                Iterator over label/result pairs.
 
         """
         yield from self._results.items()

@@ -1,3 +1,5 @@
+"""Core Experiment orchestration and execution utilities."""
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -44,6 +46,8 @@ logger = get_logger(name="Experiment")
 
 
 class Experiment:
+    """High-level container coordinating phases, callbacks, and checkpoints."""
+
     def __init__(
         self,
         label: str,
@@ -854,6 +858,7 @@ class Experiment:
         persist_epoch_progress: bool = IN_NOTEBOOK,
         val_loss_metric: str = "val_loss",
     ) -> TrainResults: ...
+
     @overload
     def run_phase(
         self,
@@ -862,29 +867,29 @@ class Experiment:
         show_eval_progress: bool = False,
         persist_progress: bool = IN_NOTEBOOK,
     ) -> EvalResults: ...
+
     def run_phase(
         self,
         phase: ExperimentPhase,
         **kwargs,
     ) -> PhaseResults:
         """
-        Executes a given phase.
+        Execute a single phase and record the results.
 
         Description:
-            The provided ExperimentPhase will be executed regardless
-            of whether it is registered to this Experiment (`execution_plan`),
-            and its outputs will be recorded under `history`.
-            **This will mutate the experiment state**. To run a phase without
-            mutating the experiment state, use `preview_phase(...)`.
+            The provided :class:`ExperimentPhase` runs regardless of whether it
+            is registered on :attr:`execution_plan`, and its outputs are stored
+            under :attr:`history`. This mutates experiment state. To run a phase
+            without mutating state, use :meth:`preview_phase`.
 
         Args:
             phase (ExperimentPhase):
-                The phase to run.
-            **kwargs:
+                Phase to run.
+            **kwargs (Any):
                 Display flags forwarded to the phase-specific run method.
 
         Returns:
-            PhaseResults: Phase results.
+            PhaseResults: Results produced by the executed phase.
 
         """
         # Initiallize run attributes
@@ -1053,6 +1058,7 @@ class Experiment:
         persist_epoch_progress: bool = IN_NOTEBOOK,
         val_loss_metric: str = "val_loss",
     ) -> TrainResults: ...
+
     @overload
     def preview_phase(
         self,
@@ -1061,28 +1067,29 @@ class Experiment:
         show_eval_progress: bool = False,
         persist_progress: bool = IN_NOTEBOOK,
     ) -> EvalResults: ...
+
     def preview_phase(
         self,
         phase: ExperimentPhase,
         **kwargs,
     ) -> PhaseResults:
         """
-        Executes a given phase without mutating the Experiment state.
+        Execute a phase without mutating the Experiment state.
 
         Description:
-            The provided ExperimentPhase will be executed on the current
-            experiment state. Any state changes are reverted after the phase
-            is executed. Execution is not recorded in `history`.
-            To run a phase with history tracking, use `run_phase(...)`.
+            The provided :class:`ExperimentPhase` runs against the current
+            experiment state and any changes are reverted afterward. Execution
+            is not recorded in :attr:`history`. Use :meth:`run_phase` to persist
+            results.
 
         Args:
             phase (ExperimentPhase):
-                The phase to run.
-            **kwargs:
+                Phase to run.
+            **kwargs (Any):
                 Display flags forwarded to the phase-specific run method.
 
         Returns:
-            PhaseResults: Phase results.
+            PhaseResults: Results produced by the previewed phase.
 
         """
         # Get initial state
@@ -1160,6 +1167,14 @@ class Experiment:
         Reconstructs an Experiment from configuration details.
 
         This does not restore state information.
+
+        Args:
+            config (dict[str, Any]):
+                Configuration payload returned by :meth:`get_config`.
+
+        Returns:
+            Experiment: Newly constructed experiment bound to the active context.
+
         """
         active_ctx = ExperimentContext.get_active()
         exp = cls(
@@ -1178,6 +1193,7 @@ class Experiment:
     # Stateful
     # ================================================
     def get_state(self) -> dict[str, Any]:
+        """Return a deep copy of mutable experiment state."""
         return {
             "ctx": self.ctx.get_state(),
             "history": deepcopy(self._history),
@@ -1185,6 +1201,13 @@ class Experiment:
         }
 
     def set_state(self, state: dict[str, Any]) -> None:
+        """
+        Restore experiment state from :meth:`get_state` output.
+
+        Args:
+            state (dict[str, Any]): Serialized snapshot captured by :meth:`get_state`.
+
+        """
         # Restore context state
         self._ctx.set_state(state["ctx"])
 

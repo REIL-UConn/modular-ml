@@ -1,3 +1,5 @@
+"""Results container for evaluation phases."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -44,6 +46,9 @@ class EvalResults(PhaseResults):
         source_view = eval_results.source_view(node="output_node")
         ```
 
+    Attributes:
+        label (str): Phase label inherited from :class:`PhaseResults`.
+
     """
 
     # ================================================
@@ -70,7 +75,13 @@ class EvalResults(PhaseResults):
 
     @property
     def n_batches(self) -> int:
-        """The number of batches executed during evaluation."""
+        """
+        The number of batches executed during evaluation.
+
+        Returns:
+            int: Number of recorded batches.
+
+        """
         return len(self.batch_indices)
 
     # ================================================

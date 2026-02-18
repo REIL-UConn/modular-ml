@@ -1,3 +1,5 @@
+"""Container describing a single execution of an experiment plan."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -23,6 +25,17 @@ class ExperimentRun:
         Each call to `Experiment.run()` produces one ExperimentRun
         instance that is appended to Experiment.history.
 
+    Attributes:
+        label (str): Human-readable identifier for the run.
+        started_at (datetime): Timestamp when execution began.
+        ended_at (datetime): Timestamp when execution completed.
+        status (Literal["completed", "failed", "stopped"]):
+            Terminal run status.
+        results (PhaseGroupResults): Execution outputs.
+        execution_meta (PhaseGroupExecutionMeta):
+            Hierarchical metadata describing per-phase execution.
+        metadata (dict[str, Any]): Arbitrary run-level metadata.
+
     """
 
     label: str
@@ -34,19 +47,28 @@ class ExperimentRun:
     results: PhaseGroupResults
     execution_meta: PhaseGroupExecutionMeta
 
-    # checkpoint_before: str | None = None
-    # checkpoint_after: str | None = None
-
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def duration_seconds(self) -> float:
-        """Total experiment execution time in seconds."""
+        """
+        Total experiment execution time in seconds.
+
+        Returns:
+            float: Duration derived from the recorded timestamps.
+
+        """
         return (self.ended_at - self.started_at).total_seconds()
 
     @property
     def phase_durations(self) -> dict[str, float]:
-        """Flattened dict of phase labels and durations."""
+        """
+        Flattened dict of phase labels and durations.
+
+        Returns:
+            dict[str, float]: Phase labels mapped to execution durations.
+
+        """
         return {
             phase_lbl: phase_meta.duration_seconds
             for phase_lbl, phase_meta in self.execution_meta.flatten().items()

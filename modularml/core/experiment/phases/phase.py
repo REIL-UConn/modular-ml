@@ -1,3 +1,5 @@
+"""Core definitions for experiment phases and input bindings."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -444,6 +446,8 @@ class InputBinding:
 
 
 class ExperimentPhase(ABC):
+    """Abstract base for executable experiment phases."""
+
     def __init__(
         self,
         label: str,

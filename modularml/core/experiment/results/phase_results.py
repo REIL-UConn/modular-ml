@@ -1,3 +1,5 @@
+"""Base results container utilities shared across phases."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -34,7 +36,16 @@ T = TypeVar("T")
 # ================================================
 @dataclass
 class ExecutionDataSeries(AxisSeries[ExecutionContext]):
-    """ExecutionContext objects keyed by (epoch, batch)."""
+    """
+    ExecutionContext objects keyed by (epoch, batch).
+
+    Attributes:
+        axes (tuple[str, ...]): Axis labels describing the series dimensions.
+        _data (dict[tuple, ExecutionContext]): Underlying mapping of keys to contexts.
+        supported_reduction_methods (ClassVar[set[str]]):
+            Allowed reducers for :meth:`AxisSeries.collapse`.
+
+    """
 
     supported_reduction_methods: ClassVar[set[str]] = {"first", "last"}
 
@@ -44,7 +55,16 @@ class ExecutionDataSeries(AxisSeries[ExecutionContext]):
 
 @dataclass
 class BatchDataSeries(AxisSeries[Batch]):
-    """Batch objects keyed by (epoch, batch)."""
+    """
+    Batch objects keyed by (epoch, batch).
+
+    Attributes:
+        axes (tuple[str, ...]): Axis labels describing the series dimensions.
+        _data (dict[tuple, Batch]): Underlying mapping of batch keys to Batch objects.
+        supported_reduction_methods (ClassVar[set[str]]):
+            Allowed reducers for :meth:`AxisSeries.collapse`.
+
+    """
 
     supported_reduction_methods: ClassVar[set[str]] = {"first", "last"}
 
@@ -52,7 +72,16 @@ class BatchDataSeries(AxisSeries[Batch]):
     # Data Casting
     # ================================================
     def to_format(self, fmt: DataFormat) -> BatchDataSeries:
-        """Casts all underlying tensors to the specified format."""
+        """
+        Cast all underlying tensors to the specified format.
+
+        Args:
+            fmt (DataFormat): Target tensor format (e.g., `torch`, `np`).
+
+        Returns:
+            BatchDataSeries: New series with converted batches.
+
+        """
         data = {k: b.to_format(fmt=fmt) for k, b in self.data.items()}
         return BatchDataSeries(
             axes=self.axes,
@@ -68,7 +97,16 @@ class BatchDataSeries(AxisSeries[Batch]):
 
 @dataclass
 class TensorDataSeries(AxisSeries[TensorLike]):
-    """TensorLike objects keyed by (epoch, batch)."""
+    """
+    TensorLike objects keyed by (epoch, batch).
+
+    Attributes:
+        axes (tuple[str, ...]): Axis labels describing the series dimensions.
+        _data (dict[tuple, TensorLike]): Underlying mapping of axis keys to tensors.
+        supported_reduction_methods (ClassVar[set[str]]):
+            Allowed reducers for :meth:`AxisSeries.collapse`.
+
+    """
 
     supported_reduction_methods: ClassVar[set[str]] = {"first", "last", "concat"}
 
@@ -78,7 +116,16 @@ class TensorDataSeries(AxisSeries[TensorLike]):
 
 @dataclass
 class LossDataSeries(AxisSeries[LossRecord]):
-    """Loss records keyed by (epoch, batch, label)."""
+    """
+    Loss records keyed by (epoch, batch, label).
+
+    Attributes:
+        axes (tuple[str, ...]): Axis labels describing the series dimensions.
+        _data (dict[tuple, LossRecord]): Mapping of axis keys to loss records.
+        supported_reduction_methods (ClassVar[set[str]]):
+            Allowed reducers for :meth:`AxisSeries.collapse`.
+
+    """
 
     supported_reduction_methods: ClassVar[set[str]] = {
         "mean",
@@ -91,7 +138,13 @@ class LossDataSeries(AxisSeries[LossRecord]):
     # Data Casting
     # ================================================
     def to_float(self) -> LossDataSeries:
-        """Casts all underlying loss record values to floats."""
+        """
+        Cast all underlying loss record values to floats.
+
+        Returns:
+            LossDataSeries: Series with float-valued loss records.
+
+        """
         return LossDataSeries(
             axes=self.axes,
             _data={k: lr.to_float() for k, lr in self.data.items()},
@@ -110,6 +163,10 @@ class LossDataSeries(AxisSeries[LossRecord]):
             >>> series = LossDataSeries(...)
             >>> series.where(epoch=1, ...).trainable
         ```
+
+        Returns:
+            float: Sum of trainable components.
+
         """
         vals = [lr.trainable for lr in self.values() if lr.trainable is not None]
         return sum(vals) if vals else 0.0
@@ -124,6 +181,10 @@ class LossDataSeries(AxisSeries[LossRecord]):
             >>> series = LossDataSeries(...)
             >>> series.where(epoch=1, ...).auxiliary
         ```
+
+        Returns:
+            float: Sum of auxiliary components.
+
         """
         vals = [lr.auxiliary for lr in self.values() if lr.auxiliary is not None]
         return sum(vals) if vals else 0.0
@@ -137,7 +198,16 @@ class LossDataSeries(AxisSeries[LossRecord]):
 
 @dataclass
 class CallbackDataSeries(AxisSeries[CallbackResult]):
-    """CallbackResult objects keyed by (kind, label, epoch, batch, edge)."""
+    """
+    CallbackResult objects keyed by (kind, label, epoch, batch, edge).
+
+    Attributes:
+        axes (tuple[str, ...]): Axis labels describing the series dimensions.
+        _data (dict[tuple, CallbackResult]): Mapping of keys to callback entries.
+        supported_reduction_methods (ClassVar[set[str]]):
+            Allowed reducers for :meth:`AxisSeries.collapse`.
+
+    """
 
     supported_reduction_methods: ClassVar[set[str]] = {"first", "last"}
 
@@ -150,6 +220,18 @@ class CallbackDataSeries(AxisSeries[CallbackResult]):
 # ================================================
 @dataclass
 class PhaseResults:
+    """
+    Base container for per-phase execution data, callbacks, and metrics.
+
+    Attributes:
+        label (str): Phase label.
+        _execution (list[ExecutionContext]): Ordered execution contexts.
+        _callbacks (list[CallbackResult]): Recorded callback outputs.
+        _metrics (MetricStore): Store of scalar metrics logged during execution.
+        _series_cache (dict[tuple, Any]): Cache of memoized AxisSeries queries.
+
+    """
+
     label: str
 
     # Phase contexts ordered by execution time
@@ -172,7 +254,13 @@ class PhaseResults:
     # Runtime Modifiers
     # ================================================
     def add_execution_context(self, ctx: ExecutionContext):
-        """Record a new execution context."""
+        """
+        Record a new execution context.
+
+        Args:
+            ctx (ExecutionContext): Context to append.
+
+        """
         # Ensure all tensors are detached/copied
         for k in ctx.outputs:
             # Detached in-place
@@ -186,7 +274,13 @@ class PhaseResults:
         self._series_cache.clear()
 
     def add_callback_result(self, cb_res: CallbackResult):
-        """Record a new callback result."""
+        """
+        Record a new callback result.
+
+        Args:
+            cb_res (CallbackResult): Result emitted by a callback.
+
+        """
         self._callbacks.append(cb_res)
         self._series_cache.clear()
 

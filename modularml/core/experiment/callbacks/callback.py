@@ -1,3 +1,5 @@
+"""Base callback definitions for experiment phases."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

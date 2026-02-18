@@ -1,3 +1,5 @@
+"""Metadata structures describing phase execution timing."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -17,6 +19,15 @@ class PhaseExecutionMeta:
         Stores timing and other meta information for execution of a single
         phase. Does not contain results; only encodes meta data to be attached
         along with results.
+
+    Attributes:
+        label (str): Phase label.
+        started_at (datetime): Timestamp when the phase began.
+        ended_at (datetime): Timestamp when the phase completed.
+        status (Literal["completed", "failed", "stopped"]):
+            Terminal execution status.
+        metadata (dict): Additional metadata captured during execution.
+
     """
 
     label: str
@@ -30,7 +41,13 @@ class PhaseExecutionMeta:
     # ================================================
     @property
     def duration_seconds(self) -> float:
-        """Total execution time in seconds."""
+        """
+        Total execution time in seconds.
+
+        Returns:
+            float: `ended_at - started_at` in seconds.
+
+        """
         return (self.ended_at - self.started_at).total_seconds()
 
 
@@ -45,6 +62,13 @@ class PhaseGroupExecutionMeta:
         preserving nesting and execution order.
 
         Does not store results; only execution-level metadata.
+
+    Attributes:
+        label (str): Group label.
+        started_at (datetime): When group execution began.
+        ended_at (datetime | None): Completion time if finished.
+        _children (dict[str, PhaseExecutionMeta | PhaseGroupExecutionMeta]):
+            Mapping of child labels to their metadata.
 
     """
 
@@ -61,7 +85,13 @@ class PhaseGroupExecutionMeta:
     # ================================================
     @property
     def duration_seconds(self) -> float:
-        """Total execution time in seconds."""
+        """
+        Total execution time in seconds.
+
+        Returns:
+            float: Duration derived from timestamps.
+
+        """
         return (self.ended_at - self.started_at).total_seconds()
 
     # ================================================
@@ -72,7 +102,7 @@ class PhaseGroupExecutionMeta:
         Add a phase or nested group metadata entry.
 
         Args:
-            meta:
+            meta (PhaseExecutionMeta | PhaseGroupExecutionMeta):
                 Execution metadata for a phase or nested group.
 
         """
@@ -90,7 +120,14 @@ class PhaseGroupExecutionMeta:
     def items(
         self,
     ) -> Iterator[tuple[str, PhaseExecutionMeta | PhaseGroupExecutionMeta]]:
-        """Iterate over children in execution order."""
+        """
+        Iterate over children in execution order.
+
+        Returns:
+            Iterator[tuple[str, PhaseExecutionMeta | PhaseGroupExecutionMeta]]:
+                Label/metadata pairs.
+
+        """
         yield from self._children.items()
 
     # ================================================

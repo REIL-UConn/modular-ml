@@ -1,3 +1,5 @@
+"""Checkpointing utilities shared by experiments and train phases."""
+
 from __future__ import annotations
 
 import re
@@ -49,38 +51,22 @@ class Checkpointing:
     Description:
         Manages when/where to save and tracks saved checkpoints.
         The actual save/restore operations are performed by the parent object
-        (TrainPhase for model state, Experiment for full experiment state).
+        (:class:`TrainPhase` for model state, :class:`Experiment` for full
+        experiment state).
 
-        When attached to a `TrainPhase`, model graph state is saved at
+        When attached to a :class:`TrainPhase`, model graph state is saved at
         training lifecycle hooks (epoch boundaries, etc.). When attached
-        to an `Experiment`, the full experiment (including results) is
+        to an :class:`Experiment`, the full experiment (including results) is
         saved at execution lifecycle hooks (phase/group boundaries).
 
-    Examples:
-    ```python
-        from modularml.callbacks import Checkpointing
-
-        # Model-level: save model state every epoch (in-memory)
-        phase = TrainPhase.from_split(
-            ...,
-            checkpointing=Checkpointing(
-                mode="memory",
-                save_on="epoch_end",
-                every_n=1,
-            ),
-        )
-
-        # Experiment-level: save full experiment to disk after each phase
-        experiment = Experiment(
-            ...,
-            checkpointing=Checkpointing(
-                mode="disk",
-                save_on="phase_end",
-                directory="./checkpoints",
-                name_template="{label}",
-            ),
-        )
-    ```
+    Attributes:
+        mode (str): Storage mode (`memory` or `disk`).
+        save_on (list[str]): Lifecycle hooks that trigger saving.
+        every_n (int): Frequency multiplier applied to hook counts.
+        directory (Path | None): Destination directory for disk checkpoints.
+        name_template (str | None): Template used to format checkpoint names.
+        max_to_keep (int | None): Limit on retained checkpoints (None keeps all).
+        overwrite (bool): Whether disk checkpoints may overwrite existing files.
 
     """
 
@@ -101,31 +87,31 @@ class Checkpointing:
 
         Args:
             mode (Literal["memory", "disk"], optional):
-                Storage mode for checkpoints. `"memory"` uses in-memory
-                state snapshots (fast, no I/O). `"disk"` writes checkpoint
-                files to the filesystem (persistent). Defaults to `"memory"`.
+                Storage mode for checkpoints. `memory` uses in-memory
+                state snapshots (fast, no I/O). `disk` writes checkpoint
+                files to the filesystem (persistent). Defaults to `memory`.
 
             save_on (str | list[str], optional):
                 Lifecycle hook(s) at which to save checkpoints. Valid values
                 depend on where the Checkpointing is attached:
 
-                - **TrainPhase**:
-                  `"phase_start"`, `"phase_end"`, `"epoch_start"`,
-                  `"epoch_end"`, `"batch_start"`, `"batch_end"`
-                - **Experiment**: `"phase_start"`, `"phase_end"`,
-                  `"group_start"`, `"group_end"`
+                - :class:`TrainPhase`:
+                  `phase_start`, `phase_end`, `epoch_start`,
+                  `epoch_end`, `batch_start`, `batch_end`
+                - :class:`Experiment`: `phase_start`, `phase_end`,
+                  `group_start`, `group_end`
 
-                Defaults to `"epoch_end"`.
+                Defaults to `epoch_end`.
 
             every_n (int, optional):
                 Save a checkpoint every `every_n` occurrences of the hook.
-                For `"epoch_end"`, this means every N epochs.
+                For `epoch_end`, this means every N epochs.
                 Defaults to 1.
 
             directory (Path | str | None, optional):
                 Directory for disk-mode checkpoints. Ignored in memory mode.
-                When attached to a TrainPhase and left as None, the directory
-                is inherited from the parent Experiment at execution time
+                When attached to a :class:`TrainPhase` and left as None, the directory
+                is inherited from the parent :class:`Experiment` at execution time
                 (saved under a `{phase.label}/` subdirectory).
 
             name_template (str | None, optional):
@@ -195,41 +181,90 @@ class Checkpointing:
     # ================================================
     @property
     def mode(self) -> str:
-        """The storage mode ('memory' or 'disk')."""
+        """
+        Get the storage mode.
+
+        Returns:
+            str: Either `memory` or `disk`.
+
+        """
         return self._mode
 
     @property
     def save_on(self) -> list[str]:
-        """The hook names at which checkpoints are saved."""
+        """
+        Get the hook names at which checkpoints are saved.
+
+        Returns:
+            list[str]: Lifecycle hooks configured for saving.
+
+        """
         return list(self._save_on)
 
     @property
     def every_n(self) -> int:
-        """Save frequency (every N hook occurrences)."""
+        """
+        Get the save frequency.
+
+        Returns:
+            int: Number of hook invocations between saves.
+
+        """
         return self._every_n
 
     @property
     def directory(self) -> Path | None:
-        """The checkpoint directory (disk mode only)."""
+        """
+        Get the checkpoint directory.
+
+        Returns:
+            Path | None: Disk directory used when `mode` is `disk`.
+
+        """
         return self._directory
 
     @property
     def overwrite(self) -> bool:
-        """Whether existing checkpoints are overwritten."""
+        """
+        Determine if disk checkpoints overwrite existing files.
+
+        Returns:
+            bool: True if overwrites are allowed.
+
+        """
         return self._overwrite
 
     @property
     def name_template(self) -> str | None:
-        """The name template for checkpoint file names."""
+        """
+        Get the template for checkpoint names.
+
+        Returns:
+            str | None: Template string with placeholders such as `{phase}`.
+
+        """
         return self._name_template
 
     @name_template.setter
     def name_template(self, value: str) -> None:
+        """
+        Update the template used when formatting checkpoint names.
+
+        Args:
+            value (str): New template containing allowed placeholders.
+
+        """
         self._name_template = value
 
     @property
     def saved_keys(self) -> list[int | str]:
-        """List of keys for which checkpoints exist."""
+        """
+        List cache keys for which checkpoints exist.
+
+        Returns:
+            list[int | str]: Keys in sorted order.
+
+        """
         if self._mode == "memory":
             return sorted(self._memory_states.keys(), key=str)
         return sorted(self._disk_paths.keys(), key=str)
@@ -288,7 +323,16 @@ class Checkpointing:
     # Query
     # ================================================
     def has_key(self, key: int | str) -> bool:
-        """Check whether a checkpoint exists for the given key."""
+        """
+        Check whether a checkpoint exists for the given key.
+
+        Args:
+            key (int | str): Identifier to query.
+
+        Returns:
+            bool: True if the checkpoint is available.
+
+        """
         if self._mode == "memory":
             return key in self._memory_states
         return key in self._disk_paths
@@ -299,6 +343,12 @@ class Checkpointing:
 
         Only available in memory mode. Returns None if no state exists
         or if in disk mode.
+
+        Args:
+            key (int | str): Identifier previously supplied to :meth:`record_memory`.
+
+        Returns:
+            dict[str, Any] | None: Stored state if available.
 
         """
         if self._mode != "memory":
@@ -311,6 +361,12 @@ class Checkpointing:
 
         Only available in disk mode. Returns None if no path exists
         or if in memory mode.
+
+        Args:
+            key (int | str): Identifier previously supplied to :meth:`record_disk`.
+
+        Returns:
+            Path | None: Checkpoint path if it exists on disk.
 
         """
         if self._mode != "disk":
@@ -368,7 +424,7 @@ class Checkpointing:
         Format the name template with provided key-value pairs.
 
         Args:
-            **kwargs: Values to substitute into the name template.
+            **kwargs (Any): Values to substitute into the name template.
                 Common keys: `label`, `key`, `phase`, `epoch`, `batch`.
 
         Returns:
@@ -416,7 +472,16 @@ class Checkpointing:
 
     @classmethod
     def from_config(cls, config: dict) -> Checkpointing:
-        """Construct from config data."""
+        """
+        Construct from config data.
+
+        Args:
+            config (dict): Serialized configuration produced by :meth:`get_config`.
+
+        Returns:
+            Checkpointing: Reconstructed checkpointing helper.
+
+        """
         directory = config.get("directory")
         return cls(
             mode=config.get("mode", "memory"),

@@ -1,3 +1,5 @@
+"""Training-phase implementation and batch scheduling utilities."""
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -108,6 +110,19 @@ class BatchSchedulingPolicy(Enum):
 
     @classmethod
     def from_value(cls, value: str | BatchSchedulingPolicy):
+        """
+        Normalize strings or enums to a :class:`BatchSchedulingPolicy`.
+
+        Args:
+            value (str | BatchSchedulingPolicy): Input value to normalize.
+
+        Returns:
+            BatchSchedulingPolicy: Canonical policy enum.
+
+        Raises:
+            ValueError: If `value` cannot be mapped to a valid policy.
+
+        """
         if isinstance(value, cls):
             return value
         if isinstance(value, str):
@@ -124,6 +139,16 @@ class BatchSchedulingPolicy(Enum):
 
 @dataclass(frozen=True)
 class SamplerExecutionKey:
+    """
+    Unique key describing a sampler execution context.
+
+    Attributes:
+        featureset_id (str): Identifier of the source :class:`FeatureSet`.
+        split (str | None): Split name used for sampling, if any.
+        sampler_cfg (Any | None): Serializable sampler configuration.
+
+    """
+
     featureset_id: str
     split: str | None
     sampler_cfg: Any | None
@@ -131,12 +156,24 @@ class SamplerExecutionKey:
 
 @dataclass
 class SamplerExecution:
+    """
+    Recorded execution info for a sampler and its bindings.
+
+    Attributes:
+        sampler_id (int): Stable identifier assigned to the sampler instance.
+        sampled (SampledView): Materialized data produced by the sampler.
+        bindings (list[InputBinding]): Input bindings satisfied by the sampler.
+
+    """
+
     sampler_id: int
     sampled: SampledView
     bindings: list[InputBinding]
 
 
 class TrainPhase(ExperimentPhase):
+    """Phase that trains model graph nodes over one or more epochs."""
+
     def __init__(
         self,
         label: str,
@@ -348,7 +385,16 @@ class TrainPhase(ExperimentPhase):
     # Callback Convenience
     # ================================================
     def add_callback(self, callback: Callback):
-        """Add a callback to this training phase."""
+        """
+        Add a callback to this training phase.
+
+        Args:
+            callback (Callback): Callback to append.
+
+        Raises:
+            ValueError: If another callback of the same type and label exists.
+
+        """
         similar_callbacks = [
             cb for cb in ensure_list(self.callbacks) if type(callback) is type(cb)
         ]

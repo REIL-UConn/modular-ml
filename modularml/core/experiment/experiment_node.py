@@ -1,3 +1,5 @@
+"""Experiment node base types and helpers."""
+
 from __future__ import annotations
 
 import uuid
@@ -11,6 +13,7 @@ from modularml.utils.representation.summary import Summarizable
 
 
 def generate_node_id() -> str:
+    """Generate a unique identifier for :class:`ExperimentNode` instances."""
     return str(uuid.uuid4())
 
 
@@ -58,17 +61,35 @@ class ExperimentNode(Summarizable, Configurable, Stateful):
 
     @property
     def node_id(self) -> str:
-        """Immutable internal identifier."""
+        """
+        Immutable internal identifier.
+
+        Returns:
+            str: Node UUID.
+
+        """
         return self._node_id
 
     @property
     def label(self) -> str:
-        """Get or set the unique label for this node."""
+        """
+        Get the unique label for this node.
+
+        Returns:
+            str: Human-readable label.
+
+        """
         return self._label
 
     @label.setter
     def label(self, new_label: str):
-        """Get or set the unique label for this node."""
+        """
+        Set the unique label for this node.
+
+        Args:
+            new_label (str): Replacement label to assign.
+
+        """
         self._validate_label(label=new_label)
 
         # Check registry (if registered)
@@ -86,6 +107,7 @@ class ExperimentNode(Summarizable, Configurable, Stateful):
     # Referencing
     # ================================================
     def reference(self) -> ExperimentNodeReference:
+        """Create a stable reference for this node."""
         return ExperimentNodeReference(
             node_id=self.node_id,
             node_label=self.label,
@@ -107,6 +129,7 @@ class ExperimentNode(Summarizable, Configurable, Stateful):
     # Configurable
     # ================================================
     def get_config(self) -> dict[str, Any]:
+        """Return serialization config for this node."""
         return {
             "label": self.label,
             "node_id": self.node_id,
@@ -119,13 +142,33 @@ class ExperimentNode(Summarizable, Configurable, Stateful):
         *,
         register: bool = True,
     ) -> ExperimentNode:
+        """
+        Instantiate a node from serialized configuration.
+
+        Args:
+            config (dict[str, Any]): Configuration emitted by :meth:`get_config`.
+            register (bool, optional):
+                Whether to register the node with the active context. Defaults to True.
+
+        Returns:
+            ExperimentNode: Constructed node.
+
+        """
         return cls(register=register, **config)
 
     # ================================================
     # Stateful
     # ================================================
     def get_state(self) -> dict[str, Any]:
+        """Return mutable state for restoration."""
         return {"label": self.label}
 
     def set_state(self, state: dict[str, Any]):
+        """
+        Restore node state from serialized data.
+
+        Args:
+            state (dict[str, Any]): Mutable data previously captured by :meth:`get_state`.
+
+        """
         self.label = state["label"]

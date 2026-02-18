@@ -1,3 +1,5 @@
+"""Results container for training phases."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -20,6 +22,14 @@ class TrainResults(PhaseResults):
 
         Validation callbacks (kind="evaluation") are automatically detected
         and their results exposed through dedicated accessors.
+
+    Attributes:
+        label (str): Phase label.
+        _execution (list[ExecutionContext]): Ordered execution contexts.
+        _callbacks (list[CallbackResult]): Recorded callback outputs.
+        _metrics (MetricStore): Stored scalar metrics.
+        _series_cache (dict[tuple, Any]): Cache of memoized AxisSeries queries.
+
     """
 
     # ================================================
@@ -46,5 +56,11 @@ class TrainResults(PhaseResults):
 
     @property
     def n_epochs(self) -> int:
-        """The number of epochs executed during training."""
+        """
+        The number of epochs executed during training.
+
+        Returns:
+            int: Total number of recorded epochs.
+
+        """
         return len(self.epoch_indices)
