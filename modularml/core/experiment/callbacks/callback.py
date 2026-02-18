@@ -486,9 +486,9 @@ class Callback(ABC):
     def on_phase_start(
         self,
         *,
-        experiment: Experiment,  # noqa: ARG002
-        phase: ExperimentPhase,  # noqa: ARG002
-        results: PhaseResults | None,  # noqa: ARG002
+        experiment: Experiment,
+        phase: ExperimentPhase,
+        results: PhaseResults | None,
     ) -> CallbackResult | None:
         """
         Run once at the start of a phase.
@@ -512,9 +512,9 @@ class Callback(ABC):
     def on_phase_end(
         self,
         *,
-        experiment: Experiment,  # noqa: ARG002
-        phase: ExperimentPhase,  # noqa: ARG002
-        results: PhaseResults | None,  # noqa: ARG002
+        experiment: Experiment,
+        phase: ExperimentPhase,
+        results: PhaseResults | None,
     ) -> CallbackResult | None:
         """
         Run once at the end of a phase.
@@ -539,10 +539,10 @@ class Callback(ABC):
     def on_epoch_start(
         self,
         *,
-        experiment: Experiment,  # noqa: ARG002
-        phase: ExperimentPhase,  # noqa: ARG002
-        exec_ctx: ExecutionContext,  # noqa: ARG002
-        results: PhaseResults | None,  # noqa: ARG002
+        experiment: Experiment,
+        phase: ExperimentPhase,
+        exec_ctx: ExecutionContext,
+        results: PhaseResults | None,
     ) -> CallbackResult | None:
         """
         Run once at the start of an epoch within a phase.
@@ -568,10 +568,10 @@ class Callback(ABC):
     def on_epoch_end(
         self,
         *,
-        experiment: Experiment,  # noqa: ARG002
-        phase: ExperimentPhase,  # noqa: ARG002
-        exec_ctx: ExecutionContext,  # noqa: ARG002
-        results: PhaseResults | None,  # noqa: ARG002
+        experiment: Experiment,
+        phase: ExperimentPhase,
+        exec_ctx: ExecutionContext,
+        results: PhaseResults | None,
     ) -> CallbackResult | None:
         """
         Run once at the end of an epoch within a phase.
@@ -598,10 +598,10 @@ class Callback(ABC):
     def on_batch_start(
         self,
         *,
-        experiment: Experiment,  # noqa: ARG002
-        phase: ExperimentPhase,  # noqa: ARG002
-        exec_ctx: ExecutionContext,  # noqa: ARG002
-        results: PhaseResults | None,  # noqa: ARG002
+        experiment: Experiment,
+        phase: ExperimentPhase,
+        exec_ctx: ExecutionContext,
+        results: PhaseResults | None,
     ) -> CallbackResult | None:
         """
         Run once at the start of a batch within an epoch.
@@ -627,10 +627,10 @@ class Callback(ABC):
     def on_batch_end(
         self,
         *,
-        experiment: Experiment,  # noqa: ARG002
-        phase: ExperimentPhase,  # noqa: ARG002
-        exec_ctx: ExecutionContext,  # noqa: ARG002
-        results: PhaseResults | None,  # noqa: ARG002
+        experiment: Experiment,
+        phase: ExperimentPhase,
+        exec_ctx: ExecutionContext,
+        results: PhaseResults | None,
     ) -> CallbackResult | None:
         """
         Run once at the end of a batch within an epoch.
@@ -657,11 +657,11 @@ class Callback(ABC):
     def on_exception(
         self,
         *,
-        experiment: Experiment,  # noqa: ARG002
-        phase: ExperimentPhase,  # noqa: ARG002
-        exec_ctx: ExecutionContext,  # noqa: ARG002
-        exception: BaseException,  # noqa: ARG002
-        results: PhaseResults | None,  # noqa: ARG002
+        experiment: Experiment,
+        phase: ExperimentPhase,
+        exec_ctx: ExecutionContext,
+        exception: BaseException,
+        results: PhaseResults | None,
     ) -> CallbackResult | None:
         """
         Run when an exception occurs during phase execution.

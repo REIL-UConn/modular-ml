@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -11,6 +12,12 @@ from modularml.core.data.batch_view import BatchView
 from modularml.core.data.execution_context import ExecutionContext
 from modularml.core.data.featureset_view import FeatureSetView
 from modularml.core.experiment.callbacks.callback import Callback
+from modularml.core.experiment.checkpointing import (
+    TRAINING_HOOKS,
+    TRAINING_NAME_TEMPLATE,
+    TRAINING_PLACEHOLDERS,
+    Checkpointing,
+)
 from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.experiment.phases.phase import ExperimentPhase, InputBinding
 from modularml.core.training.applied_loss import AppliedLoss
@@ -25,6 +32,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from modularml.core.data.sampled_view import SampledView
+    from modularml.core.experiment.experiment import Experiment
     from modularml.core.experiment.results.train_results import TrainResults
     from modularml.core.references.featureset_reference import FeatureSetReference
     from modularml.core.sampling.base_sampler import BaseSampler
@@ -139,6 +147,7 @@ class TrainPhase(ExperimentPhase):
         active_nodes: list[str | GraphNode] | None = None,
         batch_schedule: BatchSchedulingPolicy | str = BatchSchedulingPolicy.ZIP_STRICT,
         callbacks: list[Callback] | None = None,
+        checkpointing: Checkpointing | None = None,
     ):
         """
         Initiallizes a new training phase for the experiment.
@@ -183,6 +192,12 @@ class TrainPhase(ExperimentPhase):
             callbacks (list[Callback] | None, optional):
                 An optional list of Callbacks to run during phase execution.
 
+            checkpointing (Checkpointing | None, optional):
+                An optional Checkpointing callback that automatically saves model
+                state at configurable lifecycle hook points. Unlike regular callbacks,
+                this is configured as a phase-level argument rather than added manually
+                via ``add_callback()``. Defaults to None.
+
         """
         if losses is None:
             raise ValueError("Training requires at least once defined loss.")
@@ -198,6 +213,10 @@ class TrainPhase(ExperimentPhase):
         if n_epochs < 1:
             raise ValueError("n_epochs must be >= 1")
         self.n_epochs = n_epochs
+
+        # Checkpointing
+        self._checkpointing: Checkpointing | None = None
+        self.set_checkpointing(checkpointing)
 
         self._validate_samplers()
 
@@ -226,6 +245,7 @@ class TrainPhase(ExperimentPhase):
         active_nodes: list[str | GraphNode] | None = None,
         batch_schedule: BatchSchedulingPolicy | str = BatchSchedulingPolicy.ZIP_STRICT,
         callbacks: list[Callback] | None = None,
+        checkpointing: Checkpointing | None = None,
     ) -> TrainPhase:
         """
         Initiallizes a new training phase for a given FeatureSet split.
@@ -276,6 +296,10 @@ class TrainPhase(ExperimentPhase):
             callbacks (list[Callback] | None, optional):
                 An optional list of Callbacks to run during phase execution.
 
+            checkpointing (Checkpointing | None, optional):
+                An optional Checkpointing callback that automatically saves model
+                state at configurable lifecycle hook points. Defaults to None.
+
         """
         input_sources = cls._build_input_sources_from_split(
             split=split,
@@ -290,6 +314,7 @@ class TrainPhase(ExperimentPhase):
             active_nodes=active_nodes,
             batch_schedule=batch_schedule,
             callbacks=callbacks,
+            checkpointing=checkpointing,
         )
         return phase
 
@@ -335,9 +360,6 @@ class TrainPhase(ExperimentPhase):
             raise ValueError(msg)
         self.callbacks.append(callback)
 
-    # ================================================
-    # Stop Control
-    # ================================================
     def request_stop(self) -> None:
         """
         Request early termination of this training phase.
@@ -350,6 +372,99 @@ class TrainPhase(ExperimentPhase):
 
         """
         self._stop_requested = True
+
+    # ================================================
+    # Checkpointing
+    # ================================================
+    @property
+    def checkpointing(self) -> Checkpointing | None:
+        """The Checkpointing instance configured for this phase, or None."""
+        return self._checkpointing
+
+    def set_checkpointing(self, checkpointing: Checkpointing | None) -> None:
+        """
+        Attach or replace the Checkpointing configuration for this phase.
+
+        Validates that all ``save_on`` hooks are valid for a TrainPhase
+        and that the ``name_template`` only uses allowed placeholders.
+        If no ``name_template`` is set, the training default is applied.
+
+        Args:
+            checkpointing (Checkpointing | None):
+                The Checkpointing configuration, or None to disable.
+
+        """
+        if checkpointing is None:
+            self._checkpointing = None
+            return
+
+        # Validate hooks
+        invalid = set(checkpointing.save_on) - TRAINING_HOOKS
+        if invalid:
+            msg = (
+                f"Invalid `save_on` hooks for TrainPhase: {sorted(invalid)}. "
+                f"Valid hooks: {sorted(TRAINING_HOOKS)}."
+            )
+            raise ValueError(msg)
+
+        # Apply default template if not set
+        if checkpointing.name_template is None:
+            checkpointing.name_template = TRAINING_NAME_TEMPLATE
+
+        # Validate placeholders
+        Checkpointing.validate_placeholders(
+            checkpointing.name_template,
+            TRAINING_PLACEHOLDERS,
+            context_name="TrainPhase",
+        )
+
+        self._checkpointing = checkpointing
+
+    def _invoke_checkpointing(
+        self,
+        hook: str,
+        *,
+        experiment: Experiment,
+        epoch_idx: int = 0,
+        batch_idx: int = 0,
+    ) -> None:
+        """Invoke Checkpointing if configured and conditions are met."""
+        if self._checkpointing is None:
+            return
+        if experiment._checkpointing_disabled:
+            return
+        if not self._checkpointing.should_save(hook):
+            return
+
+        if self._checkpointing.mode == "memory":
+            state = experiment.model_graph.get_state()
+            self._checkpointing.record_memory(key=epoch_idx, state=state)
+        else:
+            name = self._checkpointing.format_name(
+                phase=self.label,
+                epoch=epoch_idx,
+                batch=batch_idx,
+            )
+            if self._checkpointing.directory is None:
+                msg = (
+                    "Cannot save disk checkpoint: no checkpoint directory "
+                    "set. Either set `directory` on the TrainPhase "
+                    "Checkpointing, or set one on the parent Experiment "
+                    "so it can be inherited."
+                )
+                raise RuntimeError(msg)
+
+            # Ensure directory exists
+            self._checkpointing.directory.mkdir(parents=True, exist_ok=True)
+            filepath = self._checkpointing.directory / name
+            path = experiment.model_graph.save_checkpoint(
+                filepath=filepath,
+                overwrite=self._checkpointing.overwrite,
+            )
+            self._checkpointing.record_disk(key=epoch_idx, path=Path(path))
+
+            # Register with experiment for centralized tracking
+            experiment._checkpoints[f"{self.label}/{name}"] = Path(path)
 
     # ================================================
     # Execution
@@ -657,192 +772,273 @@ class TrainPhase(ExperimentPhase):
         # ------------------------------------------------
         exp_ctx = ExperimentContext.get_active()
         experiment = exp_ctx.get_experiment()
-        for cb in self.callbacks:
-            cb._on_phase_start(
-                experiment=experiment,
-                phase=self,
-                results=results,
-            )
+        last_ctx: ExecutionContext | None = None
 
-        # ------------------------------------------------
-        # Iterate over all epochs
-        # ------------------------------------------------
-        for epoch_idx in range(self.n_epochs):
-            # ------------------------------------------------
-            # Progress Bar: batch counter
-            # ------------------------------------------------
-            per_epoch_ptask = ProgressTask(
-                style="training_loss",
-                description=f"Epoch {epoch_idx}",
-                total=step_cnt,
-                enabled=show_training_progress,
-                persist=(persist_epoch_progress and persist_progress)
-                or ((epoch_idx == self.n_epochs - 1) and persist_progress),
-            )
-
-            # Determine scheduling from self.batch_schedule
-            step_iter = self._iter_schedule(
-                policy=self.batch_schedule,
-                sampler_lengths=sampler_lens,
-            )
-
-            # Variables for loss tracking
-            running_train = 0
-            running_aux = 0
-
-            # ------------------------------------------------
-            # Iterate over all batches in this epoch
-            # ------------------------------------------------
-            for step_idx, step_plan in enumerate(step_iter):
-                # step_plan: {sampler_id: batch_idx_for_that_sampler}
-                inputs: dict[tuple[str, FeatureSetReference], BatchView] = {}
-
-                # For each sampler, decide whether it's active this step and select/mask
-                for sid, se in enumerate(sampler_execs):
-                    for binding in se.bindings:
-                        # Get list of batches for a given binding
-                        all_bvs = se.sampled.get_stream(name=binding.stream)
-                        key = (binding.node_id, binding.upstream_ref)
-
-                        # Use real batch view, if this sampler is active in this step
-                        if sid in step_plan:
-                            bv = all_bvs[step_plan[sid]]
-                            inputs[key] = bv
-                        # Otherwise, use a fully masked batch
-                        else:
-                            bv = all_bvs[0]
-                            inputs[key] = self._masked_batch_like(bv=bv)
-
-                ctx = ExecutionContext(
-                    phase_label=self.label,
-                    epoch_idx=epoch_idx,
-                    batch_idx=step_idx,
-                    inputs=inputs,
-                )
-
-                # ------------------------------------------------
-                # Callbacks: on_epoch_start
-                # ------------------------------------------------
-                if step_idx == 0:
-                    for cb in self.callbacks:
-                        cb._on_epoch_start(
-                            experiment=experiment,
-                            phase=self,
-                            exec_ctx=ctx,
-                            results=results,
-                        )
-
-                # ------------------------------------------------
-                # Callbacks: on_batch_start
-                # ------------------------------------------------
+        try:
+            experiment._in_callback = True
+            try:
                 for cb in self.callbacks:
-                    cb._on_batch_start(
+                    cb._on_phase_start(
                         experiment=experiment,
                         phase=self,
-                        exec_ctx=ctx,
                         results=results,
                     )
+            finally:
+                experiment._in_callback = False
 
-                yield ctx
+            # Checkpointing: reset and optionally save at phase_start
+            if self._checkpointing is not None:
+                self._checkpointing.reset()
+                self._invoke_checkpointing(
+                    "phase_start",
+                    experiment=experiment,
+                )
 
-                # Get step-wise loss totals
-                step_train = ctx.losses.to_float().trainable
-                step_aux = ctx.losses.to_float().auxiliary
+            # ------------------------------------------------
+            # Iterate over all epochs
+            # ------------------------------------------------
+            for epoch_idx in range(self.n_epochs):
+                # ------------------------------------------------
+                # Progress Bar: batch counter
+                # ------------------------------------------------
+                per_epoch_ptask = ProgressTask(
+                    style="training_loss",
+                    description=f"Epoch {epoch_idx}",
+                    total=step_cnt,
+                    enabled=show_training_progress,
+                    persist=(persist_epoch_progress and persist_progress)
+                    or ((epoch_idx == self.n_epochs - 1) and persist_progress),
+                )
 
-                # Update running sums (per-epoch)
-                running_train += step_train
-                running_aux += step_aux
+                # Determine scheduling from self.batch_schedule
+                step_iter = self._iter_schedule(
+                    policy=self.batch_schedule,
+                    sampler_lengths=sampler_lens,
+                )
 
-                # Compute running averages
-                avg_train = running_train / (step_idx + 1)
-                avg_aux = running_aux / (step_idx + 1)
+                # Variables for loss tracking
+                running_train = 0
+                running_aux = 0
 
-                # Log raw train_loss to MetricStore (batch-level)
-                if results is not None:
-                    results._metrics.log(
-                        name="train_loss",
-                        value=step_train,
+                # ------------------------------------------------
+                # Iterate over all batches in this epoch
+                # ------------------------------------------------
+                for step_idx, step_plan in enumerate(step_iter):
+                    # step_plan: {sampler_id: batch_idx_for_that_sampler}
+                    inputs: dict[tuple[str, FeatureSetReference], BatchView] = {}
+
+                    # For each sampler, decide whether it's active this step and select/mask
+                    for sid, se in enumerate(sampler_execs):
+                        for binding in se.bindings:
+                            # Get list of batches for a given binding
+                            all_bvs = se.sampled.get_stream(name=binding.stream)
+                            key = (binding.node_id, binding.upstream_ref)
+
+                            # Use real batch view, if this sampler is active in this step
+                            if sid in step_plan:
+                                bv = all_bvs[step_plan[sid]]
+                                inputs[key] = bv
+                            # Otherwise, use a fully masked batch
+                            else:
+                                bv = all_bvs[0]
+                                inputs[key] = self._masked_batch_like(bv=bv)
+
+                    ctx = ExecutionContext(
+                        phase_label=self.label,
+                        epoch_idx=epoch_idx,
+                        batch_idx=step_idx,
+                        inputs=inputs,
+                    )
+
+                    # ------------------------------------------------
+                    # Callbacks: on_epoch_start
+                    # ------------------------------------------------
+                    if step_idx == 0:
+                        experiment._in_callback = True
+                        try:
+                            for cb in self.callbacks:
+                                cb._on_epoch_start(
+                                    experiment=experiment,
+                                    phase=self,
+                                    exec_ctx=ctx,
+                                    results=results,
+                                )
+                        finally:
+                            experiment._in_callback = False
+                        self._invoke_checkpointing(
+                            "epoch_start",
+                            experiment=experiment,
+                            epoch_idx=epoch_idx,
+                        )
+
+                    # ------------------------------------------------
+                    # Callbacks: on_batch_start
+                    # ------------------------------------------------
+                    experiment._in_callback = True
+                    try:
+                        for cb in self.callbacks:
+                            cb._on_batch_start(
+                                experiment=experiment,
+                                phase=self,
+                                exec_ctx=ctx,
+                                results=results,
+                            )
+                    finally:
+                        experiment._in_callback = False
+                    self._invoke_checkpointing(
+                        "batch_start",
+                        experiment=experiment,
                         epoch_idx=epoch_idx,
                         batch_idx=step_idx,
                     )
 
-                # ------------------------------------------------
-                # Callbacks: on_batch_end
-                # ------------------------------------------------
-                for cb in self.callbacks:
-                    cb._on_batch_end(
-                        experiment=experiment,
-                        phase=self,
-                        exec_ctx=ctx,
-                        results=results,
-                    )
+                    yield ctx
+                    last_ctx = ctx
 
-                # ------------------------------------------------
-                # Callbacks: on_epoch_end
-                # ------------------------------------------------
-                if step_idx == step_cnt - 1:
-                    for cb in self.callbacks:
-                        cb._on_epoch_end(
-                            experiment=experiment,
-                            phase=self,
-                            exec_ctx=ctx,
-                            results=results,
+                    # Get step-wise loss totals
+                    step_train = ctx.losses.to_float().trainable
+                    step_aux = ctx.losses.to_float().auxiliary
+
+                    # Update running sums (per-epoch)
+                    running_train += step_train
+                    running_aux += step_aux
+
+                    # Compute running averages
+                    avg_train = running_train / (step_idx + 1)
+                    avg_aux = running_aux / (step_idx + 1)
+
+                    # Log raw train_loss to MetricStore (batch-level)
+                    if results is not None:
+                        results._metrics.log(
+                            name="train_loss",
+                            value=step_train,
+                            epoch_idx=epoch_idx,
+                            batch_idx=step_idx,
                         )
 
-                # Increment batch progress bar
-                tick_fields = {
-                    "loss_total": avg_train + avg_aux,
-                    "loss_train": avg_train,
-                    "loss_aux": avg_aux,
-                }
-
-                # Show val_loss on final step if validation ran this epoch
-                if (
-                    (step_idx == step_cnt - 1)
-                    and (results is not None)
-                    and (val_loss_metric in results.metric_names())
-                ):
-                    # Filter all val losses to those executed this epoch
-                    val_entries = results.metrics().select(
-                        name=val_loss_metric,
-                        epoch=epoch_idx,
+                    # ------------------------------------------------
+                    # Callbacks: on_batch_end
+                    # ------------------------------------------------
+                    experiment._in_callback = True
+                    try:
+                        for cb in self.callbacks:
+                            cb._on_batch_end(
+                                experiment=experiment,
+                                phase=self,
+                                exec_ctx=ctx,
+                                results=results,
+                            )
+                    finally:
+                        experiment._in_callback = False
+                    self._invoke_checkpointing(
+                        "batch_end",
+                        experiment=experiment,
+                        epoch_idx=epoch_idx,
+                        batch_idx=step_idx,
                     )
-                    # Take only the most recent
-                    val_entries.sort(
-                        key=lambda x: (x.batch_idx if x.batch_idx is not None else 0),
+
+                    # ------------------------------------------------
+                    # Callbacks: on_epoch_end
+                    # ------------------------------------------------
+                    if step_idx == step_cnt - 1:
+                        experiment._in_callback = True
+                        try:
+                            for cb in self.callbacks:
+                                cb._on_epoch_end(
+                                    experiment=experiment,
+                                    phase=self,
+                                    exec_ctx=ctx,
+                                    results=results,
+                                )
+                        finally:
+                            experiment._in_callback = False
+                        self._invoke_checkpointing(
+                            "epoch_end",
+                            experiment=experiment,
+                            epoch_idx=epoch_idx,
+                            batch_idx=step_idx,
+                        )
+
+                    # Increment batch progress bar
+                    tick_fields = {
+                        "loss_total": avg_train + avg_aux,
+                        "loss_train": avg_train,
+                        "loss_aux": avg_aux,
+                    }
+
+                    # Show val_loss on final step if validation ran this epoch
+                    if (
+                        (step_idx == step_cnt - 1)
+                        and (results is not None)
+                        and (val_loss_metric in results.metric_names())
+                    ):
+                        # Filter all val losses to those executed this epoch
+                        val_entries = results.metrics().select(
+                            name=val_loss_metric,
+                            epoch=epoch_idx,
+                        )
+                        # Take only the most recent
+                        val_entries.sort(
+                            key=lambda x: (
+                                x.batch_idx if x.batch_idx is not None else 0
+                            ),
+                        )
+                        if len(val_entries) > 0:
+                            tick_fields["val_loss"] = val_entries[-1].value
+
+                    per_epoch_ptask.tick(n=1, **tick_fields)
+
+                # Log epoch-level train_loss
+                if results is not None:
+                    results._metrics.log(
+                        name="train_loss",
+                        value=avg_train,
+                        epoch_idx=epoch_idx,
                     )
-                    if len(val_entries) > 0:
-                        tick_fields["val_loss"] = val_entries[-1].value
 
-                per_epoch_ptask.tick(n=1, **tick_fields)
+                per_epoch_ptask.finish()
+                epoch_ptask.tick(n=1)
 
-            # Log epoch-level train_loss
-            if results is not None:
-                results._metrics.log(
-                    name="train_loss",
-                    value=avg_train,
-                    epoch_idx=epoch_idx,
-                )
+                # Check stop flag (set by callbacks like EarlyStopping)
+                if self._stop_requested:
+                    msg = f"Training stopped at epoch {epoch_idx}."
+                    logger.debug(msg=msg, stacklevel=2)
+                    break
 
-            per_epoch_ptask.finish()
-            epoch_ptask.tick(n=1)
-
-            # Check stop flag (set by callbacks like EarlyStopping)
-            if self._stop_requested:
-                msg = f"Training stopped at epoch {epoch_idx}."
-                logger.info(msg=msg, stacklevel=2)
-                break
-
-        # ------------------------------------------------
-        # Callbacks: on_phase_end
-        # ------------------------------------------------
-        exp_ctx = ExperimentContext.get_active()
-        for cb in self.callbacks:
-            cb._on_phase_end(
+            # ------------------------------------------------
+            # Callbacks: on_phase_end
+            # ------------------------------------------------
+            exp_ctx = ExperimentContext.get_active()
+            experiment._in_callback = True
+            try:
+                for cb in self.callbacks:
+                    cb._on_phase_end(
+                        experiment=experiment,
+                        phase=self,
+                        results=results,
+                    )
+            finally:
+                experiment._in_callback = False
+            self._invoke_checkpointing(
+                "phase_end",
                 experiment=experiment,
-                phase=self,
-                results=results,
+                epoch_idx=epoch_idx,
             )
+
+        except BaseException as exc:
+            experiment._in_callback = True
+            try:
+                for cb in self.callbacks:
+                    cb._on_exception(
+                        experiment=experiment,
+                        phase=self,
+                        exec_ctx=last_ctx,
+                        exception=exc,
+                        results=results,
+                    )
+            finally:
+                experiment._in_callback = False
+            raise
 
         # Finish progress bar
         epoch_ptask.finish()
@@ -865,6 +1061,11 @@ class TrainPhase(ExperimentPhase):
                 "phase_type": "TrainPhase",
                 "n_epochs": self.n_epochs,
                 "batch_schedule": self.batch_schedule.value,
+                "checkpointing": (
+                    self._checkpointing.get_config()
+                    if self._checkpointing is not None
+                    else None
+                ),
             },
         )
         return cfg
@@ -891,9 +1092,18 @@ class TrainPhase(ExperimentPhase):
             )
             raise ValueError(msg)
 
+        # Reconstruct losses
         losses = None
         if config["losses"] is not None:
             losses = [AppliedLoss.from_config(cfg) for cfg in config["losses"]]
+
+        # Reconstruct checkpointing if present
+        ckpt_cfg = config.get("checkpointing")
+        checkpointing = (
+            Checkpointing.from_config(ckpt_cfg) if ckpt_cfg is not None else None
+        )
+
+        # Build TrainPhase
         obj = cls(
             label=config["label"],
             input_sources=[
@@ -904,8 +1114,6 @@ class TrainPhase(ExperimentPhase):
             active_nodes=config["active_nodes"],
             batch_schedule=config["batch_schedule"],
             callbacks=[Callback.from_config(cfg) for cfg in config["callbacks"]],
+            checkpointing=checkpointing,
         )
         return obj
-
-
-# TODO: add on_exception callback hook

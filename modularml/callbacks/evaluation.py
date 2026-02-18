@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 from modularml.callbacks.eval_loss_metric import EvalLossMetric
 from modularml.core.experiment.callbacks.callback import Callback, CallbackResult
 from modularml.core.experiment.phases.eval_phase import EvalPhase
+from modularml.utils.logging.warnings import warn
 
 if TYPE_CHECKING:
     from modularml.callbacks.metric import EvaluationMetric
@@ -73,7 +74,15 @@ class Evaluation(Callback):
         super().__init__(label=label or eval_phase.label)
         if every_n_epochs < 1:
             raise ValueError("every_n_epochs must be >= 1")
+        # Ensure eval phase has no callbacks
         self.eval_phase = eval_phase
+        if self.eval_phase.callbacks:
+            msg = (
+                "The EvalPhase provided to Evaluation has its own callbacks. Nested"
+                "callbacks are not currently supported, and will not be executed."
+            )
+            warn(msg)
+
         self.every_n_epochs = every_n_epochs
         self.run_on_start = run_on_start
         self._metrics: list[EvaluationMetric] = list(metrics or [])

@@ -372,12 +372,14 @@ class LoadContext:
         *,
         allow_packaged_code: bool,
         overwrite_collision: bool = False,
+        extras: dict[str, Any] | None = None,
     ):
         self.artifact_path = artifact_path
         self.serializer = serializer
         self.allow_packaged_code = allow_packaged_code
         self.overwrite_collision = overwrite_collision
         self.file_mapping: dict[str, str | None] | None = None
+        self.extras: dict[str, Any] = extras or {}
 
     def load_from_dir(
         self,
@@ -578,6 +580,7 @@ class Serializer:
         allow_packaged_code: bool = False,
         provided_class: type | None = None,
         overwrite: bool = False,
+        extras: dict[str, Any] | None = None,
     ) -> Any:
         """
         Load an artifact from disk and reconstruct the serialized object.
@@ -587,8 +590,6 @@ class Serializer:
                 Artifact directory.
             allow_packaged_code (bool):
                 Whether bundled code execution is allowed.
-            packaged_code_loader (Any):
-                Callable used for PACKAGED fallback loading.
             provided_class (type | None):
                 Required when policy == STATE_ONLY.
             overwrite (bool):
@@ -596,6 +597,9 @@ class Serializer:
                 If False, a new node_id is assigned to the reloaded object. Otherwise,
                 the existing node is removed from the ExperimentContext registry.
                 Defaults to False.
+            extras (dict[str, Any] | None):
+                Optional extra parameters forwarded to handlers via
+                `LoadContext.extras`. Defaults to None.
 
         Returns:
             Any: Reconstructed object.
@@ -615,6 +619,7 @@ class Serializer:
                 serializer=self,
                 allow_packaged_code=allow_packaged_code,
                 overwrite_collision=overwrite,
+                extras=extras,
             )
 
             return ctx.load_from_dir(

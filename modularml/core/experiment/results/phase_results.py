@@ -476,7 +476,7 @@ class PhaseResults:
         upstream_refs = find_upstream_featuresets(node=graph_node)
         exp_ctx = ExperimentContext.get_active()
 
-        views: list[FeatureSetView] = []
+        views: dict[str, FeatureSetView] = {}
         uuid_list = list(all_uuids)
         for ref in upstream_refs:
             fs: FeatureSet = exp_ctx.get_node(

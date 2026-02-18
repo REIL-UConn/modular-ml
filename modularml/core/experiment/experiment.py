@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, overload
 
+from modularml.core.experiment.callbacks.experiment_callback import (
+    ExperimentCallback,
+)
+from modularml.core.experiment.checkpointing import (
+    EXPERIMENT_HOOKS,
+    EXPERIMENT_NAME_TEMPLATE,
+    EXPERIMENT_PLACEHOLDERS,
+    Checkpointing,
+)
 from modularml.core.experiment.experiment_context import (
     ExperimentContext,
     RegistrationPolicy,
@@ -23,10 +33,14 @@ from modularml.core.experiment.results.group_results import PhaseGroupResults
 from modularml.core.experiment.results.train_results import TrainResults
 from modularml.core.io.checkpoint import Checkpoint
 from modularml.utils.environment.environment import IN_NOTEBOOK
+from modularml.utils.logging.logger import get_logger
+from modularml.utils.logging.warnings import warn
 
 if TYPE_CHECKING:
     from modularml.core.experiment.results.phase_results import PhaseResults
     from modularml.core.topology.model_graph import ModelGraph
+
+logger = get_logger(name="Experiment")
 
 
 class Experiment:
@@ -35,6 +49,8 @@ class Experiment:
         label: str,
         registration_policy: RegistrationPolicy | str | None = None,
         ctx: ExperimentContext | None = None,
+        checkpointing: Checkpointing | None = None,
+        callbacks: list[ExperimentCallback] | None = None,
     ):
         """
         Constructs a new Experiment.
@@ -50,6 +66,18 @@ class Experiment:
             ctx (ExperimentContext, optional):
                 Context to associate with this Experiment. If None, a new context
                 is created and activated.
+
+            checkpointing (Checkpointing | None, optional):
+                An optional Checkpointing configuration for automatically saving
+                the full experiment state to disk at execution lifecycle hooks
+                (e.g. `phase_end`, `group_end`). Must use `mode="disk"`
+                and `save_on` hooks from: `phase_start`, `phase_end`,
+                `group_start`, `group_end`. Defaults to None.
+
+            callbacks (list[ExperimentCallback] | None, optional):
+                An optional list of experiment-level callbacks to run during
+                `Experiment.run()` execution at phase/group boundaries.
+                Defaults to None.
 
         """
         self.label = label
@@ -76,6 +104,20 @@ class Experiment:
         self._checkpoints: dict[str, Path] = {}
         self._checkpoint_dir: Path | None = None
 
+        # Experiment-level checkpointing
+        self._exp_checkpointing: Checkpointing | None = None
+        self.set_checkpointing(checkpointing)
+
+        # Experiment-level callbacks
+        self._exp_callbacks: list[ExperimentCallback] = list(callbacks or [])
+        self._exp_callbacks.sort(key=lambda cb: cb._exec_order)
+
+        # Bool flags for guarding
+        # True while executing inside a callback
+        self._in_callback: bool = False
+        # True disables all checkpointin (experiment-level and TrainPhase-level)
+        self._checkpointing_disabled: bool = False
+
     # ================================================
     # Constructors
     # ================================================
@@ -84,6 +126,8 @@ class Experiment:
         cls,
         label: str,
         registration_policy: RegistrationPolicy | str | None = None,
+        checkpointing: Checkpointing | None = None,
+        callbacks: list[ExperimentCallback] | None = None,
     ) -> Experiment:
         """
         Construct an Experiment using the active ExperimentContext.
@@ -100,6 +144,18 @@ class Experiment:
                 Default registration policy for nodes created after this Experiment
                 is constructed.
 
+            checkpointing (Checkpointing | None, optional):
+                An optional Checkpointing configuration for automatically saving
+                the full experiment state to disk at execution lifecycle hooks
+                (e.g. `phase_end`, `group_end`). Must use `mode="disk"`
+                and `save_on` hooks from: `phase_start`, `phase_end`,
+                `group_start`, `group_end`. Defaults to None.
+
+            callbacks (list[ExperimentCallback] | None, optional):
+                An optional list of experiment-level callbacks to run during
+                `Experiment.run()` execution at phase/group boundaries.
+                Defaults to None.
+
         Returns:
             Experiment: A new Experiment utilizing the active context.
 
@@ -113,6 +169,8 @@ class Experiment:
             label=label,
             registration_policy=registration_policy,
             ctx=active_ctx,
+            checkpointing=checkpointing,
+            callbacks=callbacks,
         )
 
     # ================================================
@@ -120,11 +178,12 @@ class Experiment:
     # ================================================
     @property
     def ctx(self) -> ExperimentContext:
+        """Gets the context associated with this Experiment."""
         return self._ctx
 
     @property
     def model_graph(self) -> ModelGraph | None:
-        """The ModelGraph defined in this Experiment."""
+        """Gets the ModelGraph associated with this Experiment."""
         return self._ctx.model_graph
 
     @property
@@ -142,9 +201,120 @@ class Experiment:
         """Most recent ExperimentRun."""
         return self._history[-1] if self._history else None
 
+    @property
+    def checkpointing(self) -> Checkpointing | None:
+        """The experiment-level Checkpointing configuration, or None."""
+        return self._exp_checkpointing
+
+    @property
+    def available_checkpoints(self) -> dict[str, Path]:
+        """All available disk checkpoints (from both TrainPhase and Experiment)."""
+        return dict(self._checkpoints)
+
+    @property
+    def exp_callbacks(self) -> list[ExperimentCallback]:
+        """Experiment-level callbacks in execution order."""
+        return list(self._exp_callbacks)
+
+    # ================================================
+    # Experiment Callback Management
+    # ================================================
+    def add_callback(self, callback: ExperimentCallback) -> None:
+        """
+        Register an experiment-level callback.
+
+        Args:
+            callback (ExperimentCallback):
+                The callback to add.
+
+        """
+        if not isinstance(callback, ExperimentCallback):
+            msg = f"Expected ExperimentCallback, got {type(callback)}."
+            raise TypeError(msg)
+        self._exp_callbacks.append(callback)
+        self._exp_callbacks.sort(key=lambda cb: cb._exec_order)
+
+    @contextmanager
+    def disable_checkpointing(self):
+        """
+        Context manager that disables all checkpointing while active.
+
+        Description:
+            Suppresses both experiment-level checkpointing and any
+            TrainPhase-level checkpointing that occurs within the block.
+            The previous checkpointing configuration is restored on exit,
+            even if an exception is raised.
+
+        Examples:
+        ```python
+            with experiment.disable_checkpointing():
+                experiment.run_phase(training_phase)
+        ```
+
+        """
+        prev = self._checkpointing_disabled
+        self._checkpointing_disabled = True
+        try:
+            yield
+        finally:
+            self._checkpointing_disabled = prev
+
     # ================================================
     # Checkpointing
     # ================================================
+    def set_checkpointing(self, checkpointing: Checkpointing | None) -> None:
+        """
+        Attach or replace the Checkpointing configuration for this experiment.
+
+        Validates that the mode is `"disk"`, that all `save_on` hooks are
+        valid for an Experiment, and that the `name_template` only uses
+        allowed placeholders. If no `name_template` is set, the experiment
+        default is applied.
+
+        Args:
+            checkpointing (Checkpointing | None):
+                The Checkpointing configuration, or None to disable.
+
+        """
+        if checkpointing is None:
+            self._exp_checkpointing = None
+            return
+
+        # Experiment only supports disk mode
+        if checkpointing.mode != "disk":
+            msg = (
+                "Experiment-level checkpointing only supports mode='disk'. "
+                "In-memory checkpointing of the full experiment state is "
+                "not supported due to memory overhead."
+            )
+            raise ValueError(msg)
+
+        # Validate hooks
+        invalid = set(checkpointing.save_on) - EXPERIMENT_HOOKS
+        if invalid:
+            msg = (
+                f"Invalid save_on hooks for Experiment: {sorted(invalid)}. "
+                f"Valid hooks: {sorted(EXPERIMENT_HOOKS)}."
+            )
+            raise ValueError(msg)
+
+        # Apply default template if not set
+        if checkpointing.name_template is None:
+            checkpointing.name_template = EXPERIMENT_NAME_TEMPLATE
+
+        # Validate placeholders
+        Checkpointing.validate_placeholders(
+            checkpointing.name_template,
+            EXPERIMENT_PLACEHOLDERS,
+            context_name="Experiment",
+        )
+
+        self._exp_checkpointing = checkpointing
+
+        # Eagerly set experiment checkpoint directory from the config
+        if checkpointing.directory is not None and self._checkpoint_dir is None:
+            self.set_checkpoint_dir(checkpointing.directory, create=True)
+
     def set_checkpoint_dir(self, path: Path, *, create: bool = True):
         """
         Set directory used for storing experiment checkpoints.
@@ -162,6 +332,18 @@ class Experiment:
         if not path.is_dir():
             msg = f"No directory exists at '{path!r}'."
             raise FileExistsError(msg)
+
+        # Warn if directory already contains checkpoint files
+        existing = list(path.glob("*.ckpt.mml"))
+        if existing:
+            warn(
+                f"Checkpoint directory '{path}' already contains "
+                f"{len(existing)} checkpoint file(s). Existing files will "
+                f"only be overwritten if an exact name match occurs and "
+                f"overwrite=True.",
+                stacklevel=2,
+            )
+
         self._checkpoint_dir = path
 
     def save_checkpoint(
@@ -172,7 +354,10 @@ class Experiment:
         meta: dict[str, Any] | None = None,
     ) -> Path:
         """
-        Save ModelGraph state to a named checkpoint.
+        Save full experiment state to a Checkpoint file.
+
+        Creates a :class:`Checkpoint` container with the full experiment
+        state and serializes it to disk.
 
         Args:
             name (str):
@@ -182,59 +367,132 @@ class Experiment:
                 Defaults to False.
             meta (dict[str, Any], optional):
                 Additional meta data to attach to the checkpoint.
-                Must be pickle-able.
 
         Returns:
-            Path: The saved checkpoint path.
+            Path: The saved checkpoint file path.
 
         """
-        from modularml.core.io.serializer import _enforce_file_suffix
+        from modularml.core.io.serialization_policy import SerializationPolicy
+        from modularml.core.io.serializer import serializer
 
         if self._checkpoint_dir is None:
-            msg = "Checkpoint directory not set. Call `set_checkpoint_dir()`."
+            msg = (
+                "Checkpoint directory not set. Call `set_checkpoint_dir()` "
+                "or set `directory` on the Checkpointing config."
+            )
             raise RuntimeError(msg)
 
-        # Check checkpoint name
-        if (name in self._checkpoints) and (not overwrite):
+        if name in self._checkpoints and not overwrite:
             msg = f"Checkpoint '{name}' already exists."
             raise ValueError(msg)
 
-        # Check checkpoint path
-        filepath = self._checkpoint_dir / f"{name}"
-        filepath = _enforce_file_suffix(path=filepath, cls=Checkpoint)
-        if filepath.exists() and not overwrite:
-            msg = f"Checkpoint already exists at path: '{filepath!s}'."
-            raise FileExistsError(msg)
+        filepath = self._checkpoint_dir / name
 
-        # Save checkpoint
-        save_path = self.model_graph.save_checkpoint(
-            filepath=filepath,
+        ckpt = Checkpoint()
+        ckpt.add_entry(key="experiment", obj=self)
+
+        if meta is not None:
+            for k, v in meta.items():
+                ckpt.add_meta(k, v)
+
+        save_path = serializer.save(
+            ckpt,
+            filepath,
+            policy=SerializationPolicy.BUILTIN,
             overwrite=overwrite,
-            meta=meta,
         )
+        self._checkpoints[name] = Path(save_path)
+        return Path(save_path)
 
-        # Record checkpoint path
-        self._checkpoints[name] = save_path
-        return save_path
-
-    def restore_checkpoint(self, name: str):
+    def restore_checkpoint(self, name_or_path: str | Path) -> None:
         """
-        Restores ModelGraph state to a named checkpoint file.
+        Restore state from a previously saved checkpoint.
+
+        Description:
+            Accepts either a checkpoint name (a key from
+            :attr:`available_checkpoints`) or an explicit file path. The
+            checkpoint type is detected automatically:
+
+            - **Experiment checkpoint** (contains an ``"experiment"`` entry):
+              restores the full experiment state via :meth:`set_state`.
+            - **ModelGraph checkpoint** (contains a ``"modelgraph"`` entry):
+              restores the model graph state via
+              :meth:`ModelGraph.restore_checkpoint`.
 
         Args:
-            name (str):
-                Name of checkpoint to restore to.
+            name_or_path (str | Path):
+                Either a checkpoint name registered in
+                :attr:`available_checkpoints`, or the file path to a
+                ``.ckpt.mml`` checkpoint file.
+
+        Raises:
+            ValueError: If ``name_or_path`` is not a registered name and
+                does not point to an existing file.
+            TypeError: If the loaded checkpoint contains neither an
+                ``"experiment"`` nor a ``"modelgraph"`` entry.
 
         """
-        if name not in self._checkpoints:
+        from modularml.core.io.serializer import _enforce_file_suffix, serializer
+
+        # Resolve to filepath
+        name_or_path_str = str(name_or_path)
+        if name_or_path_str in self._checkpoints:
+            filepath = self._checkpoints[name_or_path_str]
+        else:
+            filepath = Path(name_or_path)
+
+        filepath = Path(filepath)
+        if filepath.suffix == "":
+            filepath = _enforce_file_suffix(path=filepath, cls=Checkpoint)
+
+        if not filepath.exists():
             msg = (
-                f"No checkpoint named '{name}' exists. "
-                f"Available: {list(self._checkpoints.keys())}."
+                f"No checkpoint named '{name_or_path}' exists and no file "
+                f"found at '{filepath}'. "
+                f"Available checkpoints: {list(self._checkpoints.keys())}."
             )
             raise ValueError(msg)
 
-        # Restore model graph state
-        self.model_graph.restore_checkpoint(self._checkpoints[name])
+        ckpt: Checkpoint = serializer.load(filepath)
+
+        # Auto-detect checkpoint type and restore
+        if "experiment" in ckpt.entries:
+            self.set_state(ckpt.entries["experiment"].entry_state)
+        elif "modelgraph" in ckpt.entries:
+            self.model_graph.restore_checkpoint(filepath)
+        else:
+            msg = (
+                f"Checkpoint at '{filepath}' does not contain a recognized "
+                f"entry. Expected 'experiment' or 'modelgraph' key, "
+                f"found: {list(ckpt.entries.keys())}."
+            )
+            raise TypeError(msg)
+
+    def _save_experiment_checkpoint(self, label: str) -> None:
+        """
+        Save the full experiment to disk using the checkpointing config.
+
+        Args:
+            label (str):
+                The phase or group label to use as the checkpoint key.
+
+        """
+        ckpt = self._exp_checkpointing
+        name = ckpt.format_name(label=label)
+
+        # Ensure checkpoint directory
+        if self._checkpoint_dir is None:
+            if ckpt.directory is not None:
+                self.set_checkpoint_dir(ckpt.directory, create=True)
+            else:
+                msg = "Cannot save experiment checkpoint: no checkpoint directory set."
+                raise RuntimeError(msg)
+
+        save_path = self.save_checkpoint(
+            name=name,
+            overwrite=ckpt.overwrite,
+        )
+        ckpt.record_disk(key=label, path=save_path)
 
     # ================================================
     # Execution
@@ -369,9 +627,52 @@ class Experiment:
         **This will mutate the experiment state, but history will not be
         recorded.**
         """
-        phase_start = datetime.now()
+        # ------------------------------------------------
+        # Propagate checkpoint directory to TrainPhase if needed
+        # ------------------------------------------------
+        if (
+            isinstance(phase, TrainPhase)
+            and phase.checkpointing is not None
+            and phase.checkpointing.mode == "disk"
+            and phase.checkpointing.directory is None
+        ):
+            exp_dir = self._checkpoint_dir
+            if exp_dir is None and self._exp_checkpointing is not None:
+                exp_dir = self._exp_checkpointing.directory
+            if exp_dir is not None:
+                phase_dir = exp_dir / phase.label
+                phase_dir.mkdir(parents=True, exist_ok=True)
+                phase.checkpointing._directory = phase_dir
 
-        # Run phase (modifies experiment state but does not update history)
+        # Skip callbacks and checkpointing when inside a callback
+        run_hooks = not self._in_callback
+        run_ckpt = run_hooks and not self._checkpointing_disabled
+
+        # ------------------------------------------------
+        # on_phase_start
+        # - Run experiment callback
+        # - Run experiment checkpointing
+        # ------------------------------------------------
+        if run_hooks:
+            self._in_callback = True
+            try:
+                for cb in self._exp_callbacks:
+                    cb._on_phase_start(experiment=self, phase=phase)
+            finally:
+                self._in_callback = False
+
+        if (
+            run_ckpt
+            and (self._exp_checkpointing is not None)
+            and (self._exp_checkpointing.should_save("phase_start"))
+        ):
+            self._save_experiment_checkpoint(label=phase.label)
+
+        # ------------------------------------------------
+        # run phase
+        # - modifies experiment state but does not update history
+        # ------------------------------------------------
+        phase_start = datetime.now()
         if isinstance(phase, TrainPhase):
             train_keys = {
                 "show_sampler_progress",
@@ -403,6 +704,30 @@ class Experiment:
             status="completed",
         )
 
+        # ------------------------------------------------
+        # on_phase_end
+        # - Run experiment callback
+        # - Run experiment checkpointing
+        # ------------------------------------------------
+        if run_hooks:
+            self._in_callback = True
+            try:
+                for cb in self._exp_callbacks:
+                    cb.on_phase_end(
+                        experiment=self,
+                        phase=phase,
+                        results=phase_res,
+                    )
+            finally:
+                self._in_callback = False
+
+        if (
+            run_ckpt
+            and (self._exp_checkpointing is not None)
+            and self._exp_checkpointing.should_save("phase_end")
+        ):
+            self._save_experiment_checkpoint(label=phase.label)
+
         return phase_res, phase_meta
 
     def _execute_group_with_meta(
@@ -421,15 +746,41 @@ class Experiment:
             msg = f"Expected type of PhaseGroup. Received: {type(group)}."
             raise TypeError(msg)
 
-        # Construct result containers
+        # Skip callbacks and checkpointing when inside a callback
+        run_hooks = not self._in_callback
+        run_ckpt = run_hooks and not self._checkpointing_disabled
+
+        # ------------------------------------------------
+        # on_group_start
+        # - Run experiment callback
+        # - Run experiment checkpointing
+        # ------------------------------------------------
+        if run_hooks:
+            self._in_callback = True
+            try:
+                for cb in self._exp_callbacks:
+                    cb.on_group_start(experiment=self, group=group)
+            finally:
+                self._in_callback = False
+
+        if (
+            run_ckpt
+            and (self._exp_checkpointing is not None)
+            and self._exp_checkpointing.should_save("group_start")
+        ):
+            self._save_experiment_checkpoint(label=group.label)
+
+        # ------------------------------------------------
+        # run phase group
+        # - construct result container
+        # - run each phase in order
+        # ------------------------------------------------
         group_results = PhaseGroupResults(label=group.label)
         group_meta = PhaseGroupExecutionMeta(
             label=group.label,
             started_at=datetime.now(),
             ended_at=None,
         )
-
-        # Run all items in group
         for element in group.all:
             if isinstance(element, ExperimentPhase):
                 # Run phase with meta tracking
@@ -464,6 +815,30 @@ class Experiment:
 
         # Update group meta
         group_meta.ended_at = datetime.now()
+
+        # ------------------------------------------------
+        # on_group_end
+        # - Run experiment callback
+        # - Run experiment checkpointing
+        # ------------------------------------------------
+        if run_hooks:
+            self._in_callback = True
+            try:
+                for cb in self._exp_callbacks:
+                    cb.on_group_end(
+                        experiment=self,
+                        group=group,
+                        results=group_results,
+                    )
+            finally:
+                self._in_callback = False
+
+        if (
+            run_ckpt
+            and (self._exp_checkpointing is not None)
+            and self._exp_checkpointing.should_save("group_end")
+        ):
+            self._save_experiment_checkpoint(label=group.label)
 
         return group_results, group_meta
 
@@ -620,7 +995,51 @@ class Experiment:
                 Results of all executed phases.
 
         """
-        return self.run_group(group=self._exec_plan, **kwargs)
+        # ------------------------------------------------
+        # on_experiment_start
+        # - Run experiment callback
+        # - Run experiment checkpointing
+        # ------------------------------------------------
+        for cb in self._exp_callbacks:
+            cb.on_experiment_start(experiment=self)
+        if (
+            self._exp_checkpointing is not None
+        ) and self._exp_checkpointing.should_save("experiment_start"):
+            self._save_experiment_checkpoint(label="START")
+
+        # ------------------------------------------------
+        # run all phases
+        # - callback/checkpointing logic handled internally
+        # ------------------------------------------------
+        try:
+            res = self.run_group(group=self._exec_plan, **kwargs)
+        except BaseException as exc:
+            self._in_callback = True
+            try:
+                for cb in self._exp_callbacks:
+                    cb._on_exception(
+                        experiment=self,
+                        phase=None,
+                        exception=exc,
+                    )
+            finally:
+                self._in_callback = False
+            raise
+
+        # ------------------------------------------------
+        # on_experiment_end
+        # - Run experiment callback
+        # - Run experiment checkpointing
+        # ------------------------------------------------
+        for cb in self._exp_callbacks:
+            cb.on_experiment_end(experiment=self)
+        if (
+            self._exp_checkpointing is not None
+        ) and self._exp_checkpointing.should_save("experiment_end"):
+            self._save_experiment_checkpoint(label="END")
+
+        # Return results
+        return res
 
     # Preview API
     @overload
@@ -669,11 +1088,12 @@ class Experiment:
         # Get initial state
         state = self.get_state()
 
-        # Execute phase
-        res, _ = self._execute_phase_with_meta(
-            phase=phase,
-            **kwargs,
-        )
+        # Execute phase with checkpointing disabled
+        with self.disable_checkpointing():
+            res, _ = self._execute_phase_with_meta(
+                phase=phase,
+                **kwargs,
+            )
 
         # Restore experiment state
         self.set_state(state=state)
@@ -707,11 +1127,12 @@ class Experiment:
         # Get initial state
         state = self.get_state()
 
-        # Execute group
-        res, _ = self._execute_group_with_meta(
-            group=group,
-            **kwargs,
-        )
+        # Execute group with checkpointing disabled
+        with self.disable_checkpointing():
+            res, _ = self._execute_group_with_meta(
+                group=group,
+                **kwargs,
+            )
 
         # Restore experiment state
         self.set_state(state=state)
@@ -807,6 +1228,7 @@ class Experiment:
         cls,
         filepath: Path,
         *,
+        checkpoint_dir: Path | None = None,
         allow_packaged_code: bool = False,
         overwrite: bool = False,
     ) -> Experiment:
@@ -816,6 +1238,11 @@ class Experiment:
         Args:
             filepath (Path):
                 File location of a previously saved Experiment.
+            checkpoint_dir (Path | None, optional):
+                Directory to extract saved checkpoints into. If the
+                serialized experiment contains checkpoint artifacts and
+                this is None, the checkpoints will not be restored and
+                a warning will be emitted. Defaults to None.
             allow_packaged_code : bool
                 Whether bundled code execution is allowed.
             overwrite (bool):
@@ -832,7 +1259,7 @@ class Experiment:
         """
         from modularml.core.io.serializer import _enforce_file_suffix, serializer
 
-        # Append proper sufficx only if no suffix is given
+        # Append proper suffix only if no suffix is given
         if Path(filepath).suffix == "":
             filepath = _enforce_file_suffix(path=filepath, cls=cls)
 
@@ -840,4 +1267,7 @@ class Experiment:
             filepath,
             allow_packaged_code=allow_packaged_code,
             overwrite=overwrite,
+            extras={"checkpoint_dir": checkpoint_dir}
+            if checkpoint_dir is not None
+            else None,
         )

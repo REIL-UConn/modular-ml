@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import pickle
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -77,11 +78,37 @@ class ExperimentHandler(BaseHandler["Experiment"]):
             file_mapping["model_graph"] = str(Path(save_path).relative_to(save_dir))
 
         # ------------------------------------------------
-        # 3. Save experiment-specific runtime state
+        # 3. Copy on-disk checkpoints into the artifact
+        # ------------------------------------------------
+        ckpt_entries: dict[str, str] = {}
+        for ckpt_label, ckpt_src in obj._checkpoints.items():
+            ckpt_path = Path(ckpt_src)
+            if not ckpt_path.exists():
+                continue
+
+            # Destination preserves the label's nested structure
+            # e.g. "training/epoch_0_ckpt" -> checkpoints/training/epoch_0_ckpt.ckpt.mml
+            dest = save_dir / "checkpoints" / ckpt_label
+            # Ensure the suffix is carried over
+            if ckpt_path.suffix != dest.suffix:
+                dest = dest.with_name(dest.name + "".join(ckpt_path.suffixes))
+            dest.parent.mkdir(parents=True, exist_ok=True)
+
+            if ckpt_path.is_dir():
+                shutil.copytree(ckpt_path, dest, dirs_exist_ok=True)
+            else:
+                shutil.copy2(ckpt_path, dest)
+
+            ckpt_entries[ckpt_label] = str(dest.relative_to(save_dir))
+
+        if ckpt_entries:
+            file_mapping["checkpoints"] = ckpt_entries
+
+        # ------------------------------------------------
+        # 4. Save experiment-specific runtime state
         # ------------------------------------------------
         exp_state = {
             "history": obj._history,
-            "checkpoints": obj._checkpoints,
         }
         state_path = save_dir / self.state_rel_path
         with Path.open(state_path, "wb") as f:
@@ -182,6 +209,52 @@ class ExperimentHandler(BaseHandler["Experiment"]):
             ctx=ctx,
         )
         exp._history = exp_state.get("history", [])
-        exp._checkpoints = exp_state.get("checkpoints", {})
+
+        # ------------------------------------------------
+        # 5. Extract checkpoints to user-provided directory
+        # ------------------------------------------------
+        ckpt_entries: dict[str, str] = file_mapping.get("checkpoints", {})
+        checkpoint_dir: Path | None = ctx.extras.get("checkpoint_dir")
+
+        if ckpt_entries and checkpoint_dir is not None:
+            checkpoint_dir = Path(checkpoint_dir)
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            exp.set_checkpoint_dir(checkpoint_dir, create=False)
+
+            for label, rel_path in ckpt_entries.items():
+                src_path = load_dir / rel_path
+                if not src_path.exists():
+                    continue
+
+                # Preserve nested structure from the label
+                dest = checkpoint_dir / label
+                if src_path.suffix != dest.suffix:
+                    dest = dest.with_name(
+                        dest.name + "".join(src_path.suffixes),
+                    )
+                dest.parent.mkdir(parents=True, exist_ok=True)
+
+                if src_path.is_dir():
+                    shutil.copytree(src_path, dest, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(src_path, dest)
+
+                exp._checkpoints[label] = dest
+
+        elif ckpt_entries:
+            from modularml.utils.logging.warnings import warn
+
+            warn(
+                f"The serialized experiment contains "
+                f"{len(ckpt_entries)} checkpoint(s), but no "
+                f"`checkpoint_dir` was provided to "
+                f"`Experiment.load()`. Checkpoints were not "
+                f"restored.",
+                hints=[
+                    "Pass `checkpoint_dir=Path(...)` to "
+                    "`Experiment.load()` to extract checkpoints.",
+                ],
+                stacklevel=2,
+            )
 
         return exp
