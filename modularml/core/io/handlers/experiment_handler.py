@@ -1,3 +1,5 @@
+"""Handler for serializing :class:`Experiment` objects and dependencies."""
+
 from __future__ import annotations
 
 import logging
@@ -19,7 +21,15 @@ logger = get_logger(level=logging.INFO)
 
 
 class ExperimentHandler(BaseHandler["Experiment"]):
-    """Handler for Experiment objects."""
+    """
+    Serialize :class:`Experiment` instances and their dependencies.
+
+    Attributes:
+        object_version (str): Semantic version of emitted artifacts.
+        config_rel_path (str): Relative JSON filename for configs.
+        state_rel_path (str): Relative pickle filename for runtime state.
+
+    """
 
     object_version: ClassVar[str] = "1.0"
 
@@ -37,12 +47,19 @@ class ExperimentHandler(BaseHandler["Experiment"]):
         ctx: SaveContext,  # noqa: ARG002
     ) -> dict[str, Any]:
         """
-        Encode Experiment state into save_dir.
+        Encode :class:`Experiment` dependencies and runtime state.
 
-        FeatureSets and ModelGraph are saved as full sub-artifacts (each
-        with its own `artifact.json`, `config.json`, `state.pkl`).
-        The experiment's own runtime state (history, checkpoints) is
-        pickled separately.
+        Description:
+            FeatureSets, :class:`ModelGraph`, and checkpoints are saved as nested
+            artifacts alongside pickled runtime metadata.
+
+        Args:
+            obj (Experiment): Experiment instance being serialized.
+            save_dir (Path): Destination directory for artifact content.
+            ctx (SaveContext): Active :class:`SaveContext`.
+
+        Returns:
+            dict[str, Any]: Mapping of logical artifact keys to file locations.
 
         """
         save_dir = Path(save_dir)
@@ -129,11 +146,21 @@ class ExperimentHandler(BaseHandler["Experiment"]):
         ctx: LoadContext,
     ) -> Experiment:
         """
-        Decode an Experiment from a saved artifact directory.
+        Rebuild an :class:`Experiment` and its dependencies from disk.
 
-        The active `ExperimentContext` must be clean (no existing
-        Experiment or ModelGraph). FeatureSets and ModelGraph are loaded
-        first so that the execution plan can reference registered nodes.
+        The active :class:`~modularml.core.experiment.experiment_context.ExperimentContext`
+        must not already contain an :class:`Experiment` or :class:`ModelGraph`.
+
+        Args:
+            cls (type[Experiment]): Experiment class to reconstruct.
+            load_dir (Path): Directory containing the saved artifact.
+            ctx (LoadContext): Active :class:`LoadContext`.
+
+        Returns:
+            Experiment: Reconstructed experiment bound to the active context.
+
+        Raises:
+            RuntimeError: If the active context already contains conflicting artifacts.
 
         """
         from modularml.core.experiment.experiment_context import ExperimentContext

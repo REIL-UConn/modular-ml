@@ -1,3 +1,5 @@
+"""Handler for serializing :class:`Checkpoint` objects."""
+
 from __future__ import annotations
 
 import logging
@@ -23,7 +25,15 @@ logger = get_logger(level=logging.INFO)
 
 
 class CheckpointHandler(BaseHandler[Checkpoint]):
-    """Handles serialization of Checkpoint objects."""
+    """
+    Serialize :class:`Checkpoint` objects and their entries.
+
+    Attributes:
+        object_version (str): Semantic version of emitted artifacts.
+        config_rel_path (str): Relative JSON filename for configs.
+        state_rel_path (str): Relative JSON filename for entry metadata.
+
+    """
 
     object_version: ClassVar[str] = "1.0"
 
@@ -41,18 +51,15 @@ class CheckpointHandler(BaseHandler[Checkpoint]):
         ctx: SaveContext,
     ) -> dict[str, str]:
         """
-        Encodes Checkpoint data.
+        Encode checkpoint metadata and entry state.
 
         Args:
-            obj (Checkpoint):
-                Object to encode state for.
-            save_dir (Path):
-                Directory to write encodings to.
-            ctx (SaveContext, optional):
-                Additional serialization context.
+            obj (Checkpoint): Checkpoint instance being serialized.
+            save_dir (Path): Destination directory for artifact content.
+            ctx (SaveContext): Active :class:`SaveContext`.
 
         Returns:
-            dict[str, str]: File mapping of encoded data.
+            dict[str, str]: Mapping of logical artifact keys to file locations.
 
         """
         save_dir = Path(save_dir)
@@ -113,18 +120,18 @@ class CheckpointHandler(BaseHandler[Checkpoint]):
         ctx: LoadContext,
     ) -> Checkpoint:
         """
-        Decodes a Checkpoint from a saved artifact.
+        Rebuild a :class:`Checkpoint` from serialized files.
 
         Args:
-            cls (Checkpoint):
-                Load config for class.
-            load_dir (Path):
-                Directory to decode from.
-            ctx (LoadContext, optional):
-                Additional de-serialization context.
+            cls (Checkpoint): Checkpoint class used for re-instantiation.
+            load_dir (Path): Directory containing the saved artifact.
+            ctx (LoadContext): Active :class:`LoadContext`.
 
         Returns:
-            Checkpoint: The re-instantiated checkpoint.
+            Checkpoint: Reconstructed checkpoint metadata and entries.
+
+        Raises:
+            FileNotFoundError: If expected metadata files are missing.
 
         """
         load_dir = Path(load_dir)

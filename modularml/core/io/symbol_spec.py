@@ -1,3 +1,5 @@
+"""Symbol specification data structure for referencing classes/functions."""
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -9,14 +11,23 @@ from modularml.core.io.serialization_policy import SerializationPolicy, normaliz
 @dataclass(frozen=True)
 class SymbolSpec:
     """
-    Serializable specification describing how to identify and resolve a Python symbol (class or function).
+    Serializable specification describing how to identify and resolve a Python symbol.
 
-    It defines how a class/function is identified at save time and how it
-    should be resolved at load time, such that:
-    - A runtime class/fnc can be converted into a SymbolSpec
-    - A SymbolSpec can be resolved back into a runtime class/fnc
+    Description:
+        A :class:`SymbolSpec` records the information required to locate a class or
+        function during serialization and to resolve it during deserialization.
+        Behaviour, configuration, and runtime state are handled elsewhere.
 
-    It *does not* describe behaviour, configuration, or state.
+    Attributes:
+        policy (SerializationPolicy): Serialization policy controlling resolution strategy.
+        version (int): SymbolSpec schema version.
+        key (str | None): Builtin key for :class:`SerializationPolicy.BUILTIN`.
+        registry_path (str | None): Import path for lookup registries.
+        registry_key (str | None): Key within the referenced registry.
+        module (str | None): Module path for directly importable symbols.
+        qualname (str | None): Qualified name within `module`.
+        source_ref (str | None): Packaged source reference `code/<file>.py:<qualname>`.
+
     """
 
     # Structural metadata
@@ -46,6 +57,14 @@ class SymbolSpec:
     qualname: str | None = None
 
     def validate(self) -> None:
+        """
+        Ensure the current :class:`SerializationPolicy` is coherent with the fields.
+
+        Raises:
+            ValueError: If required identity fields are missing or extra data is provided.
+            TypeError: If the policy is unsupported.
+
+        """
         object.__setattr__(self, "policy", normalize_policy(self.policy))
 
         if self.policy is SerializationPolicy.BUILTIN:
@@ -71,13 +90,26 @@ class SymbolSpec:
             raise TypeError(msg)
 
     def to_dict(self) -> dict:
-        """JSON-safe dict representation of this SymbolSpec."""
+        """Return a JSON-safe dictionary representation of this :class:`SymbolSpec`."""
         data = asdict(self)
         data[self.TAG] = True
         return data
 
     @classmethod
     def from_dict(cls, data: dict) -> SymbolSpec:
+        """
+        Create a :class:`SymbolSpec` from serialized dictionary data.
+
+        Args:
+            data (dict): Dictionary previously produced by :meth:`to_dict`.
+
+        Returns:
+            SymbolSpec: Reconstructed specification.
+
+        Raises:
+            ValueError: If `data` does not represent a serialized :class:`SymbolSpec`.
+
+        """
         data = dict(data)
         if cls.TAG not in data or not data[cls.TAG]:
             raise ValueError("Not a SymbolSpec dict")
@@ -86,4 +118,14 @@ class SymbolSpec:
 
     @classmethod
     def is_symbol_spec_dict(cls, data: dict) -> bool:
+        """
+        Return True if `data` originated from :meth:`to_dict`.
+
+        Args:
+            data (dict): Dictionary to inspect.
+
+        Returns:
+            bool: True when `data` contains the SymbolSpec tag.
+
+        """
         return isinstance(data, dict) and data.get(cls.TAG) is True

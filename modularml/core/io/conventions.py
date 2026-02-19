@@ -1,3 +1,5 @@
+"""Serialization kind conventions for ModularML artifacts."""
+
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import ClassVar
@@ -21,6 +23,13 @@ class SerializationKind:
 
     @property
     def file_suffix(self) -> str:
+        """
+        Build the filename suffix for this kind.
+
+        Returns:
+            str: Suffix formatted as `.kind.mml`.
+
+        """
         return f".{self.kind}.{MML_FILE_EXTENSION}"
 
 
@@ -45,9 +54,12 @@ class KindRegistry:
         Register a class as the base for a serialization kind.
 
         Args:
-            cls: Base class to associate with this serialization kind.
-            kind: SerializationKind definition.
-            overwrite: Allow overwriting existing registrations.
+            cls (type): Base class to associate with this serialization kind.
+            kind (SerializationKind): Kind definition to register.
+            overwrite (bool, optional): Whether to replace existing entries.
+
+        Raises:
+            ValueError: If registration conflicts occur.
 
         """
         if "." in kind.kind:
@@ -75,10 +87,16 @@ class KindRegistry:
         """
         Decorator for registering a class as a serialization base.
 
-        Example:
-            @kind_registry.register_kind(name="FeatureSet", kind="fs")
-            class FeatureSet:
-                ...
+        Args:
+            name (str): Human-readable kind name.
+            kind (str): Short kind suffix (e.g., `fs`).
+            overwrite (bool, optional): Whether to allow overwriting.
+
+        Returns:
+            Callable[[type], type]: Decorator that registers the class.
+
+        Raises:
+            ValueError: If the kind name is already registered and `overwrite` is False.
 
         """
         serialization_kind = SerializationKind(name=name, kind=kind)
@@ -94,10 +112,13 @@ class KindRegistry:
         Resolve the serialization kind for a class using MRO lookup.
 
         Args:
-            cls: Class to resolve.
+            cls (type): Class to resolve.
 
         Returns:
-            SerializationKind associated with the nearest registered base class.
+            SerializationKind: Kind associated with the nearest registered base class.
+
+        Raises:
+            KeyError: If no serialization kind is registered for the hierarchy.
 
         """
         for base in cls.__mro__:
@@ -107,7 +128,7 @@ class KindRegistry:
         raise KeyError(msg)
 
     def clear(self):
-        """Clears all registered items."""
+        """Clear all registered items."""
         self._registry.clear()
         self._rev_registry.clear()
 

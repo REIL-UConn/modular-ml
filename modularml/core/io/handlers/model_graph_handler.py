@@ -1,3 +1,5 @@
+"""Handler for serializing :class:`ModelGraph` objects."""
+
 from __future__ import annotations
 
 import logging
@@ -17,11 +19,13 @@ logger = get_logger(level=logging.INFO)
 
 class ModelGraphHandler(BaseHandler[ModelGraph]):
     """
-    BaseHandler for ModelGraph objects.
+    Serialize :class:`ModelGraph` structures, nodes, and optimizer state.
 
-    Encodes:
-        - graph structure (nodes + optimizer config)
-        - runtime state (node state + optimizer state)
+    Attributes:
+        object_version (str): Semantic version of emitted artifacts.
+        config_rel_path (str): Relative JSON filename for graph configs.
+        state_rel_path (str): Relative pickle filename for runtime state.
+
     """
 
     object_version: ClassVar[str] = "1.0"
@@ -40,21 +44,18 @@ class ModelGraphHandler(BaseHandler[ModelGraph]):
         ctx: LoadContext,
     ) -> ModelGraph:
         """
-        Decodes ModelGraph from a saved artifact.
-
-        Description:
-            Instantiates a ModelGraph (instantiates from config and sets state).
+        Rebuild a :class:`ModelGraph` from serialized configuration and state.
 
         Args:
-            cls (type[ModelGraph]):
-                Load config for class.
-            load_dir (Path):
-                Directory to decode from.
-            ctx (LoadContext, optional):
-                Additional de-serialization context.
+            cls (type[ModelGraph]): :class:`ModelGraph` class providing :meth:`from_config`.
+            load_dir (Path): Directory containing the saved artifact.
+            ctx (LoadContext): Active :class:`LoadContext`.
 
         Returns:
-            ModelGraph: The re-instantiated object.
+            ModelGraph: Re-instantiated graph registered with the active context.
+
+        Raises:
+            RuntimeError: If collisions occur and cannot be resolved.
 
         """
         from modularml.core.experiment.experiment_context import ExperimentContext

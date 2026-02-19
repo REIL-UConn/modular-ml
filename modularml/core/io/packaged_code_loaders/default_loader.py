@@ -1,3 +1,5 @@
+"""Default loader for executing packaged source code within artifacts."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -15,22 +17,19 @@ def default_packaged_code_loader(
     allow_packaged: bool,
 ) -> Any:
     """
-    Load a bundled class from an artifact.
+    Load bundled source referenced by `source_ref` from an artifact.
 
     Args:
-        artifact_path (Path):
-            Root directory of the artifact.
-        source_ref (str):
-            Reference of the form "code/<file>.py:<qualname>".
-        allow_packaged (bool):
-            Whether executing bundled code is explicitly allowed.
+        artifact_path (Path): Root directory of the artifact.
+        source_ref (str): Reference of the form `code/<file>.py:<qualname>`.
+        allow_packaged (bool): Whether executing bundled code is allowed.
 
     Returns:
-        Any: The namespace of the resolved class.
+        Any: Execution namespace containing the loaded symbols.
 
     Raises:
-        PackagedCodeError:
-            If execution is blocked or resolution fails.
+        PackagedCodeError: If execution is blocked or fails.
+        FileNotFoundError: If the referenced source file cannot be found.
 
     """
     if not allow_packaged:

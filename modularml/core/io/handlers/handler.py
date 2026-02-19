@@ -1,3 +1,5 @@
+"""Base handler implementations for encoding and decoding IO artifacts."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -26,7 +28,13 @@ logger = get_logger(level=logging.INFO)
 
 
 class BaseHandler(Generic[T]):
-    """Base handler for encoding/decoding config and state for a family of objects."""
+    """
+    Serialize and deserialize configuration and state for related object types.
+
+    Attributes:
+        object_version (str): Semantic version of artifacts emitted by the handler.
+
+    """
 
     object_version: ClassVar[str] = "1.0"
 
@@ -41,18 +49,15 @@ class BaseHandler(Generic[T]):
         ctx: SaveContext,
     ) -> dict[str, str | None]:
         """
-        Encodes state and config to files.
+        Encode configuration and state artifacts for `obj`.
 
         Args:
-            obj (T):
-                Object instance to encode.
-            save_dir (Path):
-                Directory to write encodings to.
-            ctx (SaveContext, optional):
-                Additional serialization context.
+            obj (T): Object instance to encode.
+            save_dir (Path): Directory where files will be written.
+            ctx (SaveContext): Active :class:`SaveContext` supplied by the serializer.
 
         Returns:
-            dict[str, str | None]: Mapping of "config" and "state" keys to saved files.
+            dict[str, str | None]: Mapping from logical keys (config/state) to saved file names.
 
         """
         file_mapping = self.encode_config(obj=obj, save_dir=save_dir, ctx=ctx)
@@ -68,21 +73,16 @@ class BaseHandler(Generic[T]):
         config_rel_path: str = "config.json",
     ) -> dict[str, str]:
         """
-        Encodes config to a json file.
+        Encode a configuration dictionary to JSON.
 
         Args:
-            obj (T):
-                Object to encode config for.
-            save_dir (Path):
-                Directory to write encodings to.
-            ctx (SaveContext, optional):
-                Additional serialization context.
-            config_rel_path (str):
-                Relative path to saved config file.
-                Defaults to "config.json"
+            obj (T): Configurable object providing :meth:`get_config`.
+            save_dir (Path): Directory where files will be written.
+            ctx (SaveContext): Active :class:`SaveContext`.
+            config_rel_path (str): Relative path for the saved JSON file.
 
         Returns:
-            dict[str, str]: Mapping of config to saved json file
+            dict[str, str]: Mapping with a `config` key referencing the JSON file.
 
         """
         if not isinstance(obj, Configurable):
@@ -106,21 +106,19 @@ class BaseHandler(Generic[T]):
         state_rel_path: str = "state.pkl",
     ) -> dict[str, str]:
         """
-        Encodes object state to a pickle file.
+        Encode :class:`Stateful` object state into a pickle file.
 
         Args:
-            obj (T):
-                Object to encode state for.
-            save_dir (Path):
-                Directory to write encodings to.
-            ctx (SaveContext, optional):
-                Additional serialization context.
-            state_rel_path (str):
-                Relative path to save state to.
-                Defaults to "state.pkl"
+            obj (T): Object implementing :class:`Stateful`.
+            save_dir (Path): Directory where files will be written.
+            ctx (SaveContext): Active :class:`SaveContext`.
+            state_rel_path (str): Relative path for the serialized state file.
 
         Returns:
-            dict[str, str]: Mapping of state to saved pkl file
+            dict[str, str]: Mapping with a `state` key referencing the pickle file.
+
+        Raises:
+            NotImplementedError: If `obj` does not implement :class:`Stateful`.
 
         """
         import pickle
@@ -148,21 +146,15 @@ class BaseHandler(Generic[T]):
         ctx: LoadContext,
     ) -> T:
         """
-        Decodes an object from a saved artifact.
-
-        Description:
-            Instantiates an object (instantiates from config and sets state).
+        Reconstruct an object from serialized config and state files.
 
         Args:
-            cls (type[T]):
-                Load config for class.
-            load_dir (Path):
-                Directory to decode from.
-            ctx (LoadContext, optional):
-                Additional de-serialization context.
+            cls (type[T]): Class or factory providing :meth:`from_config`.
+            load_dir (Path): Directory containing the saved artifact.
+            ctx (LoadContext): Active :class:`LoadContext`.
 
         Returns:
-            T: The re-instantiated object.
+            T: Re-instantiated object populated with decoded state.
 
         """
         obj = None
@@ -202,19 +194,18 @@ class BaseHandler(Generic[T]):
         config_rel_path: str = "config.json",
     ) -> dict[str, Any] | None:
         """
-        Decodes config from a json file.
+        Load configuration JSON from `load_dir`.
 
         Args:
-            load_dir (Path):
-                Directory to decode from.
-            ctx (LoadContext, optional):
-                Additional de-serialization context.
-            config_rel_path (str):
-                Relative path to saved config file.
-                Defaults to "config.json"
+            load_dir (Path): Directory containing the saved artifact.
+            ctx (LoadContext): Active :class:`LoadContext`.
+            config_rel_path (str): Relative path to the config JSON file.
 
         Returns:
-            dict[str, Any] | None: The decoded config data.
+            dict[str, Any] | None: Parsed configuration dictionary.
+
+        Raises:
+            FileNotFoundError: If the configuration file is missing.
 
         """
         # Check that config.json exists
@@ -235,19 +226,18 @@ class BaseHandler(Generic[T]):
         state_rel_path: str = "state.pkl",
     ) -> dict[str, Any]:
         """
-        Decodes state from a pkl file.
+        Load serialized state data from `load_dir`.
 
         Args:
-            load_dir (Path):
-                Directory to decode from.
-            ctx (LoadContext, optional):
-                Additional de-serialization context.
-            state_rel_path (str):
-                Relative path to save state to.
-                Defaults to "state.pkl"
+            load_dir (Path): Directory containing the saved artifact.
+            ctx (LoadContext): Active :class:`LoadContext`.
+            state_rel_path (str): Relative path to the pickle file.
 
         Returns:
-            dict[str, Any]: The decoded state data.
+            dict[str, Any]: Deserialized state mapping.
+
+        Raises:
+            FileNotFoundError: If the state file does not exist.
 
         """
         import pickle
@@ -269,18 +259,19 @@ class BaseHandler(Generic[T]):
     # ================================================
     def get_symbol_spec(self, obj_or_cls: Any, *, ctx: SaveContext) -> SymbolSpec:
         """
-        Gets the SymbolSpec instance for a given object and SaveContext.
+        Create a :class:`SymbolSpec` describing how to reload `obj_or_cls`.
 
         Description:
-            If the object is a BUILTIN or REGISTERED class (or an instance of one), a
-            SymbolSpec is returned mapping this object to its known class.
-            If the object is created using unknown source code (e.g., a custom Torch
-            model), the source code is packaged and saved to file under the directory
-            specified in `ctx`. A SymbolSpec is then created mapping this objects class
-            to the saved file for later deserialization.
+            Builtin and registry-backed classes are recorded by reference. Unregistered
+            symbols are packaged via the provided :class:`SaveContext` to allow
+            future reloading.
 
-            The return SymbolSpec can be cast to a JSON-safe dict using
-            `SymbolSpec.to_dict()`.
+        Args:
+            obj_or_cls (Any): Object instance or class requiring serialization metadata.
+            ctx (SaveContext): Context used for packaging custom code.
+
+        Returns:
+            SymbolSpec: Metadata describing symbol provenance.
 
         """
         # Default to packaged code (safe fallback)
@@ -298,15 +289,20 @@ class BaseHandler(Generic[T]):
 
     def handle_node_collision(self, obj: Any, *, ctx: LoadContext) -> Any:
         """
-        Applies collision handling logic if `obj` is an `ExperimentNode`.
+        Handle Experiment node ID collisions during deserialization.
 
         Description:
-            If same node_id exists, perform the following checks:
-            1. If same label + same state -> reuse existing
-            2. If different label or different state -> override or fork
-                - Override = replace existing node_id reference in ExperimentContext
-                with new object
-                - Fork = generate new node_id for reloaded object and register
+            - If a node with the same ID and state exists, reuse it.
+            - If :attr:`LoadContext.overwrite_collision` is True, replace the existing node.
+            - Otherwise, assign a new node ID before registering the reloaded node.
+
+        Args:
+            obj (Any): Object potentially representing an :class:`ExperimentNode`.
+            ctx (LoadContext): Active :class:`LoadContext`.
+
+        Returns:
+            Any: Either the existing registered node or the adjusted object.
+
         """
         from modularml.core.experiment.experiment_context import ExperimentContext
         from modularml.core.experiment.experiment_node import (
@@ -398,15 +394,19 @@ class BaseHandler(Generic[T]):
         ctx: LoadContext,
     ) -> Any:
         """
-        Applies collision handling logic if `obj` is a `ModelGraph`.
+        Handle collisions for nodes associated with a :class:`ModelGraph`.
 
         Description:
-            If same node_id exists, perform the following checks:
-            1. If same label + same state -> reuse existing
-            2. If different label or different state -> override or fork
-                - Override = replace existing node_id reference in ExperimentContext
-                with new object
-                - Fork = generate new node_id for reloaded object and register
+            Reuses identical nodes, overwrites existing registrations when allowed,
+            or assigns a fresh node ID when necessary.
+
+        Args:
+            obj (Any): Object potentially representing an :class:`ExperimentNode`.
+            ctx (LoadContext): Active :class:`LoadContext`.
+
+        Returns:
+            Any: Either the existing registered node or the adjusted object.
+
         """
         from modularml.core.experiment.experiment_context import ExperimentContext
         from modularml.core.experiment.experiment_node import (
@@ -576,7 +576,18 @@ class BaseHandler(Generic[T]):
         ctx: LoadContext,
         register: bool = True,
     ):
-        """Restores any non-JSON items in the config file."""
+        """
+        Restore non-JSON objects encoded by :meth:`_json_safe_cfg`.
+
+        Args:
+            data (dict[str, Any]): JSON-safe configuration to restore.
+            ctx (LoadContext): Active :class:`LoadContext`.
+            register (bool): Whether newly constructed nodes should register with the context.
+
+        Returns:
+            dict[str, Any]: Configuration with live objects reconstructed.
+
+        """
 
         def _restore_val(val: Any) -> Any:
             # If a SymbolSpec dict
@@ -635,14 +646,33 @@ class BaseHandler(Generic[T]):
         return restored_cfg
 
     def _write_json(self, data: dict[str, Any], save_path: Path) -> Path:
-        """Saves `data` to `path` as json."""
+        """
+        Write `data` to `save_path` as JSON.
+
+        Args:
+            data (dict[str, Any]): JSON-serializable payload.
+            save_path (Path): Output file path (suffix enforced to `.json`).
+
+        Returns:
+            Path: Path to the written JSON file.
+
+        """
         path = Path(save_path).with_suffix(".json")
         with path.open("w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, sort_keys=True)
         return path
 
     def _read_json(self, data_path: Path) -> Any:
-        """Reads `data` from `data_path` as json."""
+        """
+        Read JSON content from `data_path`.
+
+        Args:
+            data_path (Path): File path containing JSON data.
+
+        Returns:
+            Any: Parsed JSON payload.
+
+        """
         with Path(data_path).open("r", encoding="utf-8") as f:
             config = json.load(f)
         return config
@@ -662,12 +692,15 @@ class HandlerRegistry:
         overwrite: bool = False,
     ) -> None:
         """
-        Register a handler for a class (typically a base class).
+        Associate a :class:`BaseHandler` with a class (usually a base class).
 
         Args:
-            cls (type): Class to register the handler for.
+            cls (type): Class the handler should manage.
             handler (BaseHandler): Handler instance.
-            overwrite (bool): Overwrite existing mapping if True.
+            overwrite (bool): Overwrite an existing mapping when True.
+
+        Raises:
+            ValueError: If a handler is already registered and `overwrite` is False.
 
         """
         if not overwrite and cls in self._handlers:
@@ -677,13 +710,13 @@ class HandlerRegistry:
 
     def resolve(self, cls: type) -> BaseHandler:
         """
-        Resolve a handler using MRO search.
+        Return the most specific handler for `cls` using MRO traversal.
 
         Args:
-            cls (type): Class to resolve.
+            cls (type): Class requiring a handler.
 
         Returns:
-            BaseHandler: Matching handler.
+            BaseHandler: Resolved handler instance, or a default :class:`BaseHandler`.
 
         """
         for base in cls.__mro__:

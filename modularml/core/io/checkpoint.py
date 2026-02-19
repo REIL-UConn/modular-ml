@@ -1,3 +1,5 @@
+"""Checkpoint data structures for persisting stateful objects."""
+
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -6,6 +8,17 @@ from modularml.core.io.protocols import Stateful
 
 @dataclass
 class CheckpointEntry:
+    """
+    Snapshot of a single :class:`Stateful` object.
+
+    Attributes:
+        version (str): Schema version for the checkpoint entry.
+        entry_cls (type): Class of the serialized object.
+        entry_state (dict[str, Any] | None): Serialized state dictionary.
+        entry_obj (:class:`Stateful` | None): Live object reference, if available.
+
+    """
+
     version = "1.0"
 
     entry_cls: type
@@ -15,6 +28,16 @@ class CheckpointEntry:
 
 @dataclass
 class Checkpoint:
+    """
+    Collection of :class:`CheckpointEntry` snapshots plus metadata.
+
+    Attributes:
+        version (str): Schema version for the checkpoint.
+        entries (dict[str, CheckpointEntry]): Mapping of checkpoint keys to entries.
+        meta (dict[str, Any]): Arbitrary metadata associated with the checkpoint.
+
+    """
+
     version = "1.0"
 
     # Mapping of CheckpointEntry to a string-base key
@@ -26,15 +49,15 @@ class Checkpoint:
 
     def add_entry(self, key: str, obj: Stateful):
         """
-        Adds a checkpoint entry for a given object.
+        Add a checkpoint entry for a given object.
 
         Args:
-            key (str):
-                A unique label to assign to this object's checkpoint entry.
+            key (str): Unique label for the checkpoint entry.
+            obj (Stateful): Object implementing :meth:`Stateful.get_state`.
 
-            obj (Stateful):
-                The object to add a checkpoint entry for.
-                The object must implement `get_state` and `set_state`.
+        Raises:
+            ValueError: If the key already exists.
+            TypeError: If `obj` does not implement :class:`Stateful`.
 
         """
         if key in self.entries:
@@ -53,14 +76,14 @@ class Checkpoint:
 
     def add_meta(self, key: str, value: Any):
         """
-        Attach a meta data entry to this checkpoint.
+        Attach a metadata entry to this checkpoint.
 
         Args:
-            key (str):
-                A unique label to assign to this meta data value.
-            value (Any):
-                The meta data value to attach. Must be a pickle-able
-                object.
+            key (str): Unique label for the metadata value.
+            value (Any): Metadata value; must be pickle-able.
+
+        Raises:
+            ValueError: If the key already exists.
 
         """
         if key in self.meta:

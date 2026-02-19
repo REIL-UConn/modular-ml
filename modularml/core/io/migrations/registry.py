@@ -1,3 +1,5 @@
+"""Registry for applying artifact migrations."""
+
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -14,6 +16,11 @@ class MigrationRegistry:
     Registry of object-level migrations.
 
     Migrations are applied to convert one artifact to another.
+
+    Attributes:
+        _migrations (dict[tuple[str, str], tuple[str, MigrationFnc]]):
+            Mapping from `(object_type, from_version)` to `(to_version, migration_fn)`.
+
     """
 
     def __init__(self) -> None:
@@ -35,6 +42,23 @@ class MigrationRegistry:
         fn: MigrationFnc,
         overwrite: bool = False,
     ) -> None:
+        """
+        Register a migration function for a specific object type/version.
+
+        Args:
+            object_type (str): Serialized kind identifier (for example, `fs`).
+            from_version (str): Source version handled by the migration.
+            to_version (str): Target version after migration.
+            fn (MigrationFnc): Callable that mutates the artifact in-place.
+            overwrite (bool): Replace existing registration if True.
+
+        Returns:
+            None
+
+        Raises:
+            ValueError: If a migration already exists and `overwrite` is False.
+
+        """
         key = (object_type, from_version)
 
         if key in self._migrations and not overwrite:
@@ -47,6 +71,17 @@ class MigrationRegistry:
     # Introspection
     # ================================================
     def has_migration(self, object_type: str, version: str) -> bool:
+        """
+        Check whether a migration exists for an object/version pair.
+
+        Args:
+            object_type (str): Artifact kind identifier.
+            version (str): Current object version.
+
+        Returns:
+            bool: True if a migration is registered.
+
+        """
         return (object_type, version) in self._migrations
 
     # ================================================
@@ -60,10 +95,15 @@ class MigrationRegistry:
         handler: BaseHandler,
     ) -> Artifact:
         """
-        Apply all registered migrations to an Artifact until up-to-date.
+        Apply registered migrations to `artifact` until the version is current.
+
+        Args:
+            artifact (Artifact): Artifact to migrate.
+            artifact_path (Path): Directory containing the artifact files.
+            handler (BaseHandler): Handler responsible for encoding/decoding.
 
         Returns:
-            New Artifact with migrated config/state/version.
+            Artifact: Migrated artifact with updated header metadata.
 
         """
         header = artifact.header
@@ -90,43 +130,3 @@ class MigrationRegistry:
 
 
 migration_registry = MigrationRegistry()
-
-
-"""
-Example migration function to migrate FeatureSet version 1.0 to 1.1
-
-
-We define a function that maps the old artifact to the new artifact
-```
-def migrate_featureset_1_0_to_1_1(
-    *,
-    artifact: Artifact,
-    artifact_path: Path,
-    handler,
-) -> Artifact:
-    # Load config
-    config_path = artifact_path / artifact.files["config"]
-    handle
-    config = handler.decode_config(config_dir=artifact_path)
-
-    # Perform migration
-    if "scalers" in config:
-        config["transforms"] = config.pop("scalers")
-
-    # Write back
-    with config_path.open("w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2, sort_keys=True)
-
-    return artifact
-```
-
-Then we simply register it:
-```
-migration_registry.register(
-    object_type="FeatureSet",
-    from_version="1.0",
-    to_version="1.1",
-    fn=migrate_featureset_1_0_to_1_1,
-)
-```
-"""

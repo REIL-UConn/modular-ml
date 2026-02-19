@@ -1,3 +1,5 @@
+"""Protocols describing configurable and stateful objects."""
+
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
@@ -9,12 +11,10 @@ class Configurable(Protocol):
 
     def get_config(self) -> dict[str, Any]:
         """
-        Returns configuration details of this object.
+        Return the configuration needed by :meth:`from_config`.
 
         Returns:
-            dict[str, Any]:
-                Configuration used to reconstruct the object.
-                Keys must be strings.
+            dict[str, Any]: JSON-serializable configuration mapping.
 
         """
         ...
@@ -22,14 +22,13 @@ class Configurable(Protocol):
     @classmethod
     def from_config(cls, config: dict):
         """
-        Construct an object from a configuration dict.
+        Construct an object from the configuration produced by :meth:`get_config`.
 
         Args:
-            config (dict[str, Any]):
-                Configuration used to construct the object.
+            config (dict[str, Any]): Serialized configuration mapping.
 
         Returns:
-            cls: Constructed object.
+            Configurable: Instance of the implementing class.
 
         """
         ...
@@ -41,20 +40,20 @@ class Stateful(Protocol):
 
     def get_state(self) -> Any:
         """
-        Return runtime/learned state used to fully reproduce the object.
+        Return runtime state used to fully reproduce the object.
 
         Returns:
-            Any: Runtime state (handler must know how to encode/decode).
+            Any: State payload that :meth:`set_state` can consume.
 
         """
         ...
 
     def set_state(self, state: Any) -> None:
         """
-        Restore runtime/learned state.
+        Restore runtime state previously captured by :meth:`get_state`.
 
         Args:
-            state (Any): State object produced by get_state().
+            state (Any): State payload to restore.
 
         """
         ...

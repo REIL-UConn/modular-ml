@@ -1,3 +1,5 @@
+"""High-level serializer for saving/loading ModularML artifacts."""
+
 from __future__ import annotations
 
 import hashlib
@@ -30,6 +32,14 @@ if TYPE_CHECKING:
 
 
 def _zip_dir(src: Path, dest: Path) -> None:
+    """
+    Archive `src` directory into a ZIP file at `dest`.
+
+    Args:
+        src (Path): Directory to compress.
+        dest (Path): Output ZIP file path.
+
+    """
     with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for p in src.rglob("*"):
             if p.is_file():
@@ -37,11 +47,30 @@ def _zip_dir(src: Path, dest: Path) -> None:
 
 
 def _unzip(src: Path, dest: Path) -> None:
+    """
+    Extract ZIP file `src` into directory `dest`.
+
+    Args:
+        src (Path): Source ZIP file.
+        dest (Path): Destination directory for extracted contents.
+
+    """
     with zipfile.ZipFile(src, "r") as zf:
         zf.extractall(dest)
 
 
 def _enforce_file_suffix(path: Path, cls: type) -> Path:
+    """
+    Ensure artifacts follow the `<kind>.mml` suffix for `cls`.
+
+    Args:
+        path (Path): Requested output path (suffix may change).
+        cls (type): Class whose serialization kind determines the suffix.
+
+    Returns:
+        Path: Path with the enforced suffix; parent directories will exist.
+
+    """
     # Enforce 'kind.mml' suffix
     path = Path(path)
     exp_suffix = kind_registry.get_kind(cls=cls).file_suffix
@@ -54,12 +83,12 @@ def _enforce_file_suffix(path: Path, cls: type) -> Path:
 
 class SaveContext:
     """
-    Context provided to handlers during save so they can request SymbolSpecs and bundling.
+    Helper context passed to handlers during serialization.
 
-    Args:
+    Attributes:
         artifact_path (Path): Root folder of the artifact being written.
-        policy (SerializationPolicy): Root policy for the object being saved.
-        serializer (Any): Serializer instance with make_class_spec helpers.
+        serializer (Serializer): Owning serializer instance.
+        mml_version (str): Version string embedded in emitted artifacts.
 
     """
 
@@ -69,6 +98,15 @@ class SaveContext:
         serializer: Serializer,
         mml_version: str = "1.0.0",
     ):
+        """
+        Initialize a :class:`SaveContext`.
+
+        Args:
+            artifact_path (Path): Root folder where artifacts are written.
+            serializer (Serializer): Owning serializer instance.
+            mml_version (str): Version string recorded in emitted manifests.
+
+        """
         self.artifact_path = artifact_path
         self.serializer = serializer
         self.mml_version = mml_version
@@ -80,13 +118,19 @@ class SaveContext:
     # =================================================
     def _package_symbol(self, symbol: object) -> SymbolSpec:
         """
-        Ensure `symbol` (class or function) is packaged into this artifact and return its SymbolSpec.
+        Package `symbol` into the artifact and return its :class:`SymbolSpec`.
 
-        Rules:
-        - Symbols are packaged once per SaveContext
-        - Source code is always copied into artifact/code/
-        - Filename collisions are resolved by appending _0, _1, ...
-        - Existing files are reused if already packaged
+        Args:
+            symbol (object): Class or function requiring packaging.
+
+        Returns:
+            SymbolSpec: Packaged symbol specification.
+
+        Raises:
+            RuntimeError: If the symbol cannot be packaged (lambda, closures, or __main__).
+            FileNotFoundError: If the source file is missing.
+            TypeError: If the symbol type is unsupported.
+
         """
         # Resolve instances to its class (functions should be unchanged)
         if not (inspect.isclass(symbol) or inspect.isfunction(symbol)):
@@ -208,18 +252,17 @@ class SaveContext:
         policy: SerializationPolicy,
     ) -> SymbolSpec:
         """
-        Construct or retrieve a SymbolSpec for a given symbol (function or class).
+        Construct a :class:`SymbolSpec` describing `symbol`.
 
         Args:
-            symbol (object):
-                Class or function to construct spec for.
-            policy (SerializationPolicy):
-                Symbol resolution policy.
-            builtin_key (str | None):
-                Required when policy == BUILTIN.
+            symbol (object): Class or function to describe.
+            policy (SerializationPolicy): Desired serialization policy.
 
         Returns:
-            SymbolSpec of provided class.
+            SymbolSpec: Specification compatible with the selected policy.
+
+        Raises:
+            TypeError: If the policy is unsupported.
 
         """
         policy = normalize_policy(policy)
@@ -261,18 +304,12 @@ class SaveContext:
         save_dir: Path,
     ):
         """
-        Write subartifact to save_dir.
+        Write a serialized artifact for `obj` into `save_dir`.
 
         Args:
-            obj (Any):
-                Object to serialize.
-            symbol_spec (SymbolSpec):
-                SymbolSpec of the given object. Use the `make_symbol_spec` method.
-            save_dir (Path):
-                Directory to save encodings into.
-
-        Return:
-            Path: file path of saved artifact.
+            obj (Any): Object to serialize.
+            symbol_spec (SymbolSpec): Specification returned by :meth:`make_symbol_spec`.
+            save_dir (Path): Directory receiving the encoded files.
 
         """
         # Get handler for this object type
@@ -306,21 +343,19 @@ class SaveContext:
         overwrite: bool = False,
     ) -> Path:
         """
-        Write subartifact to out_path.
+        Write a zipped artifact to `out_path`.
 
         Args:
-            obj (Any):
-                Object to serialize.
-            symbol_spec (SymbolSpec):
-                SymbolSpec of the given object. Use the `make_symbol_spec` method.
-            out_path (Path):
-                File location to save to. Note that the suffix may be overwritten
-                to enforce the ModularML file extension schema.
-            overwrite (bool):
-                If True, overwrites existing artifact at out_path.
+            obj (Any): Object to serialize.
+            symbol_spec (SymbolSpec): Specification returned by :meth:`make_symbol_spec`.
+            out_path (Path): Target file path (suffix may be adjusted).
+            overwrite (bool): Overwrite `out_path` when True.
 
-        Return:
-            Path: file path of saved artifact.
+        Returns:
+            Path: Path to the written `.mml` artifact.
+
+        Raises:
+            FileExistsError: If `out_path` exists and `overwrite` is False.
 
         """
         # Enforce 'kind.mml' suffix
@@ -374,6 +409,17 @@ class LoadContext:
         overwrite_collision: bool = False,
         extras: dict[str, Any] | None = None,
     ):
+        """
+        Initialize a :class:`LoadContext`.
+
+        Args:
+            artifact_path (Path): Root directory of the artifact being loaded.
+            serializer (Serializer): Owning serializer instance.
+            allow_packaged_code (bool): Whether executing packaged code is permitted.
+            overwrite_collision (bool): Whether to overwrite ID collisions on load.
+            extras (dict[str, Any] | None): Optional user-provided metadata.
+
+        """
         self.artifact_path = artifact_path
         self.serializer = serializer
         self.allow_packaged_code = allow_packaged_code
@@ -387,7 +433,25 @@ class LoadContext:
         packaged_code_loader: Callable[[str], object] | None = None,
         provided_cls: type | None = None,
     ):
-        """Load an artifact from an unzipped directory."""
+        """
+        Load an artifact from a directory previously produced by :meth:`write_artifact`.
+
+        Args:
+            dir_load (Path): Directory containing the artifact files.
+            packaged_code_loader (Callable[[str], object] | None): Loader for packaged code.
+            provided_cls (type | None): Required when loading :attr:`SerializationPolicy.STATE_ONLY` artifacts.
+
+        Returns:
+            Any: Reconstructed object.
+
+        Raises:
+            FileNotFoundError: If `mml_file` does not exist.
+
+        Raises:
+            FileNotFoundError: If `artifact.json` is missing.
+            SymbolResolutionError: If the stored symbol cannot be resolved.
+
+        """
         if packaged_code_loader is None:
 
             def packaged_code_loader(source_ref):
@@ -444,7 +508,18 @@ class LoadContext:
         packaged_code_loader: Callable[[str], object] | None = None,
         provided_cls: type | None = None,
     ):
-        """Load an artifact from a zipped ('.mml') directory."""
+        """
+        Load an artifact directly from a zipped `.mml` archive.
+
+        Args:
+            mml_file (Path): Path to the `.mml` archive.
+            packaged_code_loader (Callable[[str], object] | None): Loader for packaged code.
+            provided_cls (type | None): Required when loading :attr:`SerializationPolicy.STATE_ONLY` artifacts.
+
+        Returns:
+            Any: Reconstructed object.
+
+        """
         path: Path = Path(mml_file)
         if not path.exists():
             raise FileNotFoundError(path)
@@ -518,22 +593,19 @@ class Serializer:
         overwrite: bool = False,
     ) -> str:
         """
-        Save an object to disk as a ModularML artifact.
+        Serialize `obj` to disk as a ModularML artifact.
 
         Args:
-            obj (Any):
-                Object to serialize.
-            save_path (str):
-                Output directory save_path for the artifact.
-            policy (SerializationPolicy):
-                Class resolution policy.
-            builtin_key (str | None):
-                Required when policy == BUILTIN.
-            overwrite (bool):
-                If True, overwrites existing artifact directory.
+            obj (Any): Object to serialize.
+            save_path (str): Output path for the resulting `.mml` file.
+            policy (SerializationPolicy): Class resolution policy for `obj`.
+            overwrite (bool): Overwrite existing artifacts when True.
 
         Returns:
-            str: Path to the artifact directory.
+            str: Path to the written artifact file.
+
+        Raises:
+            FileExistsError: If `save_path` exists and `overwrite` is False.
 
         """
         # Enforce 'kind.mml' suffix
@@ -586,23 +658,17 @@ class Serializer:
         Load an artifact from disk and reconstruct the serialized object.
 
         Args:
-            path (str):
-                Artifact directory.
-            allow_packaged_code (bool):
-                Whether bundled code execution is allowed.
-            provided_class (type | None):
-                Required when policy == STATE_ONLY.
-            overwrite (bool):
-                Whether to replace any colliding node registrations in ExperimentContext
-                If False, a new node_id is assigned to the reloaded object. Otherwise,
-                the existing node is removed from the ExperimentContext registry.
-                Defaults to False.
-            extras (dict[str, Any] | None):
-                Optional extra parameters forwarded to handlers via
-                `LoadContext.extras`. Defaults to None.
+            path (str): Path to the `.mml` artifact.
+            allow_packaged_code (bool): Whether executing packaged source code is allowed.
+            provided_class (type | None): Required when loading :attr:`SerializationPolicy.STATE_ONLY` artifacts.
+            overwrite (bool): Overwrite conflicting node registrations in the active context.
+            extras (dict[str, Any] | None): Additional metadata forwarded via :class:`LoadContext`.
 
         Returns:
             Any: Reconstructed object.
+
+        Raises:
+            FileNotFoundError: If `path` does not exist.
 
         """
         path: Path = Path(path)

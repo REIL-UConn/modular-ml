@@ -1,3 +1,5 @@
+"""Handler for serializing :class:`FeatureSet` objects."""
+
 from __future__ import annotations
 
 import logging
@@ -31,7 +33,15 @@ logger = get_logger(level=logging.INFO)
 
 
 class FeatureSetHandler(BaseHandler[FeatureSet]):
-    """BaseHandler for FeatureSet objects."""
+    """
+    Serialize :class:`FeatureSet` nodes and their associated metadata.
+
+    Attributes:
+        object_version (str): Semantic version of artifacts emitted.
+        config_rel_path (str): Relative JSON filename for configs.
+        state_rel_path (str): Relative pickle filename for remaining state.
+
+    """
 
     object_version: ClassVar[str] = "1.0"
 
@@ -49,18 +59,18 @@ class FeatureSetHandler(BaseHandler[FeatureSet]):
         ctx: SaveContext,
     ) -> dict[str, str]:
         """
-        Encodes object state to a pickle file.
+        Serialize :class:`FeatureSet` state, including splits and scalers.
 
         Args:
-            obj (FeatureSet):
-                Object to encode state for.
-            save_dir (Path):
-                Directory to write encodings to.
-            ctx (SaveContext, optional):
-                Additional serialization context.
+            obj (FeatureSet): Target :class:`FeatureSet` instance.
+            save_dir (Path): Directory to receive serialized artifacts.
+            ctx (SaveContext): Active :class:`SaveContext`.
 
         Returns:
-            dict[str, str]: Mapping of state to saved pkl file
+            dict[str, str]: Mapping of logical state keys to saved files.
+
+        Raises:
+            NotImplementedError: If `obj` does not implement :class:`Stateful`.
 
         """
         if not isinstance(obj, Stateful):
@@ -195,21 +205,15 @@ class FeatureSetHandler(BaseHandler[FeatureSet]):
         ctx: LoadContext,
     ) -> FeatureSet:
         """
-        Decodes an object from a saved artifact.
-
-        Description:
-            Instantiates an object (instantiates from config and sets state).
+        Rebuild a :class:`FeatureSet` from serialized configuration and state.
 
         Args:
-            cls (type[FeatureSet]):
-                Load config for class.
-            load_dir (Path):
-                Directory to decode from.
-            ctx (LoadContext, optional):
-                Additional de-serialization context.
+            cls (type[FeatureSet]): :class:`FeatureSet` class providing :meth:`from_config`.
+            load_dir (Path): Directory containing the saved artifact.
+            ctx (LoadContext): Active :class:`LoadContext`.
 
         Returns:
-            FeatureSet: The re-instantiated object.
+            FeatureSet: Re-instantiated object registered in the active context.
 
         """
         from modularml.core.data.featureset_view import FeatureSetView
@@ -297,16 +301,14 @@ class FeatureSetHandler(BaseHandler[FeatureSet]):
         ctx: LoadContext,
     ) -> dict[str, Any]:
         """
-        Decodes state from a pkl file.
+        Load serialized :class:`FeatureSet` state, splits, and scalers.
 
         Args:
-            load_dir (Path):
-                Directory to decode from.
-            ctx (LoadContext, optional):
-                Additional de-serialization context.
+            load_dir (Path): Directory containing the saved artifact.
+            ctx (LoadContext): Active :class:`LoadContext`.
 
         Returns:
-            dict[str, Any]: The decoded state data.
+            dict[str, Any]: State dictionary ready for :meth:`FeatureSet.set_state`.
 
         """
         from modularml.core.data.sample_collection import SampleCollection

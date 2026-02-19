@@ -1,3 +1,5 @@
+"""Registry of IO handlers for different artifact types."""
+
 from modularml.core.io.handlers.handler import HandlerRegistry
 
 from modularml.core.data.featureset import FeatureSet

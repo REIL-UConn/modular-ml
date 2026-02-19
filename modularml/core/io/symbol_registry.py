@@ -1,3 +1,5 @@
+"""Symbol registry for built-in and user-defined serializable classes."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -45,11 +47,14 @@ class SymbolRegistry:
     # ================================================
     def register_builtin_class(self, key: str, cls: type) -> None:
         """
-        Register a built-in ModularML class.
+        Register a built-in class that can be referenced by key.
 
         Args:
-            key: Stable registry key (e.g. "FeatureSet").
-            cls: Class object.
+            key (str): Stable registry key (for example, `FeatureSet`).
+            cls (type): Class object to associate with the key.
+
+        Raises:
+            ValueError: If the key is already registered.
 
         """
         if key in self._builtin_classes:
@@ -65,16 +70,15 @@ class SymbolRegistry:
         naming_fn: Callable[[type], str],
     ) -> None:
         """
-        Register a registry whose contents should be treated as REGISTERED symbols.
+        Register a mapping whose entries are treated as REGISTERED symbols.
 
         Args:
-            import_path:
-                Import path to registry object
-                (e.g. 'modularml.models.MODEL_REGISTRY')
-            registry:
-                Mapping of keys -> classes
-            naming_fn:
-                Function that maps a class to its registry key
+            import_path (str): Import path to the registry object (e.g., `modularml.models.MODEL_REGISTRY`).
+            registry (dict[str, type]): Mapping from keys to classes.
+            naming_fn (Callable[[type], str]): Function that maps a class to its registry key.
+
+        Raises:
+            ValueError: If `import_path` is already registered.
 
         """
         if import_path in self._builtin_registries:
@@ -96,18 +100,18 @@ class SymbolRegistry:
         packaged_code_loader=None,
     ) -> type:
         """
-        Resolve a SymbolSpec into a runtime class or function.
+        Resolve a :class:`SymbolSpec` into a runtime class or function.
 
         Args:
-            spec: SymbolSpec to resolve.
-            allow_packaged_code: Whether executing bundled code is allowed.
-            packaged_code_loader: Callable to load bundled source if needed.
+            spec (SymbolSpec): Specification to resolve.
+            allow_packaged_code (bool): Whether executing bundled code is allowed.
+            packaged_code_loader (Callable[[str], ModuleType] | None): Loader for packaged source code.
 
         Returns:
-            Resolved class.
+            type: Resolved class or function object.
 
         Raises:
-            SymbolResolutionError
+            SymbolResolutionError: If the symbol cannot be resolved.
 
         """
         spec.validate()
@@ -160,7 +164,16 @@ class SymbolRegistry:
     # Helpers & Convenience
     # ================================================
     def obj_is_a_builtin_class(self, obj_or_cls: Any) -> bool:
-        """Checks whether an instance is a registered built-in."""
+        """
+        Return True if `obj_or_cls` corresponds to a registered builtin class.
+
+        Args:
+            obj_or_cls (Any): Instance or class to check.
+
+        Returns:
+            bool: True when the class appears in the builtin registry.
+
+        """
         cls = obj_or_cls if isinstance(obj_or_cls, type) else obj_or_cls.__class__
         return cls in set(self._builtin_classes.values())
 
@@ -170,14 +183,14 @@ class SymbolRegistry:
         registry_name: str | None,
     ) -> bool:
         """
-        Checks whether an instance is in a built-in registry.
+        Return True if the class appears in one of the builtin registries.
 
         Args:
-            obj_or_cls:
-                Instance or class to check.
-            registry_name (str, optional):
-                Name of built-in registry to search. E.g., "scaler_registry".
-                If None, searches all registries.
+            obj_or_cls (Any): Instance or class to check.
+            registry_name (str | None): Optional suffix of the registry name to search.
+
+        Returns:
+            bool: True when the class is registered.
 
         """
         # Ensure is class, not isntance
@@ -202,7 +215,19 @@ class SymbolRegistry:
         return False
 
     def key_for(self, obj_or_cls: Any) -> str:
-        """Returns the registered key for an object or class."""
+        """
+        Return the builtin registry key for `obj_or_cls`.
+
+        Args:
+            obj_or_cls (Any): Instance or class to inspect.
+
+        Returns:
+            str: Registry key associated with the builtin class.
+
+        Raises:
+            ValueError: If the class is not registered.
+
+        """
         cls = obj_or_cls if isinstance(obj_or_cls, type) else obj_or_cls.__class__
         if not self.obj_is_a_builtin_class(obj_or_cls=obj_or_cls):
             msg = f"Class '{cls.__qualname__}' is not registered. It has no key."
@@ -210,7 +235,19 @@ class SymbolRegistry:
         return self._make_runtime_key(cls=cls)
 
     def registered_location_for(self, symbol: object) -> tuple[str, str]:
-        """Return (registry_import_path, key) if symbol is found in a registered registry."""
+        """
+        Return `(registry_import_path, key)` for a registered symbol.
+
+        Args:
+            symbol (object): Instance or class to resolve.
+
+        Returns:
+            tuple[str, str]: Import path and registry key pair.
+
+        Raises:
+            KeyError: If the symbol is not found in any registered registry.
+
+        """
         cls = symbol if isinstance(symbol, type) else symbol.__class__
 
         for registry_path, entry in self._builtin_registries.items():
