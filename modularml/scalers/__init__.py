@@ -1,3 +1,5 @@
+"""Built-in scaler registry wiring for ModularML."""
+
 from modularml.utils.registries import CaseInsensitiveRegistry
 
 # Import all scaler modules
@@ -41,6 +43,16 @@ scaler_registry = CaseInsensitiveRegistry()
 
 
 def scaler_naming_fn(x):
+    """
+    Return the registry key for a scaler class.
+
+    Args:
+        x (type): Scaler class being registered.
+
+    Returns:
+        str: Qualname used to index the scaler in :data:`scaler_registry`.
+
+    """
     return x.__qualname__
 
 
