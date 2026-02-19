@@ -37,7 +37,7 @@ class _BannerMixin:
 
     def _wrap(self, text: str, *, indent: int = 2) -> list[str]:
         """
-        Wrap text to the configured banner width.
+        Wrap text to the configured banner width, preserving explicit newlines.
 
         Args:
             text (str): Message to wrap.
@@ -48,15 +48,25 @@ class _BannerMixin:
 
         """
         pad = " " * indent
-        return [
-            pad + line
-            for line in textwrap.wrap(
-                text,
-                width=self.max_width - 2 * indent,
-                replace_whitespace=True,
-                drop_whitespace=True,
-            )
-        ]
+        width = self.max_width - 2 * indent
+        result: list[str] = []
+        for line in text.split("\n"):
+            if not line.strip():
+                result.append(pad)
+            else:
+                # Preserve the line's own leading whitespace
+                leading = line[: len(line) - len(line.lstrip())]
+                line_pad = pad + leading
+                result.extend(
+                    line_pad + part
+                    for part in textwrap.wrap(
+                        line.strip(),
+                        width=width - len(leading),
+                        replace_whitespace=True,
+                        drop_whitespace=True,
+                    )
+                )
+        return result
 
     def _supports_color(self) -> bool:
         """Return True if ANSI color output is supported."""
