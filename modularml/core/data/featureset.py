@@ -205,8 +205,9 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
         df: pd.DataFrame,
         feature_cols: str | list[str],
         target_cols: str | list[str],
-        groupby_cols: str | list[str] | None = None,
+        group_by: str | list[str] | None = None,
         tag_cols: str | list[str] | None = None,
+        sort_by: str | list[str] | None = None,
     ) -> FeatureSet:
         """
         Construct a FeatureSet from a pandas DataFrame (column-wise storage).
@@ -216,7 +217,7 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
             ModularML `SampleSchema` convention. Each domain (features, targets, tags) \
             becomes a Struct column in the final Arrow table.
 
-            If `groupby_cols` are provided, all rows sharing the same group key are \
+            If `group_by` are provided, all rows sharing the same group key are \
             aggregated into a single sample row, with feature and target columns \
             stored as array-valued sequences (e.g., np.ndarray or list).
 
@@ -229,13 +230,17 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
                 Column name(s) in `df` to be used as feature variables.
             target_cols (str | list[str]):
                 Column name(s) in `df` to be used as target variables.
-            groupby_cols (str | list[str] | None, optional):
+            group_by (str | list[str] | None, optional):
                 One or more column names defining group boundaries. Each group becomes \
                 one sample (row) in the final table, with grouped columns stored as lists. \
                 If None, each original DataFrame row is treated as a sample.
             tag_cols (str | list[str] | None, optional):
                 Column name(s) corresponding to identifying or categorical metadata \
                 (e.g., cell ID, protocol, SOC). Defaults to None.
+            sort_by (str | list[str] | None, optional):
+                Column name(s) used to sort rows within each group before aggregation. \
+                Only used when `group_by` is specified; ignored otherwise. \
+                Defaults to None.
 
         Returns:
             FeatureSet:
@@ -249,8 +254,9 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
                 df=raw_df,
                 feature_cols=["voltage", "current"],
                 target_cols=["soh"],
-                groupby_cols=["cell_id", "cycle_index"],
+                group_by=["cell_id", "cycle_index"],
                 tag_cols=["temperature", "cell_id"],
+                sort_by="timestamp",
             )
             ```
 
@@ -259,11 +265,12 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
         feature_cols = ensure_list(feature_cols)
         target_cols = ensure_list(target_cols)
         tag_cols = ensure_list(tag_cols)
-        groupby_cols = ensure_list(groupby_cols)
+        group_by = ensure_list(group_by)
+        sort_by = ensure_list(sort_by) if sort_by is not None else []
 
         # 2. Apply grouping, if defined
-        if groupby_cols:
-            grouped = df.groupby(groupby_cols, sort=False)
+        if group_by:
+            grouped = df.groupby(group_by, sort=False)
         else:
             # Each row is a separate sample -> pseudo group by index
             df = df.copy()
@@ -276,15 +283,17 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
         tag_data: dict[str, list] = {c: [] for c in tag_cols}
 
         for _, df_gb in grouped:
+            # Sort rows within this group if requested
+            df_group = df_gb.sort_values(by=sort_by) if sort_by else df_gb
             # Convert grouped columns into arrays or scalars
             for c in feature_cols:
-                vals = df_gb[c].to_numpy()
+                vals = df_group[c].to_numpy()
                 feature_data[c].append(vals if len(vals) > 1 else vals[0])
             for c in target_cols:
-                vals = df_gb[c].to_numpy()
+                vals = df_group[c].to_numpy()
                 target_data[c].append(vals if len(vals) > 1 else vals[0])
             for c in tag_cols:
-                unique_vals = df_gb[c].unique()
+                unique_vals = df_group[c].unique()
                 tag_data[c].append(
                     unique_vals[0] if len(unique_vals) == 1 else unique_vals.tolist(),
                 )
@@ -538,17 +547,18 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
             raise RuntimeError(msg) from e
 
         # Check overlap with existing splits (only within the same collection)
+        overlap_samples: dict[str, list[int]] = {}
         for existing_split in self._splits.values():
             if not split.is_disjoint_with(existing_split):
                 overlap: list[int] = split.get_overlap_with(existing_split)
-                msg = (
-                    f"Split '{split.label}' has overlapping samples with existing split '{existing_split.label}' "
-                    f"(n_overlap = {len(overlap)}). "
-                )
-                hint = (
-                    "Consider checking for disjoint splits or revising your conditions."
-                )
-                warn(msg, category=SplitOverlapWarning, stacklevel=2, hints=hint)
+                overlap_samples[existing_split.label] = overlap
+        if overlap_samples:
+            msg = f"Split '{split.label}' has overlapping samples with existing split(s): "
+            for k, v in overlap_samples.items():
+                msg += f"\n- Split '{k}' has {len(v)} overlapping samples"
+
+            hint = "Consider checking for disjoint splits or revising your conditions."
+            warn(msg, category=SplitOverlapWarning, stacklevel=2, hints=hint)
 
         # Register new split
         self._splits[split.label] = split

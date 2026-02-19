@@ -14,23 +14,25 @@ from modularml.core.data.schema_constants import (
     DOMAIN_TARGETS,
 )
 from modularml.core.experiment.experiment_context import ExperimentContext
+from modularml.core.io.protocols import Stateful
 from modularml.core.references.experiment_reference import ResolutionError
 from modularml.core.references.featureset_reference import (
     FeatureSetColumnReference,
     FeatureSetSplitReference,
 )
+from modularml.core.splitting.base_splitter import BaseSplitter
 from modularml.core.splitting.splitter_record import SplitterRecord
 from modularml.utils.data.data_format import DataFormat
 from modularml.utils.data.pyarrow_data import resolve_column_selectors
+from modularml.utils.errors.exceptions import SplitOverlapWarning
 from modularml.utils.io.cloning import clone_via_serialization
-from modularml.utils.logging.warnings import warn
+from modularml.utils.logging.warnings import catch_warnings, warn
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
     from modularml.core.data.featureset import FeatureSet
     from modularml.core.data.featureset_view import FeatureSetView
-    from modularml.core.splitting.base_splitter import BaseSplitter
 
 
 class SplitMixin:
@@ -708,13 +710,42 @@ class SplitMixin:
 
         # Register splits if requested
         if register:
-            # Record FeatureSetView as new split
-            for split in list(results.values()):
-                source.add_split(split)
+            # Handler warnings after execution
+            with catch_warnings() as w:
+                # Record FeatureSetView as new split
+                for split in list(results.values()):
+                    source.add_split(split)
+
+            # Re-emit non-overlap warnings individually
+            overlap_msgs = []
+            for captured in w._captured:
+                if captured["category"] is SplitOverlapWarning:
+                    overlap_msgs.append(captured["message"])
+                else:
+                    warn(
+                        captured["message"],
+                        category=captured["category"],
+                        hints=captured.get("hints"),
+                    )
+
+            # Merge overlap warnings into a single warning
+            # Ignore if calling from a view (overlap is guaranteed)
+            if overlap_msgs and not is_view:
+                warn(
+                    message="\n".join(m for m in overlap_msgs),
+                    category=SplitOverlapWarning,
+                    hints="Consider checking for disjoint splits or revising your conditions.",
+                )
 
             # Record this splitter configuration
             # Splitter is cloned to prevent user from modifying state
-            cloned_splitter: BaseSplitter = clone_via_serialization(obj=splitter)
+            # Only needed if splitter is stateful
+            if isinstance(splitter, Stateful):
+                cloned_splitter: BaseSplitter = clone_via_serialization(obj=splitter)
+            # Otherwise just use to/from config
+            else:
+                cloned_splitter = BaseSplitter.from_config(splitter.get_config())
+
             order = (
                 max([rec.order for rec in source._split_recs]) + 1
                 if len(source._split_recs) > 0
@@ -742,6 +773,7 @@ class SplitMixin:
         ratios: Mapping[str, float],
         *,
         group_by: str | Sequence[str] | None = None,
+        stratify_by: str | Sequence[str] | None = None,
         seed: int = 13,
         return_views: bool = False,
         register: bool = True,
@@ -764,6 +796,9 @@ class SplitMixin:
                 Subset ratios that sum to 1.0 (e.g., `{"train": 0.7, "val": 0.3}`).
             group_by (str | Sequence[str] | None):
                 Tag keys that ensure grouped samples stay together.
+            stratify_by (str | Sequence[str] | None):
+                Tag keys that enforce proportional representation across subsets.
+                Mutually exclusive with `group_by`.
             seed (int):
                 Random seed used by :class:`RandomSplitter`.
             return_views (bool):
@@ -788,7 +823,12 @@ class SplitMixin:
         """
         from modularml.splitters.random_splitter import RandomSplitter
 
-        splitter = RandomSplitter(ratios, group_by=group_by, seed=seed)
+        splitter = RandomSplitter(
+            ratios,
+            group_by=group_by,
+            stratify_by=stratify_by,
+            seed=seed,
+        )
         return self.split(
             splitter,
             return_views=return_views,

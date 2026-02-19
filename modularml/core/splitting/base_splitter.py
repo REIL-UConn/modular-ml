@@ -6,15 +6,13 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from modularml.core.io.protocols import Configurable, Stateful
-
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from modularml.core.data.featureset_view import FeatureSetView
 
 
-class BaseSplitter(Configurable, Stateful, ABC):
+class BaseSplitter(ABC):
     """
     Abstract base class for algorithms that derive :class:`FeatureSetView` objects.
 
@@ -166,35 +164,6 @@ class BaseSplitter(Configurable, Stateful, ABC):
             raise KeyError(msg)
         splitter_cls: BaseSplitter = splitter_registry.get(config["splitter_name"])
         return splitter_cls.from_config(config)
-
-    # ================================================
-    # Stateful
-    # ================================================
-    def get_state(self) -> dict[str, Any]:
-        """
-        Return runtime state (for example, RNG) of the splitter.
-
-        Returns:
-            dict[str, Any]: Splitter state dictionary.
-
-        Raises:
-            NotImplementedError: Must be implemented by subclasses.
-
-        """
-        raise NotImplementedError
-
-    def set_state(self, state: dict[str, Any]) -> None:
-        """
-        Restore runtime state previously produced by :meth:`get_state`.
-
-        Args:
-            state (dict[str, Any]): State dictionary produced by :meth:`get_state`.
-
-        Raises:
-            NotImplementedError: Must be implemented by subclasses.
-
-        """
-        raise NotImplementedError
 
     # ================================================
     # Serialization
