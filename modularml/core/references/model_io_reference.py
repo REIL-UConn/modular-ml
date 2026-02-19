@@ -1,3 +1,5 @@
+"""References that map model execution outputs."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -10,6 +12,17 @@ from modularml.core.references.experiment_reference import ResolutionError
 
 @dataclass(frozen=True)
 class ModelOutputReference(ExecutionReference):
+    """
+    Reference to the outputs of a model node.
+
+    Attributes:
+        node_label (str): Label identifying the model node.
+        node_id (str): Identifier of the model node.
+        role (str | None): Optional role within the node outputs.
+        domain (Literal["outputs"]): Output domain to resolve.
+
+    """
+
     # ModelNode-specifiers
     node_label: str
     node_id: str
@@ -19,6 +32,20 @@ class ModelOutputReference(ExecutionReference):
     domain: Literal["outputs"] = "outputs"
 
     def _resolve_execution(self, ctx: ExecutionContext):
+        """
+        Resolve the configured node output from the :class:`ExecutionContext`.
+
+        Args:
+            ctx (ExecutionContext): Execution context that stores node outputs.
+
+        Returns:
+            Any: Output batch data for the requested node and role.
+
+        Raises:
+            TypeError: If `ctx` is not an :class:`ExecutionContext`.
+            ResolutionError: If the node or role cannot be resolved.
+
+        """
         if not isinstance(ctx, ExecutionContext):
             msg = f"Context must be either an ExecutionContext. Received: {type(ctx)}."
             raise TypeError(msg)
@@ -74,7 +101,7 @@ class ModelOutputReference(ExecutionReference):
             config (dict[str, Any]): Reference configuration.
 
         Returns:
-            ReferenceLike: Reconstructed reference..
+            ModelOutputReference: Reconstructed reference.
 
         """
         return cls(**config)

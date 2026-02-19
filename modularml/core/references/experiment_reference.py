@@ -1,3 +1,5 @@
+"""Experiment-level reference helpers for nodes and execution data."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
@@ -13,19 +15,48 @@ if TYPE_CHECKING:
 
 
 class ResolutionError(RuntimeError):
-    pass
+    """Raised when a reference target cannot be resolved."""
 
 
 @dataclass(frozen=True)
 class ExperimentReference(ReferenceLike, Configurable):
-    """Base class for references resolvable at the Experiment scope."""
+    """
+    Base class for references resolvable at the experiment scope.
+
+    Attributes:
+        None: This base dataclass does not declare fields.
+
+    """
 
     def resolve(self, ctx: ExperimentContext | None = None):
+        """
+        Resolve the reference within an experiment context.
+
+        Args:
+            ctx (ExperimentContext | None): Context to resolve against. Defaults to active context.
+
+        Returns:
+            Any: Resolved object/value.
+
+        """
         if ctx is None:
             ctx = ExperimentContext.get_active()
         return self._resolve_experiment(ctx)
 
     def _resolve_experiment(self, ctx: ExperimentContext):
+        """
+        Resolve the reference for a concrete :class:`ExperimentContext`.
+
+        Args:
+            ctx (ExperimentContext): Experiment context to resolve against.
+
+        Returns:
+            Any: Resolved object or value.
+
+        Raises:
+            NotImplementedError: Always for the abstract base class.
+
+        """
         raise NotImplementedError
 
     def to_string(
@@ -35,13 +66,20 @@ class ExperimentReference(ReferenceLike, Configurable):
         include_node_id: bool = False,
     ) -> str:
         """
-        Joins all non-null fields into a single string.
+        Join all non-null fields into a dotted path representation.
+
+        Args:
+            separator (str): Separator used when concatenating parts. Defaults to ".".
+            include_node_id (bool): Whether to include the `node_id` field. Defaults to False.
+
+        Returns:
+            str: Dotted string representation of the reference.
 
         Example:
-        ``` python
-            ref = DataReference(node='PulseFeatures', domain='features', key='voltage')
-            ref.to_string()
-            # 'PulseFeatures.features.voltage'
+        ```python
+            >>> ref = DataReference(node="PulseFeatures", domain="features", key="voltage")
+            >>> ref.to_string()
+            "PulseFeatures.features.voltage"
         ```
 
         """
@@ -57,18 +95,46 @@ class ExperimentReference(ReferenceLike, Configurable):
     # Configurable
     # ================================================
     def get_config(self) -> dict[str, Any]:
-        """Return a JSON-serializable configuration."""
+        """
+        Return a JSON-serializable configuration.
+
+        Returns:
+            dict[str, Any]: Configuration suitable for :meth:`from_config`.
+
+        Raises:
+            NotImplementedError: Always for the abstract base class.
+
+        """
         raise NotImplementedError
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> ExperimentReference:
-        """Reconstructs the reference from config."""
+        """
+        Reconstruct the reference from configuration.
+
+        Args:
+            config (dict[str, Any]): Serialized reference settings.
+
+        Returns:
+            ExperimentReference: Reconstructed reference.
+
+        Raises:
+            NotImplementedError: Always for the abstract base class.
+
+        """
         raise NotImplementedError
 
 
 @dataclass(frozen=True)
 class ExperimentNodeReference(ExperimentReference):
-    """Reference to an ExperimentNode by label or id."""
+    """
+    Reference to an :class:`ExperimentNode` by label or ID.
+
+    Attributes:
+        node_label (str | None): Preferred node label.
+        node_id (str | None): Preferred node identifier.
+
+    """
 
     node_label: str | None = None
     node_id: str | None = None
@@ -77,13 +143,36 @@ class ExperimentNodeReference(ExperimentReference):
         self,
         ctx: ExperimentContext | None = None,
     ) -> ExperimentNode:
-        """Resolves this reference to a ExperimentNode instance."""
+        """
+        Resolve this reference to an :class:`ExperimentNode`.
+
+        Args:
+            ctx (ExperimentContext | None): Context to resolve against.
+
+        Returns:
+            ExperimentNode: Resolved node instance.
+
+        """
         return super().resolve(ctx=ctx)
 
     def _resolve_experiment(
         self,
         ctx: ExperimentContext,
     ) -> ExperimentNode:
+        """
+        Resolve the reference into an :class:`ExperimentNode`.
+
+        Args:
+            ctx (ExperimentContext): Experiment context containing the target node.
+
+        Returns:
+            ExperimentNode: Matching experiment node.
+
+        Raises:
+            TypeError: If `ctx` is not an :class:`ExperimentContext`.
+            ResolutionError: If the node does not exist in the context.
+
+        """
         if not isinstance(ctx, ExperimentContext):
             msg = (
                 "ExperimentNodeReference requires an ExperimentContext."
@@ -123,7 +212,13 @@ class ExperimentNodeReference(ExperimentReference):
     # Configurable
     # ================================================
     def get_config(self) -> dict[str, Any]:
-        """Return a JSON-serializable configuration."""
+        """
+        Return a JSON-serializable configuration.
+
+        Returns:
+            dict[str, Any]: Serialized configuration data.
+
+        """
         return {
             "node_id": self.node_id,
             "node_label": self.node_label,
@@ -131,13 +226,29 @@ class ExperimentNodeReference(ExperimentReference):
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> ExperimentReference:
-        """Reconstructs the reference from config."""
+        """
+        Reconstruct the reference from configuration.
+
+        Args:
+            config (dict[str, Any]): Serialized reference settings.
+
+        Returns:
+            ExperimentReference: Rehydrated reference.
+
+        """
         return cls(**config)
 
 
 @dataclass(frozen=True)
 class GraphNodeReference(ExperimentNodeReference):
-    """Reference to an GraphNode by label or id."""
+    """
+    Reference to a :class:`GraphNode` by label or ID.
+
+    Attributes:
+        node_label (str | None): Preferred node label.
+        node_id (str | None): Preferred node identifier.
+
+    """
 
     node_label: str | None = None
     node_id: str | None = None
@@ -146,13 +257,36 @@ class GraphNodeReference(ExperimentNodeReference):
         self,
         ctx: ExperimentContext | None = None,
     ) -> GraphNode:
-        """Resolves this reference to a GraphNode instance."""
+        """
+        Resolve this reference to a :class:`GraphNode`.
+
+        Args:
+            ctx (ExperimentContext | None): Context to resolve against.
+
+        Returns:
+            GraphNode: Resolved node instance.
+
+        """
         return super().resolve(ctx=ctx)
 
     def _resolve_experiment(
         self,
         ctx: ExperimentContext,
     ) -> GraphNode:
+        """
+        Resolve the reference into a :class:`GraphNode`.
+
+        Args:
+            ctx (ExperimentContext): Experiment context containing the target node.
+
+        Returns:
+            GraphNode: Matching graph node.
+
+        Raises:
+            TypeError: If `ctx` is not an :class:`ExperimentContext`.
+            ResolutionError: If the node does not exist in the context.
+
+        """
         if not isinstance(ctx, ExperimentContext):
             msg = (
                 "GraphNodeReference requires an ExperimentContext."
@@ -186,7 +320,13 @@ class GraphNodeReference(ExperimentNodeReference):
     # Configurable
     # ================================================
     def get_config(self) -> dict[str, Any]:
-        """Return a JSON-serializable configuration."""
+        """
+        Return a JSON-serializable configuration.
+
+        Returns:
+            dict[str, Any]: Serialized configuration data.
+
+        """
         return {
             "exp_node_type": "GraphNode",
             "node_id": self.node_id,
@@ -195,7 +335,19 @@ class GraphNodeReference(ExperimentNodeReference):
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> GraphNodeReference:
-        """Reconstructs the reference from config."""
+        """
+        Reconstruct the reference from configuration.
+
+        Args:
+            config (dict[str, Any]): Serialized reference data.
+
+        Returns:
+            GraphNodeReference: Rehydrated reference instance.
+
+        Raises:
+            ValueError: If the configuration is missing required metadata.
+
+        """
         ref_type = config.pop("exp_node_type", None)
         if ref_type is None:
             msg = "Config must contain `exp_node_type`."

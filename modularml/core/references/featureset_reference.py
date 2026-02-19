@@ -1,3 +1,5 @@
+"""FeatureSet reference helpers for selecting columns and splits."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -28,7 +30,17 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class FeatureSetReference(ExperimentNodeReference):
-    """Declarative reference to a subset of columns from a FeatureSet."""
+    """
+    Declarative reference to a subset of columns from a :class:`FeatureSet`.
+
+    Attributes:
+        node_label (str | None): Preferred FeatureSet label.
+        node_id (str | None): Preferred FeatureSet identifier.
+        features (tuple[str, ...] | None): Feature columns or selectors.
+        targets (tuple[str, ...] | None): Target columns or selectors.
+        tags (tuple[str, ...] | None): Tag columns or selectors.
+
+    """
 
     # ExperimentNode
     node_label: str | None = None
@@ -43,13 +55,36 @@ class FeatureSetReference(ExperimentNodeReference):
         self,
         ctx: ExperimentContext | None = None,
     ) -> FeatureSetView:
-        """Resolves this reference to a FeatureSetView instance."""
+        """
+        Resolve this reference to a :class:`FeatureSetView`.
+
+        Args:
+            ctx (ExperimentContext | None): Experiment context used for resolution.
+
+        Returns:
+            FeatureSetView: View filtered according to the configured columns.
+
+        """
         return super().resolve(ctx=ctx)
 
     def _resolve_experiment(
         self,
         ctx: ExperimentContext,
     ) -> FeatureSetView:
+        """
+        Resolve to a :class:`FeatureSetView` using the provided context.
+
+        Args:
+            ctx (ExperimentContext): Experiment context holding the FeatureSet.
+
+        Returns:
+            FeatureSetView: View filtered to the requested columns.
+
+        Raises:
+            TypeError: If `ctx` is not an :class:`ExperimentContext`.
+            ResolutionError: If the FeatureSet or columns cannot be resolved.
+
+        """
         from modularml.core.data.featureset import FeatureSet
 
         if not isinstance(ctx, ExperimentContext):
@@ -98,7 +133,13 @@ class FeatureSetReference(ExperimentNodeReference):
     # Configurable
     # ================================================
     def get_config(self) -> dict[str, Any]:
-        """Return a JSON-serializable configuration."""
+        """
+        Return a JSON-serializable configuration.
+
+        Returns:
+            dict[str, Any]: Serialized configuration values.
+
+        """
         return {
             "node_id": self.node_id,
             "node_label": self.node_label,
@@ -108,14 +149,31 @@ class FeatureSetReference(ExperimentNodeReference):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> FeatureSetReference:
-        """Reconstructs the reference from config."""
+    def from_config(cls, config: dict[str, Any]) -> FeatureSetColumnReference:
+        """
+        Reconstruct the reference from configuration.
+
+        Args:
+            config (dict[str, Any]): Serialized configuration values.
+
+        Returns:
+            FeatureSetReference: Recreated reference instance.
+
+        """
         return cls(**config)
 
 
 @dataclass(frozen=True)
 class FeatureSetSplitReference(ExperimentReference):
-    """Declarative reference to a subset of columns from a FeatureSet."""
+    """
+    Reference to a :class:`FeatureSet` split.
+
+    Attributes:
+        split_name (str): Name of the split to retrieve.
+        node_label (str | None): Preferred FeatureSet label.
+        node_id (str | None): Preferred FeatureSet identifier.
+
+    """
 
     # Split-specific
     split_name: str
@@ -128,13 +186,36 @@ class FeatureSetSplitReference(ExperimentReference):
         self,
         ctx: ExperimentContext | None = None,
     ) -> FeatureSetView:
-        """Resolves reference to a view of the FeatureSet split instance."""
+        """
+        Resolve the reference to a :class:`FeatureSetView` split.
+
+        Args:
+            ctx (ExperimentContext | None): Experiment context used for resolution.
+
+        Returns:
+            FeatureSetView: View of the requested split.
+
+        """
         return super().resolve(ctx=ctx)
 
     def _resolve_experiment(
         self,
         ctx: ExperimentContext,
     ) -> FeatureSetView:
+        """
+        Resolve to a split view of the referenced :class:`FeatureSet`.
+
+        Args:
+            ctx (ExperimentContext): Experiment context holding the FeatureSet.
+
+        Returns:
+            FeatureSetView: View filtered to the requested split.
+
+        Raises:
+            TypeError: If `ctx` is not an :class:`ExperimentContext`.
+            ResolutionError: If the FeatureSet or split does not exist.
+
+        """
         from modularml.core.data.featureset import FeatureSet
 
         if not isinstance(ctx, ExperimentContext):
@@ -168,7 +249,13 @@ class FeatureSetSplitReference(ExperimentReference):
     # Configurable
     # ================================================
     def get_config(self) -> dict[str, Any]:
-        """Return a JSON-serializable configuration."""
+        """
+        Return a JSON-serializable configuration.
+
+        Returns:
+            dict[str, Any]: Serialized configuration values.
+
+        """
         return {
             "node_id": self.node_id,
             "node_label": self.node_label,
@@ -176,14 +263,33 @@ class FeatureSetSplitReference(ExperimentReference):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> FeatureSetReference:
-        """Reconstructs the reference from config."""
+    def from_config(cls, config: dict[str, Any]) -> FeatureSetSplitReference:
+        """
+        Reconstruct the reference from configuration.
+
+        Args:
+            config (dict[str, Any]): Serialized configuration values.
+
+        Returns:
+            FeatureSetSplitReference: Recreated reference instance.
+
+        """
         return cls(**config)
 
 
 @dataclass(frozen=True)
 class FeatureSetColumnReference(ExperimentReference):
-    """Reference to a single column of a FeatureSet."""
+    """
+    Reference to a single column of a :class:`FeatureSet`.
+
+    Attributes:
+        domain (str): Column domain such as `features` or `targets`.
+        key (str): Column key within the domain.
+        rep (str): Representation identifier of the column.
+        node_label (str | None): Preferred FeatureSet label.
+        node_id (str | None): Preferred FeatureSet identifier.
+
+    """
 
     # FeatureSet-specific (single column)
     domain: str
@@ -195,7 +301,7 @@ class FeatureSetColumnReference(ExperimentReference):
     node_id: str | None = None
 
     def __post_init__(self):
-        # Validate domain
+        """Validate the configured domain."""
         valid_ds = [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS, DOMAIN_SAMPLE_ID]
         if self.domain not in valid_ds:
             msg = f"Domain must be one of: {valid_ds}. Received: {self.domain}."
@@ -205,13 +311,36 @@ class FeatureSetColumnReference(ExperimentReference):
         self,
         ctx: ExperimentContext | None = None,
     ) -> FeatureSetView:
-        """Resolves this single-column reference to a FeatureSetView instance."""
+        """
+        Resolve the reference to a single-column :class:`FeatureSetView`.
+
+        Args:
+            ctx (ExperimentContext | None): Experiment context used for resolution.
+
+        Returns:
+            FeatureSetView: View exposing the configured column.
+
+        """
         return super().resolve(ctx=ctx)
 
     def _resolve_experiment(
         self,
         ctx: ExperimentContext,
     ) -> FeatureSetView:
+        """
+        Resolve into a single-column view of the referenced :class:`FeatureSet`.
+
+        Args:
+            ctx (ExperimentContext): Experiment context containing the FeatureSet.
+
+        Returns:
+            FeatureSetView: Single-column view resolved from the FeatureSet.
+
+        Raises:
+            TypeError: If `ctx` is not an :class:`ExperimentContext`.
+            ResolutionError: If the referenced column cannot be resolved.
+
+        """
         if not isinstance(ctx, ExperimentContext):
             msg = (
                 "FeatureSetColumnReference requires an ExperimentContext."
@@ -241,31 +370,31 @@ class FeatureSetColumnReference(ExperimentReference):
         known_attrs: dict[str, str] | None = None,
     ) -> FeatureSetColumnReference:
         """
-        Parse a string into a FeatureSetColumnReference.
+        Parse a string into a :class:`FeatureSetColumnReference`.
 
         Supported forms (order-agnostic):
-            - FeatureSet.features.key.rep
-            - FeatureSet.key.rep
-            - FeatureSet.key
-            - features.key.rep        (only if exactly one FeatureSet exists)
-            - key.rep                 (same constraint)
-            - key                     (same constraint)
+            * FeatureSet.features.key.rep
+            * FeatureSet.key.rep
+            * FeatureSet.key
+            * features.key.rep (only if exactly one FeatureSet exists)
+            * key.rep (same constraint)
+            * key (same constraint)
 
         Resolution rules:
-            - domain inferred from FeatureSet schema if missing
-            - rep defaults to REP_RAW if ambiguous (with warning)
+            * domain inferred from the :class:`FeatureSet` schema if missing
+            * rep defaults to `REP_RAW` if ambiguous (with warning)
 
         Args:
-            val (str):
-                String vlaue to parsed in a true reference.
-            experiment (ExperimentContext):
-                Context of active nodes.
-            known_attrs (dict[str, str], optional):
-                Known attributes can be provided. They will be used to supplement
-                any attributes parsed from `x`.
+            val (str): String value to parse into a column reference.
+            experiment (ExperimentContext): Experiment containing FeatureSet nodes.
+            known_attrs (dict[str, str] | None): Optional attributes used to supplement parsed values.
 
         Returns:
-            FeatureSetColumnReference
+            FeatureSetColumnReference: Parsed column reference.
+
+        Raises:
+            ValueError: If unknown attributes are provided.
+            ResolutionError: If the string cannot be resolved to a unique column.
 
         """
         parts = val.split(".")
@@ -470,7 +599,13 @@ class FeatureSetColumnReference(ExperimentReference):
     # Configurable
     # ================================================
     def get_config(self) -> dict[str, Any]:
-        """Return a JSON-serializable configuration."""
+        """
+        Return a JSON-serializable configuration.
+
+        Returns:
+            dict[str, Any]: Serialized configuration values.
+
+        """
         return {
             "node_id": self.node_id,
             "node_label": self.node_label,
@@ -480,6 +615,15 @@ class FeatureSetColumnReference(ExperimentReference):
         }
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> FeatureSetReference:
-        """Reconstructs the reference from config."""
+    def from_config(cls, config: dict[str, Any]) -> FeatureSetColumnReference:
+        """
+        Reconstruct the reference from configuration.
+
+        Args:
+            config (dict[str, Any]): Serialized configuration values.
+
+        Returns:
+            FeatureSetColumnReference: Recreated reference instance.
+
+        """
         return cls(**config)

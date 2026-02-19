@@ -1,3 +1,5 @@
+"""Registration helpers for built-in reference classes."""
+
 from modularml.core.io.symbol_registry import symbol_registry
 # from modularml.core.io.conventions import SerializationKind, kind_registry
 
@@ -16,6 +18,13 @@ from .model_io_reference import ModelOutputReference
 
 
 def register_builtin():
+    """
+    Register built-in reference classes with the symbol registry.
+
+    Returns:
+        None: This function mutates the global registry in place.
+
+    """
     # Register reference types
     symbol_registry.register_builtin_class(
         key="ExecutionReference",
@@ -54,4 +63,11 @@ def register_builtin():
 
 
 def register_kinds():
-    pass
+    """
+    Register reference serialization kinds.
+
+    Returns:
+        None: Placeholder that should register :class:`SerializationKind` instances.
+
+    """
+    return
