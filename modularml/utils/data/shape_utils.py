@@ -4,9 +4,9 @@ from collections.abc import Iterable
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
 from modularml.utils.environment.optional_imports import (
-    check_pandas,
     check_tensorflow,
     check_torch,
 )
@@ -103,7 +103,6 @@ def get_shape(x) -> ShapeLike:
     """
     torch = check_torch()
     tf = check_tensorflow()
-    pd = check_pandas()
 
     # --- None or scalars ---
     if x is None or isinstance(x, (int, float, complex, bool, str, bytes)):
