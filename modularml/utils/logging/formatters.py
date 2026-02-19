@@ -1,3 +1,5 @@
+"""Logging formatter implementations for ModularML outputs."""
+
 import logging
 import textwrap
 from datetime import datetime
@@ -10,6 +12,16 @@ class ModularMLFormatter(logging.Formatter):
     """Custom log formatter with consistent timestamp, level, and source context."""
 
     def format(self, record: logging.LogRecord) -> str:
+        """
+        Format a :class:`logging.LogRecord` into a single-line message.
+
+        Args:
+            record (logging.LogRecord): Log record to format.
+
+        Returns:
+            str: Formatted log line.
+
+        """
         timestamp = datetime.fromtimestamp(record.created).strftime("%H:%M:%S")
         level = record.levelname.ljust(8)
         location = f"{record.module}:{record.lineno}"
@@ -19,9 +31,22 @@ class ModularMLFormatter(logging.Formatter):
 
 
 class _BannerMixin:
+    """Shared helpers for banner-style formatter implementations."""
+
     max_width: int = 88
 
     def _wrap(self, text: str, *, indent: int = 2) -> list[str]:
+        """
+        Wrap text to the configured banner width.
+
+        Args:
+            text (str): Message to wrap.
+            indent (int): Spaces to indent each wrapped line.
+
+        Returns:
+            list[str]: Wrapped and indented lines.
+
+        """
         pad = " " * indent
         return [
             pad + line
@@ -34,17 +59,20 @@ class _BannerMixin:
         ]
 
     def _supports_color(self) -> bool:
+        """Return True if ANSI color output is supported."""
         import os
         import sys
 
         return sys.stdout.isatty() and os.environ.get("TERM") not in (None, "dumb")
 
     def _color(self, text: str, *, code: str) -> str:
+        """Wrap text using ANSI codes when available."""
         if not self._supports_color():
             return text
         return f"\033[{code}m{text}\033[0m"
 
     def _separator(self, label: str | None = None) -> str:
+        """Return a banner separator line optionally labeled with `label`."""
         if label:
             core = f" {label} "
             side = (self.max_width - len(core)) // 2
@@ -67,10 +95,27 @@ class ModularMLBannerFormatter(ModularMLFormatter, _BannerMixin):
     """
 
     def __init__(self, *, max_width: int = 88) -> None:
+        """
+        Initialize the formatter with an optional maximum width.
+
+        Args:
+            max_width (int): Maximum banner width in characters.
+
+        """
         super().__init__()
         self.max_width = max_width
 
     def format(self, record: logging.LogRecord) -> str:
+        """
+        Format a :class:`logging.LogRecord` into a banner block.
+
+        Args:
+            record (logging.LogRecord): Log record to format.
+
+        Returns:
+            str: Multi-line banner string.
+
+        """
         level = record.levelname
 
         # Optional custom title_desc:
@@ -119,22 +164,39 @@ class WarningFormatter(ModularMLFormatter, _BannerMixin):
 
     @staticmethod
     def _short_location(filename: str) -> str:
+        """Return a shortened filename for display."""
         return Path(filename).name
 
     def _red(self, text: str) -> str:
-        """Color text red if supported."""
+        """
+        Color text red if supported.
+
+        Args:
+            text (str): Message text to wrap.
+
+        Returns:
+            str: Colored text when supported, otherwise the original text.
+
+        """
         return self._color(text=text, code=31)
 
     def format(self, record: logging.LogRecord) -> str:
         """
         Format a warning log record.
 
-        Expected ``record.extra`` fields:
-        - warning_category
-        - warning_filename
-        - warning_lineno
-        - warning_message
-        - warning_hints
+        Expected `record.extra` fields:
+            - warning_category
+            - warning_filename
+            - warning_lineno
+            - warning_message
+            - warning_hints
+
+        Args:
+            record (logging.LogRecord): Log record to format.
+
+        Returns:
+            str: Banner-rendered warning string.
+
         """
         category = record.warning_category
         filename = record.warning_filename

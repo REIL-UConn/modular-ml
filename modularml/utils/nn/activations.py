@@ -1,3 +1,5 @@
+"""Activation resolution helpers for backend-specific layers."""
+
 from typing import Any
 
 from modularml.utils.environment.optional_imports import ensure_tensorflow, ensure_torch
@@ -41,7 +43,7 @@ def resolve_activation(
             If `activation` is a string but `backend` is not provided.
 
     Examples:
-        ``` python
+    ```python
         >>> resolve_activation("relu", backend="torch")
         ReLU()
 
@@ -50,11 +52,13 @@ def resolve_activation(
 
         >>> resolve_activation(tf.keras.layers.ReLU)
         <class 'keras.layers.activation.relu.ReLU'>
-        ```
+    ```
 
     Notes:
-        - Passing instantiated objects (`torch.nn.ReLU()`, `tf.keras.layers.ReLU()`) will return them unchanged.
-        - Passing uninstantiated layer classes will return the class itself (no instantiation).
+        - Passing instantiated objects (`torch.nn.ReLU()`, `tf.keras.layers.ReLU()`)
+          will return them unchanged.
+        - Passing uninstantiated layer classes will return the class itself
+          (no instantiation).
         - For name strings, a new layer instance is created based on the backend.
 
     """
@@ -68,7 +72,9 @@ def resolve_activation(
 
     # Case 2 — string name
     if backend is None:
-        raise ValueError("Backend must be provided when activation is specified by name (string).")
+        raise ValueError(
+            "Backend must be provided when activation is specified by name (string).",
+        )
 
     return resolve_activation_by_name(activation, backend)
 
@@ -106,13 +112,13 @@ def resolve_activation_by_name(name: str, backend: Backend | str):
             selected backend.
 
     Examples:
-        ``` python
+    ```python
         >>> resolve_activation_by_name("relu", "torch")
         ReLU()
 
         >>> resolve_activation_by_name("tanh", "tensorflow")
         <keras.src.layers.activation.tanh.Tanh object at ...>
-        ```
+    ```
 
     Notes:
         - Each call returns a **new layer instance**, not a shared singleton.

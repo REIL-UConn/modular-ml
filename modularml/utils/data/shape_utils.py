@@ -1,14 +1,23 @@
+"""Shape inference utilities shared across ModularML data utilities."""
+
 from collections.abc import Iterable
 from typing import Any
 
 import numpy as np
 
-from modularml.utils.environment.optional_imports import check_pandas, check_tensorflow, check_torch
+from modularml.utils.environment.optional_imports import (
+    check_pandas,
+    check_tensorflow,
+    check_torch,
+)
 
 ShapeLike = tuple[int, ...] | dict[str, Any]
 
 
-def shapes_similar_except_singleton(shape_a: tuple[int, ...], shape_b: tuple[int, ...]) -> bool:
+def shapes_similar_except_singleton(
+    shape_a: tuple[int, ...],
+    shape_b: tuple[int, ...],
+) -> bool:
     """
     Returns True if two shapes are equal except for singleton (size-1) dimensions.
 
@@ -19,11 +28,11 @@ def shapes_similar_except_singleton(shape_a: tuple[int, ...], shape_b: tuple[int
         (32, 2, 4) ≈ (32, 4)        → False  (non-singleton mismatch)
 
     Args:
-        shape_a (tuple[int]): First shape.
-        shape_b (tuple[int]): Second shape.
+        shape_a (tuple[int, ...]): First shape.
+        shape_b (tuple[int, ...]): Second shape.
 
     Returns:
-        bool: True if the shapes are equivalent ignoring singleton dims.
+        bool: True if the shapes are equivalent ignoring singleton dimensions.
 
     """
     # Remove singleton dimensions
@@ -62,8 +71,11 @@ def get_shape(x) -> ShapeLike:
             {"__shape__": (len,), "element": ShapeLike}
     - **Generic objects with `.shape` attribute** -> returns tuple(s)
 
+    Args:
+        x (Any): Object whose structural shape should be inferred.
+
     Returns:
-        ShapeLike (tuple[int, ...] | dict[str, Any])
+        ShapeLike: Tuple or nested mapping describing the shape.
 
     Conventions:
         - Scalars -> ()
@@ -177,17 +189,17 @@ def ensure_tuple_shape(
         is raised.
 
     Args:
-        shape (Iterable):
-            Shape values.
-        min_len (int):
-            The minimum number of elements allowed in the returned tuple.
-            Defaults to 1.
-        max_len (int):
-            The maximum number of elements allowed in the returned tuple.
-            If None, no max is enforced. Defaults to None.
-        allow_null_shape (bool):
-            Whether the input and output shape can be None.
-            Defaults to False.
+        shape (Iterable): Shape values.
+        min_len (int): Minimum number of elements in the returned tuple.
+        max_len (int | None): Maximum number of elements allowed in the tuple.
+        allow_null_shape (bool): Return `None` when the input is `None`.
+
+    Returns:
+        tuple[int, ...] | None: Normalized shape tuple or `None`.
+
+    Raises:
+        TypeError: If `shape` is not iterable.
+        ValueError: If dimensions are negative or cannot satisfy `max_len`.
 
     """
     if shape is None:
@@ -223,7 +235,10 @@ def ensure_tuple_shape(
                 i += 1
 
         if len(reduced) > max_len:
-            msg = f"Cannot reduce shape {shape_tuple} to max_len={max_len} without removing non-singleton dimensions."
+            msg = (
+                f"Cannot reduce shape {shape_tuple} to max_len={max_len} "
+                "without removing non-singleton dimensions."
+            )
             raise ValueError(msg)
 
         shape_tuple = tuple(reduced)

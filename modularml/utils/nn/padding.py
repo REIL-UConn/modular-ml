@@ -1,3 +1,5 @@
+"""Padding utilities shared across multiple neural network backends."""
+
 from enum import Enum
 
 from modularml.utils.nn.backend import Backend
@@ -31,7 +33,7 @@ def map_pad_mode_to_backend(mode: PadMode, backend: str | Backend) -> str:
 
     Args:
         mode (PadMode): Universal padding mode.
-        backend (str): One of ['torch', 'tensorflow', 'scikit'].
+        backend (str | Backend): Backend identifier (`torch`, `tensorflow`, `scikit`).
 
     Returns:
         str: Backend-specific padding mode string.
@@ -46,7 +48,11 @@ def map_pad_mode_to_backend(mode: PadMode, backend: str | Backend) -> str:
     match (mode, backend):
         case (PadMode.CONSTANT, _):
             return "constant"
-        case (PadMode.REFLECT, "torch") | (PadMode.REFLECT, "tensorflow") | (PadMode.REFLECT, "scikit"):
+        case (
+            (PadMode.REFLECT, "torch")
+            | (PadMode.REFLECT, "tensorflow")
+            | (PadMode.REFLECT, "scikit")
+        ):
             return "reflect"
         case (PadMode.REPLICATE, "torch"):
             return "replicate"

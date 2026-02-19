@@ -1,3 +1,5 @@
+"""Training helpers for preserving graph state and detaching tensors."""
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -15,7 +17,13 @@ TensorLike: TypeAlias = Any
 
 @contextmanager
 def preserve_frozen_state(model_graph: ModelGraph):
-    """Context manager that restores frozen nodes after mutation."""
+    """
+    Context manager that restores frozen nodes after mutation.
+
+    Args:
+        model_graph (ModelGraph): Graph whose frozen nodes should be preserved.
+
+    """
     # Node IDs of frozen nodes prior to context execution
     frozen_before = set(model_graph.frozen_nodes.keys())
     try:
@@ -29,7 +37,16 @@ def preserve_frozen_state(model_graph: ModelGraph):
 
 
 def detach_tensor(t: TensorLike):
-    """Detach a tensor from its computation graph, backend-agnostic."""
+    """
+    Detach a tensor from its computation graph, backend-agnostic.
+
+    Args:
+        t (TensorLike): Tensor or array to detach.
+
+    Returns:
+        TensorLike: Detached copy when supported, otherwise the original object.
+
+    """
     torch = check_torch()
     tf = check_tensorflow()
 

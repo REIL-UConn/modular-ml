@@ -1,3 +1,5 @@
+"""Helpers for normalizing ModularML data format identifiers."""
+
 from enum import Enum
 
 import numpy as np
@@ -46,6 +48,19 @@ _TENSORLIKE_FORMATS = (
 
 
 def normalize_format(fmt: str | DataFormat) -> DataFormat:
+    """
+    Normalize a string or :class:`DataFormat` value into a :class:`DataFormat`.
+
+    Args:
+        fmt (str | DataFormat): Format identifier or enum instance.
+
+    Returns:
+        DataFormat: Canonical enum value.
+
+    Raises:
+        ValueError: If `fmt` cannot be resolved to a known format.
+
+    """
     if isinstance(fmt, DataFormat):
         return fmt
     fmt = fmt.lower()
@@ -56,17 +71,45 @@ def normalize_format(fmt: str | DataFormat) -> DataFormat:
 
 
 def format_requires_compatible_shapes(fmt: DataFormat) -> bool:
-    """Returns True if the specified DataFormat requires compatible shapes."""
+    """
+    Return True if the specified :class:`DataFormat` requires compatible shapes.
+
+    Args:
+        fmt (DataFormat): Format to inspect.
+
+    Returns:
+        bool: True if tensors must share shapes (NumPy, Torch, TensorFlow).
+
+    """
     return fmt in [DataFormat.NUMPY, DataFormat.TORCH, DataFormat.TENSORFLOW]
 
 
 def format_is_tensorlike(fmt: DataFormat) -> bool:
-    """True if specified DataFormat returns a tensor-like object."""
+    """
+    Return True if the specified :class:`DataFormat` yields tensor-like results.
+
+    Args:
+        fmt (DataFormat): Format to inspect.
+
+    Returns:
+        bool: True when `fmt` is a tensor format.
+
+    """
     fmt = normalize_format(fmt)
     return fmt in _TENSORLIKE_FORMATS
 
 
 def infer_data_type(obj) -> str:
+    """
+    Infer a coarse data type string for the provided object.
+
+    Args:
+        obj (Any): Object whose underlying data type should be determined.
+
+    Returns:
+        str: One of "float", "int", "bool", "string", or "unknown".
+
+    """
     torch = check_torch()
     tf = check_tensorflow()
 
@@ -102,7 +145,10 @@ def infer_data_type(obj) -> str:
             return "int"
         if np.issubdtype(np.asarray(obj).dtype, np.bool_):
             return "bool"
-        if np.issubdtype(np.asarray(obj).dtype, np.str_) or np.issubdtype(np.asarray(obj).dtype, np.object_):
+        if np.issubdtype(np.asarray(obj).dtype, np.str_) or np.issubdtype(
+            np.asarray(obj).dtype,
+            np.object_,
+        ):
             return "string"
         return "unknown"
 
@@ -120,6 +166,19 @@ def infer_data_type(obj) -> str:
 
 
 def get_data_format_for_backend(backend: str | Backend) -> DataFormat:
+    """
+    Map a backend identifier to its default :class:`DataFormat`.
+
+    Args:
+        backend (str | Backend): Backend name or enum instance.
+
+    Returns:
+        DataFormat: Default data format for the backend.
+
+    Raises:
+        ValueError: If the backend is unsupported.
+
+    """
     if isinstance(backend, str):
         backend = Backend(backend)
 

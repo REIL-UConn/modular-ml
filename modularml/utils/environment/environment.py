@@ -1,3 +1,5 @@
+"""Environment detection helpers and dynamic import utilities."""
+
 from __future__ import annotations
 
 import importlib
@@ -5,6 +7,13 @@ from typing import Any
 
 
 def _detect_notebook() -> bool:
+    """
+    Return True if running inside an IPython notebook-like shell.
+
+    Returns:
+        bool: True when executing in a notebook environment.
+
+    """
     try:
         from IPython import get_ipython
 
@@ -26,8 +35,10 @@ def import_from_path(path: str) -> Any:
     Dynamically import a class, function, or variable from a full module path.
 
     Example:
+    ```
         >>> cls = import_from_path("torch.nn.Linear")
         >>> Linear = cls
+    ```
 
     Args:
         path (str):

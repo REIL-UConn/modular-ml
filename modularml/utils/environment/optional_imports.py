@@ -1,21 +1,8 @@
-def ensure_pandas():
-    try:
-        import pandas as pd
-    except ImportError as exc:
-        msg = "pandas is required. Please install pandas to continue."
-        raise ImportError(msg) from exc
-    return pd
-
-
-def check_pandas():
-    try:
-        import pandas as pd
-    except ImportError:
-        return None
-    return pd
+"""Helpers for optional third-party dependencies."""
 
 
 def ensure_torch():
+    """Import torch, raising a helpful error if unavailable."""
     try:
         import torch
     except ImportError as exc:
@@ -25,6 +12,7 @@ def ensure_torch():
 
 
 def check_torch():
+    """Attempt to import torch, returning None if missing."""
     try:
         import torch
     except ImportError:
@@ -33,6 +21,7 @@ def check_torch():
 
 
 def ensure_tensorflow():
+    """Import tensorflow, raising a helpful error if unavailable."""
     try:
         import tensorflow as tf
     except ImportError as exc:
@@ -42,6 +31,7 @@ def ensure_tensorflow():
 
 
 def check_tensorflow():
+    """Attempt to import tensorflow, returning None if missing."""
     try:
         import tensorflow as tf
     except ImportError:

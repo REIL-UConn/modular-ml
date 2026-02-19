@@ -1,3 +1,5 @@
+"""Helpers for rendering nested summaries into ASCII boxes."""
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -6,6 +8,7 @@ SummaryRow = tuple[str, str | Iterable["SummaryRow"]]
 
 
 def _truncate(line: str, max_width: int) -> str:
+    """Truncate `line` to `max_width`, adding ellipses when necessary."""
     if len(line) <= max_width:
         return line
     if max_width <= 3:
@@ -18,9 +21,17 @@ def _try_inline(key: str, rows: Iterable[SummaryRow]) -> str | None:
     Try to render iterable inline.
 
     Rules:
-    - (k, "")  → render as `k`
-    - (k, v)   → render as `k=v`
-    - Nested iterables → not inlineable
+        - `(k, "")`  → render as `k`
+        - `(k, v)`   → render as `k=v`
+        - Nested iterables → not inlineable
+
+    Args:
+        key (str): Parent label.
+        rows (Iterable[SummaryRow]): Child rows to flatten.
+
+    Returns:
+        str | None: Inline string or None if expansion is required.
+
     """
     parts: list[str] = []
 
@@ -45,6 +56,19 @@ def _flatten_rows(
     indent: int = 0,
     indent_str: str = "  ",
 ) -> list[str]:
+    """
+    Flatten nested summary rows into formatted strings.
+
+    Args:
+        rows (Iterable[SummaryRow]): Rows to flatten.
+        max_width (int): Maximum width for each line.
+        indent (int): Current indentation level.
+        indent_str (str): String used per indent level.
+
+    Returns:
+        list[str]: Flattened, width-restricted lines.
+
+    """
     out: list[str] = []
     prefix = indent_str * indent
 
@@ -101,7 +125,18 @@ def format_summary_box(
     rows: Iterable[SummaryRow],
     max_width: int = 88,
 ) -> str:
-    """Format nested summary rows into a bordered, width-limited summary box."""
+    """
+    Format nested summary rows into a bordered, width-limited summary box.
+
+    Args:
+        title (str): Box title shown in the header.
+        rows (Iterable[SummaryRow]): Rows to render.
+        max_width (int): Maximum line width including borders.
+
+    Returns:
+        str: Rendered summary box.
+
+    """
     flat = _flatten_rows(rows, max_width=max_width)
 
     if not flat:
@@ -128,8 +163,15 @@ def safe_cast_to_summary_rows(obj: object) -> str | list[tuple[str, str]]:
     """
     Normalize an object for SummaryRow usage.
 
-    Uses _format_summary_rows if object has that attribute, otherwise
-    uses repr and safely casts any multi-line repr strings.
+    Uses `_summary_rows` if the object defines it, otherwise falls
+    back to `repr` and safely casts multi-line representations.
+
+    Args:
+        obj (object): Object to normalize.
+
+    Returns:
+        str | list[tuple[str, str]]: Normalized summary content.
+
     """
     if hasattr(obj, "_summary_rows"):
         return obj._summary_rows()
@@ -142,8 +184,22 @@ def safe_cast_to_summary_rows(obj: object) -> str | list[tuple[str, str]]:
 
 
 class Summarizable:
-    def _summary_rows(self) -> list[SummaryRow]: ...
+    """Mixin that provides a summary box rendering helper."""
+
+    def _summary_rows(self) -> list[SummaryRow]:  # pragma: no cover
+        """Return rows used by :meth:`summary`."""
+
     def summary(self, max_width: int = 88) -> str:
+        """
+        Render a formatted summary box for this object.
+
+        Args:
+            max_width (int): Maximum width for the rendered box.
+
+        Returns:
+            str: Summary box string.
+
+        """
         return format_summary_box(
             title=self.__class__.__name__,
             rows=self._summary_rows(),

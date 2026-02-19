@@ -1,10 +1,21 @@
+"""Data conversion helpers shared across ModularML utilities and backends."""
+
 from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
 
-from modularml.utils.data.data_format import DataFormat, format_requires_compatible_shapes, normalize_format
-from modularml.utils.environment.optional_imports import check_tensorflow, check_torch, ensure_tensorflow, ensure_torch
+from modularml.utils.data.data_format import (
+    DataFormat,
+    format_requires_compatible_shapes,
+    normalize_format,
+)
+from modularml.utils.environment.optional_imports import (
+    check_tensorflow,
+    check_torch,
+    ensure_tensorflow,
+    ensure_torch,
+)
 from modularml.utils.errors.error_handling import ErrorMode
 from modularml.utils.logging.warnings import warn
 from modularml.utils.nn.backend import Backend, infer_backend
@@ -22,21 +33,17 @@ def flatten_to_2d(arr: np.ndarray, merged_axes: int | tuple[int]):
 
     Args:
         arr (np.ndarray): Input N-D array.
-        merged_axes (int | tuple[int]):
-            Axes whose sizes are merged into a single dimension.
+        merged_axes (int | tuple[int]): Axes whose sizes are merged into a single dimension.
 
     Returns:
-        flat (np.ndarray): 2D array of shape (A, B).
-        meta (dict): Metadata for reversing the operation:
-            - "original_shape": tuple
-            - "merged_axes": tuple
+        tuple[np.ndarray, dict[str, tuple]]:
+            - Flattened 2D array of shape `(A, B)`.
+            - Metadata for reversing the operation (`original_shape`, `merged_axes`).
 
     Example:
-        ```python
         X.shape  # (1000, 3, 16, 16)
-        Y = flatten_to_2d(X, (2,3))
+        Y = flatten_to_2d(X, (2, 3))
         Y.shape  # (3000, 256)
-        ```
 
     """
     arr = np.asarray(arr)
@@ -82,12 +89,10 @@ def unflatten_from_2d(flat: np.ndarray, meta: dict):
 
     Args:
         flat (np.ndarray): 2D flattened array.
-        meta (dict): Metadata from `flatten_to_2d`:
-            - "original_shape": tuple
-            - "merged_axes": tuple
+        meta (dict): Metadata from :func:`flatten_to_2d` describing the original axes.
 
     Returns:
-        np.ndarray: The restored N-D array.
+        np.ndarray: Restored N-D array with its original shape.
 
     """
     original_shape = meta["original_shape"]
@@ -157,8 +162,7 @@ def align_ranks(arr1: Any, arr2: Any, backend: Backend | None = None) -> tuple:
             operations are used. If None, backend is inferred for each array.
 
     Returns:
-        tuple:
-            A pair `(arr1_aligned, arr2_aligned)` such that `arr1_aligned.shape == arr2_aligned.shape`.
+        tuple[Any, Any]: Pair `(arr1_aligned, arr2_aligned)` with matching shapes.
 
     Raises:
         ValueError:
@@ -184,7 +188,18 @@ def align_ranks(arr1: Any, arr2: Any, backend: Backend | None = None) -> tuple:
     tf = check_tensorflow()
 
     def _modify_arr(arr, singleton_idxs: list[int], arr_backend: Backend | None = None):
-        """Insert singletons at each index in `singleton_idxs`."""
+        """
+        Insert singleton axes into `arr` using backend-appropriate operations.
+
+        Args:
+            arr (Any): Tensor or array to reshape.
+            singleton_idxs (list[int]): Positions where singleton axes should be inserted.
+            arr_backend (Backend | None): Backend override. Defaults to inference from `arr`.
+
+        Returns:
+            Any: Reshaped tensor compatible with the backend.
+
+        """
         if arr_backend is None:
             arr_backend = infer_backend(arr)
 
@@ -231,7 +246,9 @@ def align_ranks(arr1: Any, arr2: Any, backend: Backend | None = None) -> tuple:
         ref, cmp = shape_1, shape_2
 
     # For each item in ref, see if cmp matches:
-    cmp_assignments = -1 * np.ones(shape=len(ref))  # each element corresponds to index in ref
+    cmp_assignments = -1 * np.ones(
+        shape=len(ref),
+    )  # each element corresponds to index in ref
     for i in range(len(cmp)):
         for j in range(i, len(ref)):
             if cmp[i] == ref[j]:
@@ -256,18 +273,15 @@ def stack_nested_numpy(obj: np.ndarray, shape: tuple[int, ...]) -> np.ndarray:
     Recursively stack nested NumPy object arrays into a dense array of shape (n_samples, *shape).
 
     Args:
-        obj (np.ndarray):
-            Outer NumPy array (dtype=object) where each element is either a NumPy array or \
-                another object array.
-        shape (tuple[int, ...]):
-            Expected inner shape per sample, excluding n_samples.
+        obj (np.ndarray): Object-dtype array containing nested arrays.
+        shape (tuple[int, ...]): Expected inner shape per sample, excluding `n_samples`.
 
     Returns:
-        np.ndarray: Dense NumPy array of shape (n_samples, *shape).
+        np.ndarray: Dense NumPy array of shape `(n_samples, *shape)`.
 
     Notes:
         - Assumes homogenous shapes across all samples.
-        - Never converts to PyList (keeps everything in NumPy).
+        - Never converts to Python lists.
         - Recurses only for object-dtype subarrays.
 
     """
@@ -279,7 +293,9 @@ def stack_nested_numpy(obj: np.ndarray, shape: tuple[int, ...]) -> np.ndarray:
         return obj.reshape((len(obj), *shape)) if shape else obj
 
     # Base case: final depth, inner arrays are numeric
-    if len(shape) == 1 or all(not isinstance(sub, np.ndarray) or sub.dtype != object for sub in obj):
+    if len(shape) == 1 or all(
+        not isinstance(sub, np.ndarray) or sub.dtype != object for sub in obj
+    ):
         return np.stack(obj, axis=0)
 
     # Recursive case: still object arrays inside
@@ -308,10 +324,10 @@ def merge_dict_of_arrays_to_numpy(
         - **"auto"**:    Attempts stack → concat(axis=0) → concat(axis=-1) → flatten.
 
     Args:
-        data: Mapping of key → array-like objects to merge.
-        mode: Merge strategy. Defaults to "auto".
-        axis: Axis for concatenation or stacking. Defaults depend on `mode`.
-        align_singletons: If True, adds singleton dimensions to align ranks.
+        data (dict[str, np.ndarray]): Mapping of key to array-like objects to merge.
+        mode (Literal["auto", "stack", "concat", "flatten"]): Merge strategy. Defaults to "auto".
+        axis (int | None): Axis for concatenation or stacking. Defaults depend on `mode`.
+        align_singletons (bool): Add singleton dimensions to align ranks when True.
 
     Returns:
         np.ndarray: The merged array.
@@ -331,6 +347,14 @@ def merge_dict_of_arrays_to_numpy(
               e.g. [(2, 3), (2, 2)] -> (10,)
             - If `axis` is specified: only flatten *after* that axis.
               e.g. [(10, 3, 2), (10, 4, 1)], axis=0 -> (10, 14)
+
+        Args:
+            arrays (list[np.ndarray]): Arrays to flatten.
+            axis (int | None): Axis preserved before flattening. If None, fully flatten.
+
+        Returns:
+            np.ndarray: Concatenated flattened array.
+
         """
         if not arrays:
             raise ValueError("Cannot flatten an empty list of arrays.")
@@ -346,6 +370,14 @@ def merge_dict_of_arrays_to_numpy(
         Concatenate all arrays along the given axis.
 
         Raises ValueError if dimensions (other than the target axis) are incompatible.
+
+        Args:
+            arrays (list[np.ndarray]): Arrays to concatenate.
+            axis (int): Axis along which to concatenate.
+
+        Returns:
+            np.ndarray: Concatenated output.
+
         """
         if not arrays:
             raise ValueError("Cannot concatenate an empty list of arrays.")
@@ -356,6 +388,14 @@ def merge_dict_of_arrays_to_numpy(
         Stack arrays along a *new* dimension (the dict-key axis).
 
         Raises ValueError if arrays differ in shape.
+
+        Args:
+            arrays (list[np.ndarray]): Arrays to stack.
+            axis (int): Axis index for the new dimension.
+
+        Returns:
+            np.ndarray: Stacked output array.
+
         """
         if not arrays:
             raise ValueError("Cannot stack an empty list of arrays.")
@@ -372,7 +412,11 @@ def merge_dict_of_arrays_to_numpy(
     ranks = [len(s) for s in arr_shapes]
     ranks_match = len(set(ranks)) == 1
     # Align rank to reference
-    if align_singletons and not (mode == "flatten" and axis is None) and not ranks_match:
+    if (
+        align_singletons
+        and not (mode == "flatten" and axis is None)
+        and not ranks_match
+    ):
         try:
             aligned_arrs = []
             # Use highest rank array as reference shape to match
@@ -560,7 +604,13 @@ def convert_dict_to_format(
 
     # List
     if fmt == DataFormat.LIST:
-        return [list(row) for row in zip(*[to_list(v, errors=errors) for v in data.values()], strict=True)]
+        return [
+            list(row)
+            for row in zip(
+                *[to_list(v, errors=errors) for v in data.values()],
+                strict=True,
+            )
+        ]
 
     msg = f"Unsupported data format: {fmt}"
     raise ValueError(msg)
@@ -578,10 +628,10 @@ def to_python(obj):
     - Dicts, tuples, and lists -> Recursively converted
 
     Args:
-        obj: Any object to convert.
+        obj (Any): Object to convert.
 
     Returns:
-        Python-native object.
+        Any: Python-native representation.
 
     """
     torch = check_torch()
@@ -627,14 +677,11 @@ def to_list(obj: Any, errors: ErrorMode = ErrorMode.RAISE):
     Converts any object into a Python list.
 
     Args:
-        obj: Any object to convert.
-        errors: How to handle non-listable objects.
-            - "raise": Raise TypeError if the object cannot be converted.
-            - "coerce": Force conversion where possible (wrap scalars, arrays, tensors, etc.).
-            - "ignore": Leave incompatible objects unchanged.
+        obj (Any): Object to convert.
+        errors (ErrorMode): How to handle non-listable objects.
 
     Returns:
-        list or object (if errors="ignore" and incompatible).
+        list[Any] | Any: Converted list or original object when ignored.
 
     """
     # If we're ignoring incompatible types, leave dicts unchanged directly
@@ -689,12 +736,12 @@ def to_numpy(
     call wraps the final scalar into a 0-D array.
 
     Args:
-        obj: Object to convert.
-        errors: Error handling mode (RAISE, COERCE, IGNORE).
-        _top_level: Internal flag to track recursion depth.
+        obj (Any): Object to convert.
+        errors (ErrorMode): Error handling mode (RAISE, COERCE, IGNORE).
+        _top_level (bool): Internal flag to track recursion depth.
 
     Returns:
-        np.ndarray or object (if IGNORE and conversion is not possible).
+        np.ndarray | Any: NumPy array or original object when ignored.
 
     """
     # If it's already a numpy array, just return
@@ -706,7 +753,9 @@ def to_numpy(
     # Dicts must use DICT_NUMPY format unless coerced
     if isinstance(py_obj, dict):
         if errors == ErrorMode.RAISE:
-            raise TypeError("Cannot convert dict directly to NumPy array. Use DICT_NUMPY instead.")
+            raise TypeError(
+                "Cannot convert dict directly to NumPy array. Use DICT_NUMPY instead.",
+            )
         if errors == ErrorMode.COERCE:
             return np.array(list(py_obj.values()))
         if errors == ErrorMode.IGNORE:
@@ -716,10 +765,14 @@ def to_numpy(
     if isinstance(py_obj, list | tuple):
         try:
             # Recursively convert every element to numpy before stacking
-            converted = [to_numpy(item, errors=errors, _top_level=False) for item in py_obj]
+            converted = [
+                to_numpy(item, errors=errors, _top_level=False) for item in py_obj
+            ]
             return np.array(
                 converted,
-                dtype=object if any(isinstance(c, np.ndarray) and c.ndim == 0 for c in converted) else None,
+                dtype=object
+                if any(isinstance(c, np.ndarray) and c.ndim == 0 for c in converted)
+                else None,
             )
         except Exception as e:
             if errors == ErrorMode.RAISE:
@@ -748,7 +801,17 @@ def to_numpy(
 
 
 def to_torch(obj: Any, errors: ErrorMode = ErrorMode.RAISE):
-    """Converts any object into a PyTorch tensor."""
+    """
+    Convert any object into a PyTorch tensor.
+
+    Args:
+        obj (Any): Object to convert.
+        errors (ErrorMode): Error handling strategy.
+
+    Returns:
+        torch.Tensor | Any: Torch tensor or original object when ignored.
+
+    """
     torch = ensure_torch()
 
     # If it's already a Torch Tensor, just return
@@ -769,7 +832,17 @@ def to_torch(obj: Any, errors: ErrorMode = ErrorMode.RAISE):
 
 
 def to_tensorflow(obj: Any, errors: ErrorMode = ErrorMode.RAISE):
-    """Converts any object into a TensorFlow tensor."""
+    """
+    Convert any object into a TensorFlow tensor.
+
+    Args:
+        obj (Any): Object to convert.
+        errors (ErrorMode): Error handling strategy.
+
+    Returns:
+        tensorflow.Tensor | Any: TensorFlow tensor or original object when ignored.
+
+    """
     tf = ensure_tensorflow()
 
     # If it's already a Tensforflow Tensor, just return
@@ -789,31 +862,21 @@ def to_tensorflow(obj: Any, errors: ErrorMode = ErrorMode.RAISE):
             return tf.convert_to_tensor(np.asarray([py_obj]), dtype=tf.float32)
 
 
-def enforce_numpy_shape(arr: np.ndarray, target_shape: tuple[int, ...]) -> np.ndarray:
-    arr = np.asarray(arr)
-    if arr.shape != target_shape:
-        arr = arr.reshape(target_shape)
-    return arr
-
-
 def convert_to_format(
     data: Any,
     fmt: str | DataFormat,
     errors: ErrorMode = ErrorMode.RAISE,
 ) -> Any:
     """
-    Converts a data object into the specified format.
+    Convert a data object into the specified format.
 
     Args:
-        data: Dicts, arrays, lists, scalars, or tensors.
-        fmt: Target data format to convert into.
-        errors: How to handle incompatible types:
-            - ErrorMode.RAISE: Raise an error when conversion fails.
-            - ErrorMode.COERCE: Force conversion where possible.
-            - ErrorMode.IGNORE: Leave unconvertible objects unchanged.
+        data (Any): Dicts, arrays, lists, scalars, or tensors.
+        fmt (str | DataFormat): Target data format to convert into.
+        errors (ErrorMode): Strategy for handling incompatible types.
 
     Returns:
-        Converted object.
+        Any: Converted object.
 
     """
     torch = check_torch()
@@ -821,7 +884,9 @@ def convert_to_format(
 
     fmt = normalize_format(fmt)
     if isinstance(data, dict):
-        raise TypeError("Use the `convert_dict_to_format` method for conversion of dict-like data.")
+        raise TypeError(
+            "Use the `convert_dict_to_format` method for conversion of dict-like data.",
+        )
 
     if fmt == DataFormat.NUMPY:
         return to_numpy(data, errors=errors)

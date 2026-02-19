@@ -1,3 +1,5 @@
+"""Rich progress manager for nested task displays."""
+
 from __future__ import annotations
 
 import contextlib
@@ -77,12 +79,14 @@ class ProgressManager:
     # ================================================
     @classmethod
     def activate(cls) -> ProgressManager:
+        """Create and register a new active progress manager."""
         mgr = cls()
         cls._ACTIVE = mgr
         return mgr
 
     @classmethod
     def get_active(cls) -> ProgressManager:
+        """Return the active progress manager, creating one if needed."""
         if cls._ACTIVE is None:
             cls._ACTIVE = cls()
             _register_ipython_hooks()
@@ -90,6 +94,7 @@ class ProgressManager:
 
     @classmethod
     def deactivate(cls):
+        """Deactivate and dispose of the active progress manager."""
         if cls._ACTIVE is not None:
             cls._ACTIVE._shutdown()
             cls._ACTIVE = None
@@ -98,6 +103,7 @@ class ProgressManager:
     # Style Registration
     # ================================================
     def register_style(self, style: ProgressStyle):
+        """Register a custom :class:`ProgressStyle` by name."""
         if style.name in self._styles:
             msg = f"Style name '{style.name}' already registered."
             raise ValueError(msg)

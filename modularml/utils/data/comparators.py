@@ -1,3 +1,5 @@
+"""Comparison helpers for array, tensor, and nested Python structures."""
+
 import numpy as np
 
 from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
@@ -8,6 +10,19 @@ tf = check_tensorflow()
 
 
 def arrays_equal(a, b, *, rtol=1e-6, atol=1e-8):
+    """
+    Return True if two NumPy arrays share the same shape, dtype, and values.
+
+    Args:
+        a (np.ndarray): First array to compare.
+        b (np.ndarray): Second array to compare.
+        rtol (float, optional): Relative tolerance for :func:`numpy.allclose`. Defaults to 1e-6.
+        atol (float, optional): Absolute tolerance for :func:`numpy.allclose`. Defaults to 1e-8.
+
+    Returns:
+        bool: True if arrays match under the specified tolerances.
+
+    """
     if a.shape != b.shape:
         return False
     if a.dtype != b.dtype:
@@ -16,7 +31,17 @@ def arrays_equal(a, b, *, rtol=1e-6, atol=1e-8):
 
 
 def deep_equal(a, b):
-    """Recursively check deep equality of arbitrarily nested dicts/lists/tuples."""
+    """
+    Recursively check equality of nested structures, tensors, and primitives.
+
+    Args:
+        a (Any): First structure to compare.
+        b (Any): Second structure to compare.
+
+    Returns:
+        bool: True if all nested elements compare equal.
+
+    """
     if a is b:
         return True
 
@@ -89,19 +114,16 @@ def deep_equal(a, b):
 
 def tensors_are_equal(a, b, *, tol: float = 1e-9, strict_backend_match: bool = True):
     """
-    Compares to Tensor-like elements for equality.
+    Compare two tensor-like elements for equality across supported backends.
 
     Args:
-        a (Tensor-like):
-            First tensor to compare.
-        b (Tensor-like):
-            Second tensor to compare.
-        tol (float, optional):
-            How close numeric values need to be to be considered equal.
-            Defaults to 1e-9.
-        strict_backend_match (bool, optional):
-            Whether a "match" requires the tensors be of the same backend, in addition
-            to value matches. Defaults to True.
+        a (Any): First tensor-like object to compare.
+        b (Any): Second tensor-like object to compare.
+        tol (float, optional): Absolute tolerance for :func:`numpy.allclose`. Defaults to 1e-9.
+        strict_backend_match (bool, optional): Require matching backends before comparing values.
+
+    Returns:
+        bool: True if tensors match backend (when requested), shape, and numeric values.
 
     """
 

@@ -1,3 +1,5 @@
+"""Artifact inspection utilities for safe analysis of packaged code."""
+
 import inspect
 import json
 import pathlib
@@ -56,7 +58,10 @@ def inspect_packaged_code(path: pathlib.Path) -> dict[str, str]:
             if not name.endswith(MML_FILE_EXTENSION):
                 continue
 
-            with root_zip.open(name) as nested_bytes, zipfile.ZipFile(nested_bytes) as nested_zip:
+            with (
+                root_zip.open(name) as nested_bytes,
+                zipfile.ZipFile(nested_bytes) as nested_zip,
+            ):
                 all_sources.update(
                     _inspect_mml_zip(
                         mml_zip=nested_zip,
@@ -74,7 +79,23 @@ def _inspect_mml_zip(
     root_zip: zipfile.ZipFile,
     label: str,
 ) -> dict[str, str]:
-    """Inspect a single opened `.mml` zip archive."""
+    """
+    Inspect a single opened `.mml` zip archive.
+
+    Args:
+        mml_zip (zipfile.ZipFile): Zip handle for the artifact being inspected.
+        root_zip (zipfile.ZipFile): Root zip handle where packaged code lives.
+        label (str): Human-readable label for error reporting.
+
+    Returns:
+        dict[str, str]: Mapping of `source_ref` values to encoded source text.
+
+    Raises:
+        ValueError: If the artifact is missing expected metadata.
+        RuntimeError: If the artifact config cannot be parsed.
+        FileNotFoundError: If packaged code referenced in the config is missing.
+
+    """
     sources: dict[str, str] = {}
 
     # Validate artifact.json

@@ -1,3 +1,5 @@
+"""Utilities for cloning objects via serialization."""
+
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -6,7 +8,16 @@ from modularml.core.io.serialization_policy import SerializationPolicy
 
 
 def clone_via_serialization(obj: Any):
-    """Create an isolated clone of an object by serialize/deserialize logic."""
+    """
+    Create an isolated clone of an object by serializing and deserializing it.
+
+    Args:
+        obj (Any): Object implementing the serializer protocols.
+
+    Returns:
+        Any: Deep-cloned instance created via artifact round-trip.
+
+    """
     from modularml.core.io.serializer import serializer
 
     with TemporaryDirectory() as tmpdir:

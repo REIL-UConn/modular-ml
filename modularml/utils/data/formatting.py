@@ -1,3 +1,5 @@
+"""Data formatting helpers for rounding, flattening, and slicing structures."""
+
 import math
 from collections import Counter
 from collections.abc import Iterable, Sequence
@@ -10,11 +12,14 @@ T = TypeVar("T")
 
 def normal_round(num, ndigits: int = 0):
     """
-    Rounds a float to the specified number of decimal places.
+    Round a numeric value to the specified number of decimal places.
 
     Args:
-        num (any): the value to round
-        ndigits: the number of digits to round to.
+        num (float | int): Value to round.
+        ndigits (int): Number of digits to round to.
+
+    Returns:
+        float | int: Rounded value.
 
     """
     if ndigits == 0:
@@ -35,8 +40,7 @@ def format_value_to_sig_digits(
     Args:
         value (float): Input number.
         sig_digits (int): Number of significant digits to keep.
-        round_integers (bool): If True, round integers to the specified
-            significant digits as well. If False, only apply decimal rounding.
+        round_integers (bool): Round integers to the specified significant digits when True.
 
     Returns:
         str: String representation of the formatted number.
@@ -46,14 +50,6 @@ def format_value_to_sig_digits(
         '1510'
         >>> format_value_to_sig_digits(12.3456, 3)
         '12.3'
-        >>> format_value_to_sig_digits(0.003123, 3)
-        '0.00312'
-        >>> format_value_to_sig_digits(0.00001234, 3)
-        '0.0000123'
-        >>> format_value_to_sig_digits(1235.123, 2)
-        '1200'
-        >>> format_value_to_sig_digits(1235.123, 2, round_integers=False)
-        '1235'
 
     """
     if value == 0 or math.isnan(value):
@@ -102,21 +98,15 @@ def flatten_dict_paths(
             A list of fully flattened paths using the specified separator.
 
     Raises:
-        TypeError:
-            If a list contains non-string elements, or if an unsupported
-            value type is encountered in the dictionary.
+        TypeError: If a sequence contains non-string elements or any value has an unsupported type.
 
     Examples:
-        ```python
-        flatten_dict_paths({"a": ["b", "c"]})
-        # ['a.b', 'a.c']
-
-        flatten_dict_paths({"a": {"b": "c", "d": "e"}})
-        # ['a.b.c', 'a.d.e']
-
-        flatten_dict_paths({"a": {"b": ["c", "f"], "d": ["e", "g"]}})
-        # ['a.b.c', 'a.b.f', 'a.d.e', 'a.d.g']
-        ```
+        >>> flatten_dict_paths({"a": ["b", "c"]})
+        ['a.b', 'a.c']
+        >>> flatten_dict_paths({"a": {"b": "c", "d": "e"}})
+        ['a.b.c', 'a.d.e']
+        >>> flatten_dict_paths({"a": {"b": ["c", "f"], "d": ["e", "g"]}})
+        ['a.b.c', ...]
 
     """
     paths = []
@@ -154,31 +144,24 @@ def ensure_list(x):
     - any other sequence (tuple, set, np.ndarray): return converted to list
 
     Args:
-        x: Any input value.
+        x (Any): Input value.
 
     Returns:
-        list: A list representation of `x`.
-
-    Raises:
-        TypeError: If the input is not convertible to a list.
+        list[Any]: List representation of `x`.
 
     """
     if x is None:
         return []
 
-    # If it's already a list, return directly
     if isinstance(x, list):
         return x
 
-    # Treat strings and all scalar types as atomic -> wrap in list
     if isinstance(x, (str, bytes, int, float, bool)):
         return [x]
 
-    # If it's a sequence (tuple, np.array, etc.), convert to list
     if isinstance(x, Sequence):
         return list(x)
 
-    # For any other single object (e.g. Enum, custom class), also wrap in list
     return [x]
 
 
@@ -191,12 +174,10 @@ def ensure_tuple(x):
         Iterables (excluding strings and bytes) are converted via tuple(x).
 
     Args:
-        x (Any):
-            Object to convert.
+        x (Any): Object to convert.
 
     Returns:
-        tuple:
-            Tuple representation of the input.
+        tuple[Any, ...]: Tuple representation of the input.
 
     """
     if isinstance(x, Iterable) and not isinstance(x, (str, bytes)):
@@ -213,6 +194,13 @@ def to_hashable(val: Any):
         - NumPy arrays are converted to tuples.
         - Lists are converted to tuples.
         - Nested structures are recursively converted.
+
+    Args:
+        val (Any): Value to convert.
+
+    Returns:
+        Hashable: Hashable representation of `val`.
+
     """
     if isinstance(val, np.ndarray):
         return tuple(to_hashable(x) for x in val.tolist())
@@ -236,15 +224,11 @@ def find_duplicates(
     Find all duplicate elements in a list.
 
     Args:
-        items (list[T]):
-            A list of elements.
-
-        ignore_case (bool, optional):
-            Whether to ignore the case of any string elements in `items`.
-            E.g., if True, `'mse'` would be a duplicate of `'MSE'`.
+        items (list[T]): Elements to inspect.
+        ignore_case (bool, optional): Compare string elements case-insensitively.
 
     Returns:
-        list[T]: A list of all elements which are not unique.
+        list[T]: Duplicate entries preserving their canonical representation.
 
     """
     if ignore_case:
@@ -264,12 +248,10 @@ def sort_split_names(split_names: Iterable[str]) -> list[str]:
         splits. Matching is case-insensitive and stable within each priority group.
 
     Args:
-        split_names (Iterable[str]):
-            Collection of split name strings to sort.
+        split_names (Iterable[str]): Split name strings to sort.
 
     Returns:
-        list[str]:
-            Sorted list of split names following semantic priority.
+        list[str]: Sorted list of split names following semantic priority.
 
     """
 

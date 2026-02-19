@@ -1,3 +1,5 @@
+"""Graph traversal helpers for resolving dependencies within model graphs."""
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -16,14 +18,32 @@ TraversalDirection = Literal["upstream", "downstream", "both"]
 
 
 def is_tail_node(node: GraphNode):
-    # Tail nodes: no downstream consumers
+    """
+    Return True if the :class:`GraphNode` has no downstream consumers.
+
+    Args:
+        node (GraphNode): :class:`GraphNode` to inspect.
+
+    Returns:
+        bool: True if downstream connections are disallowed or absent.
+
+    """
     return (not node.allows_downstream_connections) or (
         len(node.get_downstream_refs()) == 0
     )
 
 
 def is_head_node(node: GraphNode):
-    # Head nodes: inputs from a FeatureSet
+    """
+    Return True if the :class:`GraphNode` accepts FeatureSet inputs (head node).
+
+    Args:
+        node (GraphNode): :class:`GraphNode` to inspect.
+
+    Returns:
+        bool: True if the node allows upstream FeatureSet connections.
+
+    """
     if not node.allows_upstream_connections:
         return False
     ups = node.get_upstream_refs()
@@ -34,18 +54,21 @@ def find_upstream_featuresets(
     node: str | GraphNode,
 ) -> list[FeatureSetReference]:
     """
-    Recursively find all upstream FeatureSetReferences feeding into `node`.
+    Recursively find all upstream :class:`FeatureSetReference` objects feeding into `node`.
 
     Description:
-        Traverses the graph upstream until FeatureSetReferences are reached.
+        Traverses the graph upstream until :class:`FeatureSetReference` instances are reached.
 
     Args:
         node (str | GraphNode):
-            The node ID, label, or instance to perform a search for.
+            The node ID, label, or :class:`GraphNode` instance to perform a search for.
 
     Returns:
         list[FeatureSetReference]:
             All unique upstream FeatureSets (order not guaranteed).
+
+    Raises:
+        TypeError: If `node` is neither a string nor a :class:`GraphNode`.
 
     """
     from modularml.core.topology.graph_node import GraphNode
@@ -90,7 +113,7 @@ def get_subgraph_nodes(
     include_roots: bool = True,
 ) -> set[str]:
     """
-    Collect a set of GraphNode IDs reachable from one or more root nodes.
+    Collect a set of :class:`GraphNode` IDs reachable from one or more root nodes.
 
     Description:
         This utility traverses the ModelGraph starting from one or more root
@@ -106,11 +129,11 @@ def get_subgraph_nodes(
 
     Args:
         graph (ModelGraph):
-            The ModelGraph containing the connected GraphNodes.
+            The :class:`ModelGraph` containing the connected :class:`GraphNode` objects.
 
         roots (str | GraphNode | Iterable[str | GraphNode]):
             One or more root nodes from which traversal begins.
-            Each value may be a node ID, node label, or GraphNode instance.
+            Each value may be a node ID, node label, or :class:`GraphNode` instance.
 
         direction ("upstream" | "downstream" | "both", optional):
             Direction of traversal relative to the root nodes.
@@ -122,11 +145,14 @@ def get_subgraph_nodes(
 
     Returns:
         set[str]:
-            A set of GraphNode IDs reachable under the specified traversal.
+            A set of :class:`GraphNode` IDs reachable under the specified traversal.
+
+    Raises:
+        ValueError: If `direction` is not one of the supported values.
 
     Notes:
         - Returned IDs always refer to nodes present in `graph.nodes`.
-        - FeatureSetReferences are excluded from traversal results.
+        - :class:`FeatureSetReference` instances are excluded from traversal results.
         - Order is not guaranteed; this is a dependency set, not an execution order.
         - For execution ordering, use `ModelGraph._sorted_node_ids`.
 

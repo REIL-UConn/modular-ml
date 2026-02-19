@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from modularml.core.io.serialization_policy import SerializationPolicy
-from modularml.utils.io.importing import import_object
+from modularml.utils.environment.environment import import_from_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -128,13 +128,13 @@ class SymbolRegistry:
                 return self._builtin_classes[spec.key]
             # Try importing missing class
             try:
-                return import_object(spec.key.replace(":", "."))
+                return import_from_path(spec.key.replace(":", "."))
             except Exception as exc:
                 msg = f"Failed to find BUILTIN class '{spec.key}'. {exc}"
                 raise SymbolResolutionError(msg) from exc
 
         if policy is SerializationPolicy.REGISTERED:
-            registry = import_object(spec.registry_path)
+            registry = import_from_path(spec.registry_path)
             try:
                 return registry[spec.registry_key]
             except KeyError as exc:

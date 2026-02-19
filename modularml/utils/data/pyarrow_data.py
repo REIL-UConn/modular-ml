@@ -1,3 +1,5 @@
+"""PyArrow conversion helpers for ModularML sample domains."""
+
 import ast
 import fnmatch
 import hashlib
@@ -43,12 +45,12 @@ def resolve_column_selectors(
             All available columns in the table being filtered.
 
         columns (str | list[str] | None):
-            Fully-qualified column names to include  (e.g., `"features.voltage.raw"`).
+            Fully-qualified column names to include (e.g., `features.voltage.raw`).
             Must have an exact match in `all_columns`.
 
         features (str | list[str] | None):
-            Feature-domain selectors. Accepts exact names or wildcard (`"*"`) patterns.
-            Domain prefix `"features."` may be omitted.
+            Feature-domain selectors. Accepts exact names or wildcard (`*`) patterns.
+            Domain prefix `features.` may be omitted.
 
         targets (str | list[str] | None):
             Same as `features`, but for the targets domain.
@@ -66,12 +68,20 @@ def resolve_column_selectors(
 
     Returns:
         dict[str, set[str]]:
-            Mapping of domain -> set of fully-qualified column names
-            (e.g. `{"features": {"features.voltage.raw"}, ...}`)
+            Mapping of domain to fully-qualified column names
+            (e.g., `{"features": {"features.voltage.raw"}}`).
+
+    Raises:
+        KeyError: If a requested column or pattern does not match any column.
+        ValueError: If a selector has an invalid format or mismatched domain.
 
     """
     # Build final column selection (organized by domain)
-    selected: dict[str, set[str]] = {DOMAIN_FEATURES: set(), DOMAIN_TARGETS: set(), DOMAIN_TAGS: set()}
+    selected: dict[str, set[str]] = {
+        DOMAIN_FEATURES: set(),
+        DOMAIN_TARGETS: set(),
+        DOMAIN_TAGS: set(),
+    }
 
     # 1. Extract columns defined via `columns` argument
     for col in ensure_list(columns):
@@ -134,13 +144,40 @@ def resolve_column_selectors(
 
 
 def _remove_domain_prefix(element: str, domain: str) -> str:
-    """Removes the domain prefix from element, if it contains it."""
+    """
+    Remove the domain prefix from `element`, if present.
+
+    Args:
+        element (str): Fully-qualified column name.
+        domain (str): Domain prefix to remove (e.g., `features`).
+
+    Returns:
+        str: Column name without the domain prefix.
+
+    """
     prefix = f"{domain}."
-    return element[element.rindex(prefix) + len(prefix) :] if prefix in element else element
+    return (
+        element[element.rindex(prefix) + len(prefix) :]
+        if prefix in element
+        else element
+    )
 
 
 def _ensure_domain_prefix(element: str, domain: str) -> str:
-    """Ensures the domain prefix is in element."""
+    """
+    Ensure the domain prefix is present on `element`.
+
+    Args:
+        element (str): Column selector to normalize.
+        domain (str): Expected domain name.
+
+    Returns:
+        str: Selector guaranteed to start with `domain`.
+
+    Raises:
+        ValueError: If `element` already references a different domain.
+
+    """
     prefix = f"{domain}."
 
     all_domains = [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS]
@@ -157,19 +194,50 @@ def _ensure_domain_prefix(element: str, domain: str) -> str:
 
 
 def _remove_rep_suffix(element: str, rep: str) -> str:
-    """Removes the representation suffix from element, if it contains it."""
+    """
+    Remove the representation suffix from `element`, if present.
+
+    Args:
+        element (str): Fully-qualified column name.
+        rep (str): Representation suffix to remove.
+
+    Returns:
+        str: Column without the specified suffix.
+
+    """
     suffix = f".{rep}"
     return element[: element.rindex(suffix)] if suffix in element else element
 
 
 def _ensure_rep_suffix(element: str, rep: str) -> str:
-    """Ensures the representation suffix is in element."""
+    """
+    Ensure the representation suffix exists on `element`.
+
+    Args:
+        element (str): Column selector to normalize.
+        rep (str): Representation suffix to enforce.
+
+    Returns:
+        str: Column guaranteed to end with the suffix.
+
+    """
     suffix = f".{rep}"
     return element if element.endswith(suffix) else element + suffix
 
 
 def flatten_schema(schema: pa.Schema, prefix: str = "", separator: str = "."):
-    """Return flattened column paths for a (possibly nested) Arrow schema."""
+    """
+    Return flattened column paths for a (possibly nested) Arrow schema.
+
+    Args:
+        schema (pa.Schema): Schema to flatten.
+        prefix (str, optional): Prefix applied to every nested path. Defaults to "".
+        separator (str, optional): Separator between nested levels. Defaults to ".".
+
+    Returns:
+        list[str]: Flattened column paths including nested field names.
+
+    """
     cols = []
     for field in schema:
         name = f"{prefix}{field.name}"
@@ -189,6 +257,13 @@ def normalize_numpy_dtype_for_pyarrow_dtype(dtype) -> str:
     Normalize dtype across NumPy and Arrow for consistent metadata storage.
 
     Returns a semantic type string like 'float32', 'int64', 'string', etc.
+
+    Args:
+        dtype (str | np.dtype): NumPy dtype or dtype string to normalize.
+
+    Returns:
+        str: Semantic dtype string describing the element width.
+
     """
     if isinstance(dtype, str):
         dtype = np.dtype(dtype)
@@ -205,8 +280,22 @@ def normalize_numpy_dtype_for_pyarrow_dtype(dtype) -> str:
     return str(pa.from_numpy_dtype(dtype))
 
 
-def get_shape_of_pyarrow_array(arr: pa.Array, *, include_nrows: bool = True) -> tuple[int, ...]:
-    """Infers the shape of a PyArrow array."""
+def get_shape_of_pyarrow_array(
+    arr: pa.Array,
+    *,
+    include_nrows: bool = True,
+) -> tuple[int, ...]:
+    """
+    Infer the shape of a PyArrow array using sampled rows.
+
+    Args:
+        arr (pa.Array): Array whose element shape should be inferred.
+        include_nrows (bool, optional): Include the row dimension in the returned shape.
+
+    Returns:
+        tuple[int, ...]: Best-effort shape for the provided array.
+
+    """
     # Get num rows
     n_rows = len(arr)
     if n_rows == 0:
@@ -238,9 +327,11 @@ def get_dtype_of_pyarrow_array(arr: pa.Array) -> str:
     """
     Infer array data type directly from contents.
 
+    Args:
+        arr (pa.Array): Array whose dtype should be described.
+
     Returns:
-        str: String representing the element data type. \
-            For example, "float32", "int64", or "bytes".
+        str: Element data type string (e.g., `float32`, `int64`, `bytes`).
 
     """
 
@@ -280,7 +371,17 @@ def get_dtype_of_pyarrow_array(arr: pa.Array) -> str:
 
 
 def make_nested_list_type(base_type: pa.DataType, depth: int) -> pa.DataType:
-    """Recursively build a nested PyArrow ListType (e.g., list<list<...<float32>>>)."""
+    """
+    Recursively build a nested PyArrow ListType (e.g., list<list<...<float32>>>).
+
+    Args:
+        base_type (pa.DataType): Base element type for the innermost tensor.
+        depth (int): Number of nested list levels to create.
+
+    Returns:
+        pa.DataType: Nested list type with the specified depth.
+
+    """
     typ = base_type
     for _ in range(depth):
         typ = pa.list_(typ)
@@ -297,29 +398,26 @@ def numpy_to_sample_schema_column(
     max_list_depth: int = 2,
 ) -> tuple[str, pa.StructArray, dict[bytes, bytes]]:
     """
-    Converts a NumPy array of any rank into a PyArrow column suitable for use in SampleCollection.
+    Convert a NumPy array into a PyArrow column suitable for :class:`SampleCollection`.
 
     This function automatically chooses between:
-      - Nested list arrays (for rank ≤ max_list_depth)
+      - Nested list arrays (for rank <= `max_list_depth`)
       - Binary blobs with shape metadata (for higher-rank tensors)
 
     Args:
-        name: Column name.
-        data: NumPy array of shape (N, ...).
-        rep (Literal["raw", "transformed"]): The representation to store the data under.
-        dtype: Optional element dtype (defaults to `pa.from_numpy_dtype(data.dtype)`).
-        store_shape_metadata: If True, returns schema metadata for shape reconstruction.
-        max_list_depth: Maximum nesting depth for list-based encoding (default=2).
+        name (str): Column name.
+        data (np.ndarray): NumPy array of shape `(N, ...)`.
+        rep (Literal["raw", "transformed"]): Representation name used in the schema.
+        dtype (pa.DataType | None): Optional element dtype. Defaults to `pa.from_numpy_dtype(data.dtype)`.
+        store_shape_metadata (bool): Attach shape metadata for reconstruction.
+        max_list_depth (int): Maximum nesting depth for list-based encoding.
 
     Returns:
-        (name, pa.Array, metadata)
-            name: The same as input `name`.
-            pa.Array: PyArrow array storing the tensor under the representation.
-            metadata: Dict with optional shape and dtype info for schema attachment.
+        tuple[str, pa.StructArray, dict[bytes, bytes]]: Column name, Arrow array, and metadata dict.
 
     Raises:
         TypeError: If `data` is not a NumPy array.
-        ValueError: If `data` is empty.
+        ValueError: If `data` is empty or scalar.
 
     """
     if rep not in [REP_RAW, REP_TRANSFORMED]:
@@ -330,7 +428,10 @@ def numpy_to_sample_schema_column(
         raise TypeError(msg)
 
     if data.ndim == 0:
-        raise ValueError("Cannot store scalar arrays as tensor columns (need at least 1 dimension).")
+        msg = (
+            "Cannot store scalar arrays as tensor columns (need at least 1 dimension)."
+        )
+        raise ValueError(msg)
 
     if dtype is None:
         dtype = pa.from_numpy_dtype(data.dtype)
@@ -352,15 +453,23 @@ def numpy_to_sample_schema_column(
     # Case 2: high-rank tensors -> store as binary
     else:
         # Convert each row (sample) to bytes
-        element_size = data[0].nbytes if isinstance(data[0], np.ndarray) else np.prod(shape) * data.itemsize
-        array = pa.array([data[i].tobytes() for i in range(n_samples)], type=pa.binary(element_size))
+        element_size = (
+            data[0].nbytes
+            if isinstance(data[0], np.ndarray)
+            else np.prod(shape) * data.itemsize
+        )
+        array = pa.array(
+            [data[i].tobytes() for i in range(n_samples)],
+            type=pa.binary(element_size),
+        )
 
     # Metadata for shape reconstruction
     metadata = {}
     if store_shape_metadata:
+        meta_dtype = normalize_numpy_dtype_for_pyarrow_dtype(data.dtype).encode()
         metadata = {
             f"{name}.{rep}.{SHAPE_SUFFIX}".encode(): str(shape).encode(),
-            f"{name}.{rep}.{DTYPE_SUFFIX}".encode(): normalize_numpy_dtype_for_pyarrow_dtype(data.dtype).encode(),
+            f"{name}.{rep}.{DTYPE_SUFFIX}".encode(): meta_dtype,
         }
 
     return name, array, metadata
@@ -379,13 +488,17 @@ def pyarrow_array_to_numpy(
     Supports both list-array and binary encodings.
 
     Args:
-        array: PyArrow Array (list, list<list<>>, or binary).
-        shape: Required for binary arrays if shape cannot be inferred.
-        dtype: Optional NumPy dtype. If None, inferred from the Arrow array or metadata.
-        metadata: Optional schema metadata dict (e.g., table.schema.metadata) for dtype/shape lookup.
+        array (pa.Array): PyArrow array (list, nested list, or binary).
+        shape (tuple[int, ...] | None): Optional shape override for binary encodings.
+        dtype (np.dtype | None): Optional dtype override.
+        metadata (dict[bytes, bytes] | None): Schema metadata for dtype/shape lookup.
 
     Returns:
         np.ndarray: Reconstructed tensor.
+
+    Raises:
+        ValueError: If shape information is missing for binary encodings.
+        TypeError: If the Arrow type is unsupported.
 
     """
     # Infer dtype automatically
@@ -428,7 +541,10 @@ def pyarrow_array_to_numpy(
         n_rows = len(array)
         # Convert each element back into a NumPy array
         return np.stack(
-            [np.frombuffer(array[i].as_buffer(), dtype=dtype).reshape(shape) for i in range(n_rows)],
+            [
+                np.frombuffer(array[i].as_buffer(), dtype=dtype).reshape(shape)
+                for i in range(n_rows)
+            ],
             axis=0,
         )
 
@@ -443,22 +559,20 @@ def build_sample_schema_table(
     tags: dict[str, np.ndarray] | None = None,
 ) -> pa.Table:
     """
-    Build a metadata-preserving PyArrow table compatible with `SampleCollection`.
+    Build a metadata-preserving PyArrow table compatible with :class:`SampleCollection`.
 
     Description:
-        Converts three dictionaries of NumPy arrays (`features`, `targets`, and `tags`) \
-        into a structured Arrow table. Each domain becomes a Struct column whose fields \
-        are *per-column structs* containing a single representation field: `"raw"`.
+        Converts three dictionaries of NumPy arrays (`features`, `targets`, and `tags`)
+        into a structured Arrow table. Each domain becomes a Struct column whose fields
+        are per-column structs containing a single representation field: `raw`.
 
         Example layout:
-        ```
-        features: struct<
-            voltage: struct<raw: list<float32>>,
-            current: struct<raw: list<float32>>
-        >
-        ```
+            features: struct<
+                voltage: struct<raw: list<float32>>,
+                current: struct<raw: list<float32>>
+            >
 
-        Each leaf array is stored as a PyArrow array, and accompanying metadata \
+        Each leaf array is stored as a PyArrow array, and accompanying metadata
         (shape, dtype) is attached to the table schema for full reconstruction.
 
         Metadata keys follow the namespaced convention:
@@ -466,18 +580,12 @@ def build_sample_schema_table(
             - `features.voltage.raw.dtype`
 
     Args:
-        features:
-            Mapping of feature names → NumPy arrays.
-        targets:
-            Mapping of target names → NumPy arrays.
-        tags:
-            Mapping of tag names → NumPy arrays.
+        features (dict[str, np.ndarray]): Feature columns keyed by name.
+        targets (dict[str, np.ndarray]): Target columns keyed by name.
+        tags (dict[str, np.ndarray] | None): Optional tag columns keyed by name.
 
     Returns:
-        pa.Table:
-            A PyArrow table with structured columns (`features`, `targets`, and \
-            optionally `tags`), each holding per-column representation structs and \
-            complete dtype/shape metadata.
+        pa.Table: PyArrow table with structured domain columns and metadata.
 
     """
 
@@ -486,7 +594,18 @@ def build_sample_schema_table(
         domain_dict: dict[str, np.ndarray],
         meta_prefix: str | None = None,
     ):
-        """Converts dict of arrays to tuple[{col_name: pa.Array}, meta_data_dict]."""
+        """
+        Convert a domain dict into Arrow columns and metadata.
+
+        Args:
+            domain_name (str): Domain prefix (e.g., `features`).
+            domain_dict (dict[str, np.ndarray]): Mapping of column names to arrays.
+            meta_prefix (str | None): Optional metadata key prefix.
+
+        Returns:
+            tuple[dict[str, pa.Array], dict[bytes, bytes]]: Column mapping and metadata.
+
+        """
         cols: dict[str, pa.Array] = {}
         metadata = {}
 
@@ -554,6 +673,16 @@ def build_sample_schema_table(
 
 
 def hash_pyarrow_table(table: pa.Table) -> str:
+    """
+    Compute a deterministic SHA-256 digest for a PyArrow table's contents.
+
+    Args:
+        table (pa.Table): Table to hash.
+
+    Returns:
+        str: Hexadecimal digest of the table contents.
+
+    """
     t = table.combine_chunks()
     h = hashlib.sha256()
 

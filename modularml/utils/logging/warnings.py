@@ -1,3 +1,5 @@
+"""Warning emission utilities with consistent ModularML formatting."""
+
 from __future__ import annotations
 
 import inspect
@@ -11,28 +13,14 @@ from .logger import get_logger
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
-"""
-Example usage of warnings:
-
-```python
-from modularml.utils.logging.warnings import warn
-
-warn(
-    "FeatureSet has no targets defined.",
-    category=SchemaWarning,
-    hints=[
-        "Call FeatureSet.validate() before training.",
-        "Ensure target columns are registered.",
-    ],
-)
-```
-"""
-
 _logger = get_logger("warnings")
 
 
 WarningPayload = dict[str, object]
-_WARNING_HOOK: ContextVar[Callable[[WarningPayload], bool] | None] = ContextVar("_WARNING_HOOK", default=None)
+_WARNING_HOOK: ContextVar[Callable[[WarningPayload], bool] | None] = ContextVar(
+    "_WARNING_HOOK",
+    default=None,
+)
 
 
 def _resolve_caller_frame(stacklevel: int) -> inspect.FrameInfo | None:
@@ -41,6 +29,13 @@ def _resolve_caller_frame(stacklevel: int) -> inspect.FrameInfo | None:
 
     Falls back to the outermost available frame if the requested
     depth exceeds the call stack.
+
+    Args:
+        stacklevel (int): Stack depth relative to :func:`warn`.
+
+    Returns:
+        inspect.FrameInfo | None: Frame info for the resolved caller, if any.
+
     """
     frame = inspect.currentframe()
     try:
@@ -65,19 +60,15 @@ def warn(
     """
     Emit a formatted ModularML warning with optional hints and source context.
 
-    This function should be used instead of `warnings.warn` inside ModularML
+    This function should be used instead of :func:`warnings.warn` inside ModularML
     modules. It automatically captures the calling location, formats the
     warning, and routes it through the ModularML logging system.
 
     Args:
-        message (str):
-            Warning message text.
-        category (Type[Warning]):
-            Warning category class.
-        hints (str | Iterable[str] | None):
-            Optional hint or list of hints suggesting corrective actions.
-        stacklevel (int):
-            Stack level adjustment for locating the user call site.
+        message (str): Warning message text.
+        category (type[Warning]): Warning category class.
+        hints (str | Iterable[str] | None): Optional hint or list of hints suggesting corrective actions.
+        stacklevel (int): Stack level adjustment for locating the user call site.
 
     """
     # Resolve caller frame
@@ -126,6 +117,10 @@ def catch_warnings():
 
     Allows inspection, suppression, or replacement of warnings before
     they are logged.
+
+    Yields:
+        WarningInterceptor: Captured warning accessor for the scoped block.
+
     """
     captured: list[WarningPayload] = []
 
@@ -141,8 +136,33 @@ def catch_warnings():
 
 
 class WarningInterceptor:
+    """
+    Container that exposes captured warning payloads during interception.
+
+    Attributes:
+        _captured (list[WarningPayload]): Stored warning payloads in emission order.
+
+    """
+
     def __init__(self, captured: list[dict]):
+        """
+        Initialize the interceptor with captured payloads.
+
+        Args:
+            captured (list[dict]): Warning payloads collected by :func:`catch_warnings`.
+
+        """
         self._captured = captured
 
     def match(self, text: str) -> bool:
+        """
+        Return True if any captured warning message contains `text`.
+
+        Args:
+            text (str): Substring to search within captured messages.
+
+        Returns:
+            bool: True if at least one message contains `text`.
+
+        """
         return any(text in w["message"] for w in self._captured)

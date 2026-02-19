@@ -1,3 +1,5 @@
+"""Progress bar column definitions and reusable styles."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -21,6 +23,7 @@ class OptionalTextColumn(TextColumn):
         self.field_name = field_name
 
     def render(self, task):
+        """Render the column only when the configured field has a value."""
         if task.fields.get(self.field_name) is None:
             return Text("")
         return super().render(task)
@@ -28,6 +31,16 @@ class OptionalTextColumn(TextColumn):
 
 @dataclass
 class ProgressStyle:
+    """
+    Container describing a named progress style.
+
+    Attributes:
+        name (str): Unique style identifier.
+        columns (list[ProgressColumn]): Rich column layout for the progress bar.
+        default_fields (dict[str, object]): Optional default task fields.
+
+    """
+
     name: str
     columns: list[ProgressColumn]
     default_fields: dict[str, object] = None

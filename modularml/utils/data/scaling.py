@@ -1,3 +1,5 @@
+"""Scaling helpers for reversing FeatureSet and RoleData transforms."""
+
 from modularml.core.data.batch import Batch
 from modularml.core.data.sample_data import RoleData, SampleData
 from modularml.core.data.schema_constants import (
@@ -32,9 +34,12 @@ def unscale_sample_data(data: SampleData, from_node: str | GraphNode) -> SampleD
             FeatureSet used for inverse scaling.
 
     Returns:
-        SampleData:
-            New SampleData instance with unscaled targets and, when applicable,
-            unscaled features.
+        SampleData: New SampleData with unscaled targets and features (when applicable).
+
+    Raises:
+        TypeError: If `data` or `from_node` types are invalid.
+        ValueError: If no upstream FeatureSet exists.
+        RuntimeError: If multiple upstream FeatureSets are found.
 
     """
     if not isinstance(data, SampleData):
@@ -120,8 +125,10 @@ def unscale_role_data(data: RoleData, from_node: str | GraphNode) -> RoleData:
             FeatureSet used for inverse scaling.
 
     Returns:
-        RoleData:
-            New RoleData instance with unscaled data for all roles.
+        RoleData: RoleData with unscaled data for all roles.
+
+    Raises:
+        TypeError: If `data` is not a :class:`RoleData`.
 
     """
     if not isinstance(data, RoleData):
@@ -151,9 +158,10 @@ def unscale_batch_data(data: Batch, from_node: str | GraphNode) -> Batch:
             FeatureSet used for inverse scaling.
 
     Returns:
-        Batch:
-            New Batch instance with unscaled targets and, when applicable,
-            unscaled features for all roles.
+        Batch: Batch with unscaled features and targets for all roles.
+
+    Raises:
+        TypeError: If `data` is not a :class:`Batch`.
 
     """
     if not isinstance(data, Batch):
@@ -191,9 +199,7 @@ def unscale_data(
             FeatureSet used for inverse scaling.
 
     Returns:
-        SampleData | RoleData | Batch:
-            New data instance of the same type with unscaled targets and, when
-            applicable, unscaled features.
+        SampleData | RoleData | Batch: Instance of the same type with unscaled values.
 
     """
     if isinstance(data, SampleData):

@@ -1,3 +1,5 @@
+"""Backend normalization helpers and inference logic."""
+
 from enum import Enum
 from typing import Any
 
@@ -25,6 +27,16 @@ class Backend(str, Enum):
 
 
 def is_valid_backend(value: str | Backend):
+    """
+    Return True if `value` can be normalized to a :class:`Backend`.
+
+    Args:
+        value (str | Backend): Backend identifier to validate.
+
+    Returns:
+        bool: True if normalization succeeds.
+
+    """
     try:
         _ = normalize_backend(value=value)
     except ValueError:
@@ -33,6 +45,19 @@ def is_valid_backend(value: str | Backend):
 
 
 def normalize_backend(value: str | Backend):
+    """
+    Normalize a backend string or enum value to :class:`Backend`.
+
+    Args:
+        value (str | Backend): Backend identifier to normalize.
+
+    Returns:
+        Backend: Normalized backend enum.
+
+    Raises:
+        ValueError: If the value cannot be normalized.
+
+    """
     if isinstance(value, Backend):
         return value
     if isinstance(value, str):

@@ -1,3 +1,5 @@
+"""Wrapper around Rich progress tasks with context-aware behavior."""
+
 from __future__ import annotations
 
 from .progress_manager import ProgressManager
@@ -15,6 +17,17 @@ class ProgressTask:
         enabled: bool = True,
         persist: bool = True,
     ):
+        """
+        Initialize a progress task definition.
+
+        Args:
+            style (str): Progress style name registered with the manager.
+            description (str): Human-readable description shown in the bar.
+            total (int | None): Optional total units of work.
+            enabled (bool): Disable reporting when False.
+            persist (bool): Keep the bar visible after completion.
+
+        """
         self.style_name = style
         self.description = description
         self.total = total
@@ -37,7 +50,14 @@ class ProgressTask:
         self._started = True
 
     def tick(self, n: int = 1, **fields):
-        """Increment this tasks progress in the Live display."""
+        """
+        Increment this task's progress in the Live display.
+
+        Args:
+            n (int): Units to advance. Defaults to 1.
+            **fields: Additional Rich task fields to update.
+
+        """
         if not self.enabled:
             return
         if not self._started:
@@ -58,6 +78,7 @@ class ProgressTask:
         mgr._refresh_layout()
 
     def set_total(self, total: int):
+        """Update the total units of work for this task."""
         # Update task total
         self.total = total
         # Update display only if already being displayed
@@ -71,6 +92,7 @@ class ProgressTask:
         mgr._refresh_layout()
 
     def finish(self, **fields):
+        """Mark the task as complete and persist any final fields."""
         if not self._started or self._finished:
             return
         self._finished = True
