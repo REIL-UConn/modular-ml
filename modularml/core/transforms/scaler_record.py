@@ -1,3 +1,5 @@
+"""Metadata records that track applied scaling operations."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,34 +14,29 @@ class ScalerRecord(Configurable):
     """
     Metadata describing a single applied scaling transform.
 
-    Stores the minimal information required to:
-      - reconstruct transform configuration
-      - check dependency ordering
-      - undo or invert the transform
-      - replay transform history
+    Description:
+        Captures the configuration and bookkeeping necessary to replay, serialize,
+        or invert a transform applied to FeatureSet data.
 
-    Args:
+    Attributes:
         order (int):
             Monotonically increasing identifier indicating transform order.
         domain (str):
-            One of {"features", "targets", "tags"}.
+            Domain name (`features`, `targets`, or `tags`).
         keys (tuple[str]):
             Column names within the domain that were transformed.
         rep_in (str):
-            Input representation name (e.g., "raw" or "transformed").
+            Input representation (for example, `raw`).
         rep_out (str):
-            Output representation name produced by this transform.
+            Output representation after scaling.
         fit_split (str | None):
-            Name of the split used for fitting, or None if fit on all samples.
+            Split name used during fitting, or `None` if fit on all samples.
         merged_axes (tuple[int] | None):
-            Axes merged during flattening prior to scaling (if any).
+            Axes merged during flattening prior to scaling.
         flatten_meta (dict):
-            Metadata required to reverse flattening (e.g., original_shape).
-        scaler_obj (Scaler):
-            Fitted scaler instance supporting transform() and inverse_transform().
-        scaler_artifact_path (str):
-            Relative path to fully serialized scaler artifact (relative to FeatureSet artifact).
-            E.g., "scalers/scaler_000.sc.mml".
+            Metadata required to reverse flattening (for example, original shapes).
+        scaler_obj (Scaler | None):
+            Optional fitted :class:`Scaler` capable of transform/inverse operations.
 
     """
 
@@ -77,14 +74,13 @@ class ScalerRecord(Configurable):
     # ================================================
     def get_config(self) -> dict[str, Any]:
         """
-        Return a JSON-serializable configuration.
+        Return a JSON-serializable configuration for this record.
 
         Note:
-            This config does not include the scaler instance, only the
-            `scaler.get_config()` dict.
+            The scaler instance is represented only via :meth:`Scaler.get_config`.
 
         Returns:
-            dict[str, Any]: Configuration used to reconstruct this record.
+            dict[str, Any]: Configuration dictionary suitable for :meth:`from_config`.
 
         """
         return {
@@ -96,15 +92,22 @@ class ScalerRecord(Configurable):
             "fit_split": self.fit_split,
             "merged_axes": self.merged_axes,
             "flatten_meta": self.flatten_meta,
-            "scaler_config": None if self.scaler_obj is None else self.scaler_obj.get_config(),
+            "scaler_config": None
+            if self.scaler_obj is None
+            else self.scaler_obj.get_config(),
         }
 
     @classmethod
     def from_config(cls, config: dict) -> ScalerRecord:
         """
-        Reconstructs the record from config.
+        Reconstruct the record from configuration.
 
-        This *does not* rebuild the scaler state, only its config.
+        Args:
+            config (dict): Dictionary produced by :meth:`get_config`.
+
+        Returns:
+            ScalerRecord: Rehydrated record referencing an unfitted scaler.
+
         """
         scaler_cfg = config.get("scaler_config")
         return cls(
