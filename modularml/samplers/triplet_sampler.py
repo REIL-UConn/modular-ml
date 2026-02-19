@@ -1,3 +1,5 @@
+"""Convenience wrappers for triplet sampling."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -19,14 +21,11 @@ class TripletSampler(NSampler):
     """
     Sampler for generating anchor-positive-negative triplets.
 
-    This sampler is a convenience wrapper around ``NSampler`` for the
-    three-way sampling pattern commonly used in metric learning and
-    contrastive representation learning. It accepts two sets of
-    SimilarityCondition mappings—one for selecting positive samples
-    (similar to the anchor) and one for selecting negative samples
-    (dissimilar to the anchor). Internally, it defines two roles,
-    `"positive"` & `"negative"`, and returns aligned triplets under
-    the roles `"anchor"`, `"positive"`, and `"negative"`.
+    Description:
+        A specialized :class:`NSampler` wrapper that declares `positive` and `negative`
+        roles so that each batch contains aligned anchor, positive, and negative indices
+        together with similarity scores.
+
     """
 
     def __init__(
@@ -49,89 +48,60 @@ class TripletSampler(NSampler):
         source: FeatureSet | FeatureSetView | None = None,
     ):
         """
-        Initialize a similarity-based sampler for anchor-positive-negative triplets.
+        Initialize a similarity-based sampler for triplets.
 
         Description:
-            `TripletSampler` constructs training triplets by selecting, for
-            each anchor sample, a positive sample that satisfies the provided
-            positive similarity conditions and a negative sample that satisfies
-            the negative conditions. Column identifiers in
-            `pos_conditions` and `neg_conditions` are resolved using
-            `DataReference.from_string` and can refer to FeatureSet features,
-            targets, or tags (e.g., "SOH_PCT", "features.voltage.raw").
-
-            Under the hood, the sampler invokes `NSampler` with two roles:
-                - "positive": candidates satisfying `pos_conditions`
-                - "negative": candidates satisfying `neg_conditions`
-
-            Only anchors that produce valid matches for *both* roles are kept.
-            All triplet components are then sorted and aligned into consistent
-            batches, each containing:
-                - anchor indices
-                - matched positive indices
-                - matched negative indices
-                - per-role similarity scores
+            :class:`TripletSampler` resolves the column identifiers in `pos_conditions` and
+            `neg_conditions` via :meth:`FeatureSetColumnReference.from_string`, then
+            configures :class:`NSampler` with `positive` and `negative` roles. Only
+            anchors that have valid matches for both roles are emitted.
 
         Args:
             pos_conditions (dict[str, SimilarityCondition]):
-                Mapping from column specifiers to similarity rules for selecting
-                positive samples. All keys must resolve to concrete
-                (domain, key, variant) columns.
+                Similarity rules for selecting positive samples.
 
             neg_conditions (dict[str, SimilarityCondition]):
-                Mapping from column specifiers to similarity rules for selecting
-                negative samples. These often mirror the positive rules but with
-                different tolerances or match modes.
+                Similarity rules for selecting negative samples.
 
-            batch_size (int, optional):
-                Number of triplets to return per batch. Defaults to 1.
+            batch_size (int):
+                Number of triplets per batch.
 
-            shuffle (bool, optional):
-                Whether to shuffle triplets after alignment but before batching.
-                Defaults to False.
+            shuffle (bool):
+                Whether to shuffle aligned triplets before batching.
 
-            max_samples_per_anchor (int | None, optional):
-                Maximum number of positive or negative samples selected for each
-                anchor. If None, all valid matches are included. Defaults to 3.
+            max_samples_per_anchor (int | None):
+                Maximum positive/negative matches per anchor; `None` keeps all matches.
 
-            choose_best_only (bool, optional):
-                If True, only the highest-scoring matches are selected for each
-                role instead of random sampling within match categories.
-                Defaults to False.
+            choose_best_only (bool):
+                Select only top-scoring matches per role.
 
-            group_by (list[str], optional):
-                FeatureSet key(s) defining grouping behavior.
-                Only one grouping strategy can be active at a time.
+            group_by (list[str] | None):
+                Optional FeatureSet keys for grouping (mutually exclusive with `stratify_by`).
 
-            group_by_role (str, optional):
-                If `group_by=True`, the role on which to draw data for grouping
-                must be specified. Defaults to `"anchor"`.
+            group_by_role (str):
+                Role used for grouping; defaults to :attr:`ROLE_ANCHOR`.
 
-            stratify_by (list[str], optional):
-                FeatureSet key(s) defining strata for stratified sampling.
-                Conflicts with `group_by`.
+            stratify_by (list[str] | None):
+                Optional keys for stratified sampling.
 
-            stratify_by_role (str, optional):
-                If `stratify_by=True`, the role on which to draw data for stratification
-                must be specified. Defaults to `"anchor"`.
+            stratify_by_role (str):
+                Role used for stratification; defaults to :attr:`ROLE_ANCHOR`.
 
-            strict_stratification (bool, optional):
-                See description above.
+            strict_stratification (bool):
+                Whether batching stops when any stratum is exhausted.
 
-            drop_last (bool, optional):
-                Whether to drop the final batch if it contains fewer than
-                ``batch_size`` triplets. Defaults to False.
+            drop_last (bool):
+                Drop the final incomplete batch.
 
-            seed (int | None, optional):
-                Random seed for deterministic random behavior. Defaults to None.
+            seed (int | None):
+                Random seed for reproducible shuffling.
 
-            show_progress (bool, optional):
-                Whether to show a progress bar during the batch building process.
-                Defaults to True.
+            show_progress (bool):
+                Whether to show progress updates.
 
-            source (FeatureSet | FeatureSetView):
-                The source data from samples are drawn. Note that batches are not
-                constructed until `materialize_batches` is called.
+            source (FeatureSet | FeatureSetView | None):
+                Optional :class:`FeatureSet` or :class:`FeatureSetView` to bind
+                immediately.
 
         """
         super().__init__(
@@ -155,6 +125,7 @@ class TripletSampler(NSampler):
         )
 
     def __repr__(self):
+        """Return a concise string describing sampler state."""
         if self.is_bound:
             return f"TripletSampler(n_batches={self.num_batches}, batch_size={self.batcher.batch_size})"
         return f"TripletSampler(batch_size={self.batcher.batch_size})"
@@ -166,11 +137,8 @@ class TripletSampler(NSampler):
         """
         Return configuration required to reconstruct this sampler.
 
-        Description:
-            This *does not* restore the source, only the sampler configurtion.
-
         Returns:
-            dict[str, Any]: Sampler configuration.
+            dict[str, Any]: Serializable sampler configuration (sources excluded).
 
         """
         cfg = super().get_config()
@@ -183,10 +151,13 @@ class TripletSampler(NSampler):
         Construct a sampler from configuration.
 
         Args:
-            config (dict[str, Any]): Sampler configuration.
+            config (dict[str, Any]): Serialized sampler configuration.
 
         Returns:
-            TripletSampler: Unfitted sampler instance.
+            TripletSampler: Unbound sampler instance.
+
+        Raises:
+            ValueError: If the configuration was not produced by :meth:`get_config`.
 
         """
         if ("sampler_name" not in config) or (

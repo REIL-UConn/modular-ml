@@ -1,3 +1,5 @@
+"""Generalized similarity-based samplers."""
+
 from __future__ import annotations
 
 import bisect
@@ -22,6 +24,15 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class SortedColumn:
+    """
+    Precomputed sorted view of a numeric column.
+
+    Attributes:
+        values (np.ndarray): Sorted column values.
+        original_to_sorted_idxs (np.ndarray): Indices mapping sorted positions back to the original array.
+
+    """
+
     values: np.ndarray  # Sorted values
     original_to_sorted_idxs: (
         np.ndarray
@@ -30,14 +41,13 @@ class SortedColumn:
 
 class NSampler(BaseSampler):
     """
-    General N-way sampler for similarity-based multi-role sample selection.
+    General N-way sampler for similarity-based multi-role batching.
 
-    This sampler generalizes pairwise sampling to support an arbitrary
-    number of roles (e.g., "positive", "negative", "pair").
-    Each role defines its own set of similarity conditions, and these
-    conditions determine which samples may be paired with each anchor.
-    The sampler selects valid matches per role, intersects anchors
-    across all roles, aligns indexing, and produces N-way batches.
+    Attributes:
+        condition_mapping (dict[str, dict[str, SimilarityCondition]]): Per-role column conditions.
+        max_samples_per_anchor (int | None): Cap on matches selected per anchor.
+        choose_best_only (bool): Whether to keep only the top-scoring matches per role.
+
     """
 
     __SPECS__ = SamplerStreamSpec(
@@ -64,67 +74,35 @@ class NSampler(BaseSampler):
         source: FeatureSet | FeatureSetView | None = None,
     ):
         """
-        Initialize an N-way similarity-based sampler.
+        Initialize similarity rules for each sampler role.
 
         Description:
-            Each role in `condition_mapping` has its own set of
-            SimilarityCondition objects. For each anchor sample, the
-            sampler evaluates all candidates according to these conditions,
-            selects up to `max_samples_per_anchor` matches per role,
-            computes per-role scores, and later intersects anchors across
-            all roles to ensure that only anchors with valid matches for
-            every role are retained.
+            Every entry in `condition_mapping` defines a role name that maps to
+            one or more :class:`SimilarityCondition` objects keyed by column specifiers.
+            For each anchor sample the sampler gathers candidate matches per role,
+            trims to `max_samples_per_anchor` matches (optionally keeping only the
+            top-scoring ones), intersects anchors that have valid matches for *all*
+            roles, and finally emits aligned batches.
 
         Args:
             condition_mapping (dict[str, dict[str, SimilarityCondition]]):
-                Mapping from role name to {column_key to SimilarityCondition}.
-                E.g., `{"pair": {...}}` or `{"positive": {...}, "negative": {...}}`
+                Mapping from role name to column-condition pairs (e.g. `{"positive": {...}}`).
+            batch_size (int): Number of N-way samples per batch.
+            shuffle (bool): Whether to shuffle aligned samples prior to batching.
+            max_samples_per_anchor (int | None): Maximum matches to keep per role; `None` keeps every candidate.
+            choose_best_only (bool): Select only the highest-scoring matches per role when True.
+            group_by (list[str] | None): Optional FeatureSet keys used for grouping (mutually exclusive with `stratify_by`).
+            group_by_role (str): Role whose data drive grouping operations.
+            stratify_by (list[str] | None): Optional keys for stratified sampling.
+            stratify_by_role (str): Role whose data drive stratification.
+            strict_stratification (bool): Whether to stop when any stratum exhausts.
+            drop_last (bool): Drop the final incomplete batch.
+            seed (int | None): Random seed for reproducible shuffling.
+            show_progress (bool): Whether to display progress updates.
+            source (FeatureSet | FeatureSetView | None): Optional :class:`FeatureSet` or :class:`FeatureSetView` to bind immediately.
 
-            batch_size (int):
-                Number of N-way samples per batch.
-
-            shuffle (bool):
-                Shuffle final aligned samples across all roles.
-
-            max_samples_per_anchor (int | None):
-                For each role, maximum number of selected samples.
-                If None, uses all candidates.
-
-            choose_best_only (bool):
-                Whether to select only the highest-scoring sample(s) per role.
-
-            group_by (list[str], optional):
-                FeatureSet key(s) defining grouping behavior.
-                Only one grouping strategy can be active at a time.
-
-            group_by_role (str, optional):
-                If `group_by=True`, the role on which to draw data for grouping
-                must be specified. Defaults to `"anchor"`.
-
-            stratify_by (list[str], optional):
-                FeatureSet key(s) defining strata for stratified sampling.
-                Conflicts with `group_by`.
-
-            stratify_by_role (str, optional):
-                If `stratify_by=True`, the role on which to draw data for stratification
-                must be specified. Defaults to `"anchor"`.
-
-            strict_stratification (bool, optional):
-                See description above.
-
-            drop_last (bool):
-                Whether to drop final incomplete batch.
-
-            seed (int | None):
-                RNG seed.
-
-            show_progress (bool, optional):
-                Whether to show a progress bar during the batch building process.
-                Defaults to True.
-
-            source (FeatureSet | FeatureSetView):
-                The source data from samples are drawn. Note that batches are not
-                constructed until `materialize_batches` is called.
+        Raises:
+            ValueError: If `condition_mapping` defines the reserved role `anchor`.
 
         """
         self.condition_mapping = {
@@ -152,40 +130,21 @@ class NSampler(BaseSampler):
 
     def build_samples(self) -> dict[tuple[str, str], Samples]:
         """
-        Construct N-way samples using similarity-based matching logic.
+        Construct N-way batches using similarity intersections.
 
         Description:
-            For each anchor sample in the bound FeatureSetView:
-                1. Resolve role-specific columns for each role.
-                2. Generate role-specific candidate matches using
-                   similarity and fallback rules.
-                3. Intersect anchors across all roles so only anchors
-                   with valid matches in every role are retained.
-                4. Align role indices according to the canonical anchor
-                   ordering.
-                5. Shuffle results if requested.
-                6. Slice aligned data into batches of size ``batch_size``.
-
-            The resulting BatchView objects contain:
-                - "anchor": aligned anchor indices
-                - one key per role: aligned role indices
-                - role-specific sample weights
+            For every anchor row, the sampler resolves the configured columns,
+            generates role-specific candidate matches, intersects anchors that
+            satisfy every role, optionally shuffles, and slices the aligned arrays
+            into batches of size `batch_size`.
 
         Returns:
-            dict[tuple[str, str], Samples]:
-                Mapping of stream labels to Samples objects with attributes
-                representing an N-way batch of aligned sample indices and weights.
-                The dict key must be a 2-tuple of (stream label, source FeatureSet label).
+            dict[tuple[str, str], Samples]: Mapping from `(stream_label, source_label)` to :class:`Samples` describing aligned indices and weights.
 
         Raises:
-            RuntimeError:
-                If no source is bound.
-            TypeError:
-                If the bound source is not a FeatureSetView.
-            ValueError:
-                If fewer than two samples are available, or if roles
-                fail to produce a valid non-empty intersection of
-                anchor samples.
+            RuntimeError: If :meth:`BaseSampler.bind_source` has not been called.
+            TypeError: If the bound source is not a :class:`FeatureSetView`.
+            ValueError: If the source has fewer than two samples or if no anchors satisfy every role.
 
         """
         # Validate sources
@@ -233,6 +192,7 @@ class NSampler(BaseSampler):
         }
 
     def __repr__(self):
+        """Return a concise representation of the sampler state."""
         if self.is_bound:
             return f"NSampler(n_batches={self.num_batches}, batch_size={self.batcher.batch_size})"
         return f"NSampler(batch_size={self.batcher.batch_size})"
@@ -243,9 +203,11 @@ class NSampler(BaseSampler):
     @property
     def role_names(self) -> list[str]:
         """
-        Names of roles produced by this sampler.
+        Return the roles produced by this sampler.
 
-        All output streams have the same set of roles.
+        Returns:
+            list[str]: Ordered tuple of :attr:`ROLE_ANCHOR` followed by configured roles.
+
         """
         return (ROLE_ANCHOR, *self.condition_mapping.keys())
 
@@ -254,45 +216,21 @@ class NSampler(BaseSampler):
     # =====================================================
     def _standardize_role_idxs(self, d: dict[str, tuple[NDArray, ...]]):
         """
-        Standardize and align anchor and role indices across all roles.
-
-        Description:
-            Each role independently produces:
-                - anchor indices
-                - matched sample indices
-                - per-pair scores
-
-            Since each role may produce different sets of anchors, this
-            method ensures consistent N-way alignment by:
-
-                1. Converting all arrays to NumPy and validating lengths.
-                2. Computing the intersection of anchor indices across
-                   all roles.
-                3. Filtering each role to keep only anchors in the
-                   intersection.
-                4. Sorting each role's anchors to match a canonical
-                   global anchor order.
-                5. Building aligned arrays of role indices and scores
-                   keyed by:
-                        - "anchor"
-                        - each role name
+        Align anchor and role indices returned by each role.
 
         Args:
-            d (dict[str, tuple[NDArray,...]]):
-                Mapping from role name → (anchor_idxs, role_idxs, role_scores),
-                all using absolute sample indices.
+            d (dict[str, tuple[NDArray, ...]]):
+                Mapping from role name to `(anchor_idxs, role_idxs, role_scores)`
+                tuples using absolute indices.
 
         Returns:
             tuple[dict[str, NDArray], dict[str, NDArray]]:
-                A pair of dictionaries:
-                    - role_idxs:  aligned anchor and role indices
-                    - role_scores: aligned score arrays
+                Pair containing aligned role indices and aligned score arrays keyed by
+                :attr:`ROLE_ANCHOR` and each configured role.
 
         Raises:
-            ValueError:
-                If any role returns mismatched array lengths, if anchors
-                fail to intersect across roles, or if anchor order cannot
-                be aligned across roles.
+            ValueError: If array lengths mismatch, anchors fail to intersect,
+            or anchor order cannot be aligned.
 
         """
         # 1. Convert everything to NumPy arrays
@@ -304,7 +242,10 @@ class NSampler(BaseSampler):
             s = np.asarray(s).reshape(-1)
 
             if not (len(a) == len(r) == len(s)):
-                msg = f"Role '{role}' returned arrays of mismatched length: {len(a)}, {len(r)}, {len(s)}"
+                msg = (
+                    f"Role '{role}' returned arrays of mismatched length: "
+                    f"{len(a)}, {len(r)}, {len(s)}."
+                )
                 raise ValueError(msg)
 
             role_arrays[role] = (a, r, s)
@@ -353,34 +294,24 @@ class NSampler(BaseSampler):
         spec: dict[str, Any],
     ) -> tuple[set[int], set[int]]:
         """
-        Identify numeric matches using tolerance-based binary search.
-
-        Description:
-            Uses pre-sorted numeric column values to identify samples
-            whose values fall within the similarity window defined by:
-                |anchor_val - candidate_val| <= cond.tolerance
-
-            Returns two disjoint sets:
-                - match indices
-                - non-match indices
+        Identify numeric matches using tolerance-based search.
 
         Args:
             anchor_val (Any):
-                The value of the anchor sample.
+                Value of the anchor sample.
             cond (SimilarityCondition):
-                Similarity rule with mode and tolerance.
+                Rule specifying similarity mode and tolerance.
             spec (dict[str, Any]):
-                Column specification containing sorted values,
-                index mappings, and the categorical flag.
+                Column metadata including sorted values,
+                index mapping, and categorical flag.
 
         Returns:
-            tuple[set[int], set[int]]:
-                (matched_relative_indices, non_matched_relative_indices)
+            tuple[set[int], set[int]]: Matched and non-matched relative indices.
 
         Raises:
             ValueError:
                 If the column is categorical or if match and non-match
-                sets overlap (should never occur).
+                sets overlap.
 
         """
         if spec["categorical"]:
@@ -428,26 +359,16 @@ class NSampler(BaseSampler):
         """
         Identify exact-match categorical similarities.
 
-        Description:
-            Matches candidate samples whose categorical values equal the
-            anchor value. Similarity conditions determine whether the
-            match or its complement constitutes the "similar" set.
-
         Args:
-            anchor_val (Any):
-                Categorical value for the anchor sample.
-            cond (SimilarityCondition):
-                Similarity rule describing match mode.
-            spec (dict[str, Any]):
-                Column specification containing a category mapping.
+            anchor_val (Any): Anchor categorical value.
+            cond (SimilarityCondition): Similarity rule describing match mode.
+            spec (dict[str, Any]): Column metadata including categorical mappings.
 
         Returns:
-            tuple[set[int], set[int]]:
-                (matched_relative_indices, non_matched_relative_indices)
+            tuple[set[int], set[int]]: Matched and non-matched relative indices.
 
         Raises:
-            ValueError:
-                If the column is numeric or if category groups overlap.
+            ValueError: If the column is numeric or if category groups overlap.
 
         """
         if not spec["categorical"]:
@@ -477,23 +398,17 @@ class NSampler(BaseSampler):
         """
         Compute per-candidate similarity scores across all conditions.
 
-        Description:
-            Each candidate sample's score is the mean of the scores
-            returned by each SimilarityCondition associated with the
-            role. Scores are computed using the anchor and candidate
-            values extracted from the resolved column specifications.
-
         Args:
             anchor_idx (int):
                 Relative index of the anchor sample.
             cand_list (list[int]):
                 Relative indices for candidate samples.
             specs (list[dict[str, Any]]):
-                Column/condition specifications for the role.
+                Column and :class:`SimilarityCondition`
+                specifications for the role.
 
         Returns:
-            np.ndarray[float]:
-                Array of mean similarity scores, one per candidate.
+            np.ndarray[float]: Mean similarity scores, one per candidate.
 
         """
         out = []
@@ -511,18 +426,11 @@ class NSampler(BaseSampler):
         """
         Precompute sorted order for a numeric array.
 
-        Description:
-            Sorts a numeric 1D array and records both the sorted values
-            and the permutation mapping from sorted indices back to the
-            original array positions. Used for fast numeric range search.
-
         Args:
-            arr (NDArray):
-                Numeric 1D array.
+            arr (NDArray): Numeric 1D array.
 
         Returns:
-            SortedColumn:
-                Dataclass holding sorted values and index mappings.
+            SortedColumn: Sorted values and permutation indices.
 
         """
         order = np.argsort(arr)
@@ -536,31 +444,22 @@ class NSampler(BaseSampler):
         """
         Resolve and prepare column specifications for a single role.
 
-        Description:
-            Each role may reference multiple columns using string keys.
-            This method resolves those references using DataReference,
-            extracts the underlying arrays, validates dimensionality,
-            and prepares structures needed for similarity evaluation
-            (sorted numeric columns or categorical index maps).
-
         Args:
             view (FeatureSetView):
-                Bound FeatureSetView containing all samples.
+                Bound :class:`FeatureSetView` containing all samples.
             conds (dict[str, SimilarityCondition]):
-                Mapping of column identifiers to similarity rules.
+                Mapping from column identifiers to similarity rules.
 
         Returns:
             list[dict[str, Any]]:
-                A list of column specifications, each including:
-                    - resolved DataReference
-                    - raw column values
-                    - condition object
-                    - sorted structure or categorical mapping
-                    - datatype flags
+                List of column specs containing the resolved
+                :class:`FeatureSetColumnReference`, raw values, condition,
+                and helper structures.
 
         Raises:
             ValueError:
-                If column resolution fails, or if data are not 1D.
+                If a reference cannot be resolved or the column is
+                not one-dimensional.
 
         """
         # Resolve columns for each condition
@@ -625,34 +524,18 @@ class NSampler(BaseSampler):
         """
         Generate matched samples for a single role.
 
-        Description:
-            Iterates over all anchor samples in the view. For each anchor:
-                1. Identifies per-condition match/non-match sets.
-                2. Applies strict or fallback behavior to prune candidates.
-                3. Computes full/partial/non-match groups.
-                4. Selects up to ``max_samples_per_anchor`` matches in
-                   group priority order.
-                5. Computes similarity scores per selected candidate.
-
-            Returns three parallel lists containing:
-                - anchor absolute indices
-                - matched sample absolute indices
-                - per-match scores
-
         Args:
             view (FeatureSetView):
-                Bound FeatureSetView containing samples.
+                Bound :class:`FeatureSetView` containing samples.
             specs (list[dict[str, Any]]):
-                List of column specifications for conditions.
+                Column specification dictionaries per condition.
 
         Returns:
             tuple[list[int], list[int], list[float]]:
-                Parallel lists of anchor indices, matched indices,
-                and match scores.
+                Parallel arrays of anchor indices, matched indices, and match scores.
 
         Raises:
-            ValueError:
-                If a role attempts to pair a sample with itself.
+            ValueError: If a sample is paired with itself.
 
         """
         abs_indices = view.indices
@@ -782,11 +665,8 @@ class NSampler(BaseSampler):
         """
         Return configuration required to reconstruct this sampler.
 
-        Description:
-            This *does not* restore the source, only the sampler configurtion.
-
         Returns:
-            dict[str, Any]: Sampler configuration.
+            dict[str, Any]: Serializable sampler configuration (sources excluded).
 
         """
         cfg = super().get_config()
@@ -806,10 +686,13 @@ class NSampler(BaseSampler):
         Construct a sampler from configuration.
 
         Args:
-            config (dict[str, Any]): Sampler configuration.
+            config (dict[str, Any]): Serialized sampler configuration.
 
         Returns:
-            NSampler: Unfitted sampler instance.
+            NSampler: Unbound sampler instance.
+
+        Raises:
+            ValueError: If the configuration was not produced by :meth:`get_config`.
 
         """
         if ("sampler_name" not in config) or (config["sampler_name"] != "NSampler"):

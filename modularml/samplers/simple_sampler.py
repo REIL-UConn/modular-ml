@@ -1,3 +1,5 @@
+"""Simple batching sampler implementations."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -11,6 +13,8 @@ if TYPE_CHECKING:
 
 
 class SimpleSampler(BaseSampler):
+    """Single-stream sampler that chunks a :class:`FeatureSet` or view."""
+
     __SPECS__ = SamplerStreamSpec(
         stream_names=(STREAM_DEFAULT,),
         roles=(ROLE_DEFAULT,),
@@ -30,61 +34,50 @@ class SimpleSampler(BaseSampler):
         source: FeatureSet | FeatureSetView | None = None,
     ):
         """
-        Initialize a sampler that splits a FeatureSet or view into batches.
+        Initialize batching logic for a :class:`FeatureSet` or view.
 
         Description:
-            `SimpleSampler` implements three batching strategies:
+            :class:`SimpleSampler` can build batches using one of three strategies:
 
-            1. **Group-based batching (`group_by`)**
-                Samples sharing identical values for the specified columns are \
-                placed into the same bucket. Each bucket is then partitioned \
-                into batches.
+            1. Grouping (`group_by`): samples with identical column values share a bucket.
+            2. Stratification (`stratify_by`): strata interleave samples to balance roles.
+            3. Sequential slicing: rows are taken in order (optionally shuffled).
 
-            2. **Stratified batching (`stratify_by`)**
-                Samples are grouped into strata defined by column values. \
-                Batches are created by interleaving samples from each stratum \
-                to maintain balanced representation.
-
-                - If `strict_stratification=True`, batching stops once any \
-                  stratum is exhausted (perfectly balanced but may drop samples).
-                - If False, batching continues until all samples are consumed \
-                  (uses all samples but later batches may be unbalanced).
-
-            3. **Sequential batching**
-                Samples are taken in order (optionally shuffled) and cut into \
-                fixed-size batches.
-
-            The sampler always returns **zero-copy BatchView objects** that \
-            reference the original FeatureSet. BatchViews do *not* materialize \
-            data; they only store role to row-index mappings.
+            Each batch is returned as a zero-copy :class:`~modularml.core.data.batch_view.BatchView`
+            produced by :meth:`BaseSampler.materialize_batches`.
 
         Args:
             batch_size (int):
                 Number of samples in each batch.
-            shuffle (bool, optional):
-                Whether to shuffle samples (and later the resulting batches).
-            group_by (list[str], optional):
-                FeatureSet key(s) defining grouping behavior. \
-                Only one grouping strategy can be active at a time.
-            stratify_by (list[str], optional):
-                FeatureSet key(s) defining strata for stratified sampling. \
-                Conflicts with `group_by`.
-            strict_stratification (bool, optional):
-                See description above.
-            drop_last (bool, optional):
-                Drop the final incomplete batch.
-            seed (int, optional):
+
+            shuffle (bool):
+                Whether to shuffle samples and completed batches.
+
+            group_by (list[str] | None):
+                FeatureSet keys that define grouping buckets. Mutually exclusive
+                with `stratify_by`.
+
+            stratify_by (list[str] | None):
+                Keys used for stratified sampling. Cannot be combined with `group_by`.
+
+            strict_stratification (bool):
+                Whether to end batching when any stratum is exhausted.
+
+            drop_last (bool):
+                Drop the final incomplete batch if True.
+
+            seed (int | None):
                 Random seed for reproducible shuffling.
-            show_progress (bool, optional):
-                Whether to show a progress bar during the batch building process.
-                Defaults to True.
-            source (FeatureSet | FeatureSetView):
-                The source data from samples are drawn. Note that batches are not
-                constructed until `materialize_batches` is called.
+
+            show_progress (bool):
+                Whether to emit progress updates while materializing batches.
+
+            source (FeatureSet | FeatureSetView | None):
+                Optional :class:`FeatureSet` or :class:`FeatureSetView` to bind
+                immediately.
 
         Raises:
-            ValueError:
-                If both `group_by` and `stratify_by` are provided.
+            ValueError: If both `group_by` and `stratify_by` are provided.
 
         """
         super().__init__(
@@ -103,13 +96,16 @@ class SimpleSampler(BaseSampler):
 
     def build_samples(self) -> dict[tuple[str, str], Samples]:
         """
-        Construct samples using grouping or stratification logic.
+        Construct single-stream batches using grouping or stratification.
 
         Returns:
             dict[tuple[str, str], Samples]:
-                Mapping of stream labels to Samples objects with attributes
-                representing a batch of sample indices and weights.
-                The dict key must be a 2-tuple of (stream label, source FeatureSet label).
+                Mapping from `(stream_label, source_label)` to :class:`Samples`
+                objects describing batch indices and weights.
+
+        Raises:
+            RuntimeError: If :meth:`BaseSampler.bind_source` has not been called.
+            TypeError: If the bound source is not a :class:`FeatureSetView`.
 
         """
         if self.sources is None:
@@ -132,6 +128,7 @@ class SimpleSampler(BaseSampler):
         }
 
     def __repr__(self):
+        """Return a developer-friendly string summarizing sampler state."""
         if self.is_bound:
             return f"SimpleSampler(n_batches={self.num_batches}, batch_size={self.batcher.batch_size})"
         return f"SimpleSampler(batch_size={self.batcher.batch_size})"
@@ -143,11 +140,8 @@ class SimpleSampler(BaseSampler):
         """
         Return configuration required to reconstruct this sampler.
 
-        Description:
-            This *does not* restore the source, only the sampler configurtion.
-
         Returns:
-            dict[str, Any]: Sampler configuration.
+            dict[str, Any]: Serializable sampler configuration (sources excluded).
 
         """
         cfg = super().get_config()
@@ -160,10 +154,13 @@ class SimpleSampler(BaseSampler):
         Construct a sampler from configuration.
 
         Args:
-            config (dict[str, Any]): Sampler configuration.
+            config (dict[str, Any]): Serialized sampler configuration.
 
         Returns:
-            SimpleSampler: Unfitted sampler instance.
+            SimpleSampler: Unbound sampler instance.
+
+        Raises:
+            ValueError: If the configuration was not produced by :meth:`get_config`.
 
         """
         if ("sampler_name" not in config) or (

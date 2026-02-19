@@ -1,3 +1,5 @@
+"""Built-in sampler registration utilities."""
+
 from modularml.utils.registries import CaseInsensitiveRegistry
 
 # Import all sampler modules
@@ -18,6 +20,16 @@ sampler_registry = CaseInsensitiveRegistry()
 
 
 def sampler_naming_fn(x):
+    """
+    Return the registry key for a sampler class.
+
+    Args:
+        x (type): Sampler class being registered.
+
+    Returns:
+        str: Qualname used to index the sampler in :data:`sampler_registry`.
+
+    """
     return x.__qualname__
 
 

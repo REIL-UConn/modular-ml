@@ -1,3 +1,5 @@
+"""Convenience wrappers for similarity-based pair samplers."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -15,13 +17,11 @@ class PairedSampler(NSampler):
     """
     Sampler for generating anchor-pair matches using similarity conditions.
 
-    This sampler is a convenience wrapper around `NSampler` for the
-    common two-way pairing case. It accepts a single mapping of
-    column keys to SimilarityCondition objects and internally delegates
-    to `NSampler` using a single role named `"pair"`. The resulting
-    batches contain aligned indices under the roles `"anchor"` & `"pair"`
-    where each anchor is matched with one or more candidate samples
-    that satisfy the provided similarity conditions.
+    Description:
+        A thin wrapper around :class:`NSampler` configured with a single role named `pair`.
+        Each batch therefore contains aligned anchor indices plus candidate indices stored under
+        the `pair` role together with similarity weights.
+
     """
 
     def __init__(
@@ -46,85 +46,53 @@ class PairedSampler(NSampler):
         Initialize a similarity-based anchor-pair sampler.
 
         Description:
-            `PairedSampler` selects, for each anchor sample, a set of
-            candidate pair samples that satisfy the provided similarity
-            conditions. All keys in `conditions` are resolved to concrete
-            (domain, key, variant) columns using `DataReference` and
-            evaluated using their associated SimilarityCondition objects.
-
-            The sampler internally invokes `NSampler` with a single role
-            named `"pair"`, meaning each batch will contain:
-                - aligned anchor indices under `"anchor"`
-                - aligned partner indices under `"pair"`
-                - per-pair similarity weights
-
-            This sampler is intended for contrastive, metric-learning, or
-            supervised-pairing workflows where only two roles are needed.
-
+            :class:`PairedSampler` resolves every column specifier in `conditions` using
+            :meth:`FeatureSetColumnReference.from_string`, evaluates matches via the associated
+            :class:`SimilarityCondition`, and delegates batching to :class:`NSampler` with a
+            single role named `pair`.
 
         Args:
             conditions (dict[str, SimilarityCondition]):
-                Mapping from user-defined column specifiers to similarity
-                conditions. Each key is resolved using
-                :meth:`DataReference.from_string` with the bound FeatureSet label,
-                and must ultimately refer to a concrete (domain, key, variant).
-                Example keys:
-                    - "SOH_PCT"
-                    - "features.voltage.raw"
-                    - "targets.health_label.transformed"
+                Mapping from column identifiers to similarity rules used for the `pair` role.
 
-            batch_size (int, optional):
-                Number of (anchor, pair) pairs per batch. Defaults to 1.
+            batch_size (int):
+                Number of (anchor, pair) tuples per batch.
 
-            shuffle (bool, optional):
-                If True, the final list of (anchor, pair) pairs is shuffled before
-                batching. Stochastic selection within match categories is also
-                controlled by this flag. Defaults to False.
+            shuffle (bool):
+                Whether to shuffle aligned pairs prior to batching.
 
-            max_pairs_per_anchor (int | None, optional):
-                Maximum number of pairs to generate per anchor:
-                - If None: all valid pairs are used.
-                - If int: at most `max_pairs_per_anchor` pairs per anchor are
-                    created, prioritizing full → partial → non-matches.
-                Defaults to 3.
+            max_pairs_per_anchor (int | None):
+                Maximum number of partners per anchor; `None` keeps all matches.
 
             choose_best_only (bool):
-                Instead of generating multiple pairs, select only the \
-                highest-score pair per anchor.
+                Select only the top-scoring partner(s) per anchor.
 
-            group_by (list[str], optional):
-                FeatureSet key(s) defining grouping behavior.
-                Only one grouping strategy can be active at a time.
+            group_by (list[str] | None):
+                Optional FeatureSet keys for grouping (mutually exclusive with `stratify_by`).
 
-            group_by_role (str, optional):
-                If `group_by=True`, the role on which to draw data for grouping
-                must be specified. Defaults to `"anchor"`.
+            group_by_role (str):
+                Role used for grouping; defaults to :attr:`ROLE_ANCHOR`.
 
-            stratify_by (list[str], optional):
-                FeatureSet key(s) defining strata for stratified sampling.
-                Conflicts with `group_by`.
+            stratify_by (list[str] | None):
+                Optional keys for stratified sampling.
 
-            stratify_by_role (str, optional):
-                If `stratify_by=True`, the role on which to draw data for stratification
-                must be specified. Defaults to `"anchor"`.
+            stratify_by_role (str):
+                Role used for stratification; defaults to :attr:`ROLE_ANCHOR`.
 
-            strict_stratification (bool, optional):
-                See description above.
+            strict_stratification (bool):
+                Whether batching stops when any stratum is exhausted.
 
-            drop_last (bool, optional):
-                If True, the final incomplete batch (with fewer than `batch_size`
-                pairs) is dropped. Defaults to False.
+            drop_last (bool):
+                Drop the final incomplete batch.
 
-            seed (int | None, optional):
-                Random seed for reproducible shuffling and stochastic selection.
+            seed (int | None):
+                Random seed for reproducible shuffling.
 
-            show_progress (bool, optional):
-                Whether to show a progress bar during the batch building process.
-                Defaults to True.
+            show_progress (bool):
+                Whether to show progress updates.
 
-            source (FeatureSet | FeatureSetView):
-                The source data from samples are drawn. Note that batches are not
-                constructed until `materialize_batches` is called.
+            source (FeatureSet | FeatureSetView | None):
+                Optional :class:`FeatureSet` or :class:`FeatureSetView` to bind immediately.
 
         """
         super().__init__(
@@ -145,6 +113,7 @@ class PairedSampler(NSampler):
         )
 
     def __repr__(self):
+        """Return a concise string describing sampler state."""
         if self.is_bound:
             return f"PairedSampler(n_batches={self.num_batches}, batch_size={self.batcher.batch_size})"
         return f"PairedSampler(batch_size={self.batcher.batch_size})"
@@ -156,11 +125,8 @@ class PairedSampler(NSampler):
         """
         Return configuration required to reconstruct this sampler.
 
-        Description:
-            This *does not* restore the source, only the sampler configurtion.
-
         Returns:
-            dict[str, Any]: Sampler configuration.
+            dict[str, Any]: Serializable sampler configuration (sources excluded).
 
         """
         cfg = super().get_config()
@@ -173,10 +139,13 @@ class PairedSampler(NSampler):
         Construct a sampler from configuration.
 
         Args:
-            config (dict[str, Any]): Sampler configuration.
+            config (dict[str, Any]): Serialized sampler configuration.
 
         Returns:
-            PairedSampler: Unfitted sampler instance.
+            PairedSampler: Unbound sampler instance.
+
+        Raises:
+            ValueError: If the configuration was not produced by :meth:`get_config`.
 
         """
         if ("sampler_name" not in config) or (
