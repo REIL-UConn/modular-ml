@@ -1,3 +1,5 @@
+"""Records for capturing computed losses and aggregations."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -15,20 +17,17 @@ if TYPE_CHECKING:
 @dataclass
 class LossRecord:
     """
-    A container for storing the result of computing a loss value.
+    Container for trainable and auxiliary loss values produced by execution steps.
 
     Attributes:
         label (str):
-            Identifier for the loss (e.g., "mse_loss", "triplet_margin").
+            Identifier for the loss (for example, `mse_loss`).
         node_id (str | None):
-            The node ID that produced the data on which the loss was
-            computed.
+            Identifier of the node that produced the measured data.
         trainable (Any | None):
-            Raw computed loss value to be used for backpropogration.
-            Typically a backend-specific tensor or scalar.
+            Backend value contributing to gradient computation.
         auxiliary (Any | None):
-            Raw computed loss value that should not be used for backpropogration.
-            Typically a backend-specific tensor or scalar.
+            Backend value excluded from gradient computation.
 
     """
 
@@ -42,13 +41,26 @@ class LossRecord:
     # ================================================
     @property
     def total(self) -> Any:
-        """Sum of trainable and auxiliary values."""
+        """
+        Sum of trainable and auxiliary values.
+
+        Returns:
+            Any: Backend-specific scalar combining available components.
+
+        """
         return sum([x for x in [self.trainable, self.auxiliary] if x is not None])
 
     # ================================================
     # Data Formatting and Casting
     # ================================================
     def as_dict(self) -> dict[str, Any]:
+        """
+        Convert the record to a serializable dictionary.
+
+        Returns:
+            dict[str, Any]: Dictionary with label, node, and loss values.
+
+        """
         return {
             "label": self.label,
             "node_id": self.node_id,
@@ -58,14 +70,14 @@ class LossRecord:
 
     def to_float(self) -> LossRecord:
         """
-        Construct a copy of this loss record with values as floats.
+        Return a copy of this record with backend values cast to floats.
 
-        Backend-specific values are cast to float. Note that this
-        will break any auto-grad based loss tracking (i.e., PyTorch
-        backpropogation will not be possible on the returned record).
+        Description:
+            Casting breaks autograd tracking (for example, PyTorch
+            backpropagation) on the returned record.
 
         Returns:
-            LossRecord: A new LossRecord instance will float values.
+            LossRecord: New record with float-based trainable and auxiliary values.
 
         """
         return LossRecord(
@@ -80,7 +92,22 @@ class LossRecord:
     # ================================================
     @classmethod
     def merge(cls, *records: LossRecord) -> LossRecord:
-        """Merge all records into a new instance."""
+        """
+        Merge compatible records into a new instance.
+
+        Args:
+            *records (LossRecord):
+                Records to merge; either variadic or a single iterable.
+
+        Returns:
+            LossRecord:
+                Aggregated record with summed trainable and auxiliary values.
+
+        Raises:
+            TypeError: If any input is not a :class:`LossRecord`.
+            ValueError: If labels or node identifiers do not match.
+
+        """
         # Check if passed list instead of separate args
         if (len(records) == 1) and isinstance(records[0], list):
             records = records[0]
@@ -120,13 +147,36 @@ class LossRecord:
         )
 
     def merge_with(self, *others: LossRecord) -> LossRecord:
-        """Merge this record with others."""
+        """
+        Merge this record with additional records.
+
+        Args:
+            *others (LossRecord): Additional records to merge.
+
+        Returns:
+            LossRecord: Combined record produced by :meth:`LossRecord.merge`.
+
+        """
         return type(self).merge(self, *others)
 
     def __add__(self, other: LossRecord) -> LossRecord:
+        """
+        Return a merged record combining this record with `other`.
+
+        Returns:
+            LossRecord: Result of :meth:`LossRecord.merge` with both operands.
+
+        """
         return type(self).merge(self, other)
 
     def __radd__(self, other: LossRecord | int) -> LossRecord:
+        """
+        Support `sum()` by treating zero as the additive identity.
+
+        Returns:
+            LossRecord: Aggregated result respecting commutative addition semantics.
+
+        """
         if other == 0:
             return self
         return type(self).merge(other, self)
@@ -134,16 +184,17 @@ class LossRecord:
     @classmethod
     def mean(cls, *records: LossRecord) -> LossRecord:
         """
-        Compute the mean of all records.
+        Compute the mean of all provided records.
 
         Description:
-            Trainable and auxiliary loss values are only averaged over
-            the number of records with non-None trainable/auxiliary
-            attributes. For example, if there are five records, but only
-            three have non-null `trainable` values, the returned trainable
-            value will have been divided by 3, not 5.
+            Trainable and auxiliary values are averaged over the count of records that
+            define each component after converting values to Python floats.
 
-            Values are cast to Python floats before averaging.
+        Args:
+            *records (LossRecord): Records to average; accepts a single iterable.
+
+        Returns:
+            LossRecord: Averaged record retaining the shared label and node identifier.
 
         """
         # Check if passed list instead of separate args
@@ -183,10 +234,13 @@ class LossRecord:
 
 class LossCollection(AxisSeries[LossRecord]):
     """
-    Loss records keyed by (node, label).
+    Axis-aware collection of :class:`LossRecord` instances keyed by node and label.
 
-    Note that axis `"node"` internally uses the unique node_id value, but can be
-    accessed externally via node_id, the node label or the actual node instance.
+    Description:
+        Axis `"node"` always maps to the unique `node_id` internally but can be
+        accessed using node instances, node IDs, or labels in queries using
+        :class:`AxisSeries` helpers.
+
     """
 
     supported_reduction_methods: ClassVar[set[str]] = {
@@ -198,10 +252,18 @@ class LossCollection(AxisSeries[LossRecord]):
 
     def __init__(self, records: list[LossRecord]) -> None:
         """
-        Initialize a LossCollection from some list of LossRecords.
+        Initialize the collection and merge duplicate keys.
 
-        All records with the same node and label will be merged using
-        `LossRecord.merge`.
+        Description:
+            Records with identical `(node, label)` pairs are merged via
+            :meth:`LossRecord.merge`.
+
+        Args:
+            records (list[LossRecord]): Records to index by `(node, label)`.
+
+        Returns:
+            None: This initializer does not return a value.
+
         """
         self._records = records
 
@@ -221,14 +283,15 @@ class LossCollection(AxisSeries[LossRecord]):
         coords: dict[str, Any],
     ) -> dict[str, Hashable]:
         """
-        Hook mapping potential Experiment node instance/label to its node ID.
+        Map Experiment node identifiers to canonical node IDs.
 
         Args:
             coords (dict[str, Any]):
-                Maps any coords values for `key="node"` to node ID.
+                Coordinate dictionary potentially containing `node` keys.
 
         Returns:
-            dict[str, Hashable]: Coords with "node" values updated to node ID..
+            dict[str, Hashable]:
+                Coordinates with any node entries replaced by node IDs.
 
         """
         if "node" in coords:
@@ -247,17 +310,36 @@ class LossCollection(AxisSeries[LossRecord]):
     # ================================================
     @property
     def loss_labels(self) -> list[str]:
-        """List of unique loss labels."""
+        """
+        List unique loss labels in the collection.
+
+        Returns:
+            list[str]: Sorted label values stored in the label axis.
+
+        """
         return self.axis_values(axis="label")
 
     @property
     def node_ids(self) -> list[str]:
-        """List of unique node IDs."""
+        """
+        List unique node IDs in the collection.
+
+        Returns:
+            list[str]: Node IDs represented in the node axis.
+
+        """
         return self.axis_values(axis="node")
 
     @property
     def nodes(self) -> list[ExperimentNode]:
-        """List of unique node instances associated with these losses."""
+        """
+        List :class:`ExperimentNode` instances associated with the stored node IDs.
+
+        Returns:
+            list[ExperimentNode]:
+                Resolved nodes retrieved from the active experiment context.
+
+        """
         exp_ctx = ExperimentContext.get_active()
         return [exp_ctx.get_node(node_id=x) for x in self.node_ids]
 
@@ -265,7 +347,13 @@ class LossCollection(AxisSeries[LossRecord]):
     # Data Casting
     # ================================================
     def to_float(self) -> LossCollection:
-        """Casts all underlying loss record values to floats."""
+        """
+        Cast all underlying loss records to floats.
+
+        Returns:
+            LossCollection: New collection with float-based records.
+
+        """
         lrs = [lr.to_float() for lr in self.values()]
         return LossCollection(records=lrs)
 
@@ -275,13 +363,15 @@ class LossCollection(AxisSeries[LossRecord]):
     @property
     def trainable(self) -> float:
         """
-        Retrieves the total trainable loss value of all records in this collection.
+        Return the total trainable loss summed across records.
 
-        To get the trainable loss for a specific node or label, use:
-        ```python
-            >>> lc = LossCollection(...)
-            >>> lc.where(node=MyMLP, ...).trainable
-        ```
+        Description:
+            Call :meth:`AxisSeries.where` to filter the collection before
+            accessing this property.
+
+        Returns:
+            float: Sum of non-null `trainable` values.
+
         """
         vals = [lr.trainable for lr in self.values() if lr.trainable is not None]
         return sum(vals) if vals else 0.0
@@ -289,13 +379,15 @@ class LossCollection(AxisSeries[LossRecord]):
     @property
     def auxiliary(self) -> float:
         """
-        Retrieves the total auxiliary loss value of all records in this collection.
+        Return the total auxiliary loss summed across records.
 
-        To get the auxiliary loss for a specific node or label, use:
-        ```python
-            >>> lc = LossCollection(...)
-            >>> lc.where(node=MyMLP, ...).auxiliary
-        ```
+        Description:
+            Call :meth:`AxisSeries.where` to filter the collection before
+            accessing this property.
+
+        Returns:
+            float: Sum of non-null `auxiliary` values.
+
         """
         vals = [lr.auxiliary for lr in self.values() if lr.auxiliary is not None]
         return sum(vals) if vals else 0.0

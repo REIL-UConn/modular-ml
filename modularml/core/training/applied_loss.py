@@ -1,3 +1,5 @@
+"""Utilities for applying configured losses to model outputs."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -31,6 +33,23 @@ if TYPE_CHECKING:
 
 
 class AppliedLoss(Summarizable):
+    """
+    Bind a :class:`Loss` to a :class:`ModelNode` with resolved inputs.
+
+    Attributes:
+        loss (Loss):
+            Wrapped :class:`Loss` instance evaluated for each execution step.
+        weight (float):
+            Scalar multiplier applied to computed loss values before aggregation.
+        label (str | None):
+            Friendly label used when logging summaries for this applied loss.
+        node_id (str):
+            Identifier of the :class:`ModelNode` targeted by this loss.
+        inputs (dict[str, ReferenceLike]):
+            Mapping of loss argument names to runtime references.
+
+    """
+
     def __init__(
         self,
         loss: Loss,
@@ -41,29 +60,25 @@ class AppliedLoss(Summarizable):
         label: str | None = None,
     ):
         """
-        Defines a Loss applied on a specified ModelNode.
+        Define a :class:`Loss` applied on a specified :class:`ModelNode`.
 
         Args:
             loss (Loss):
-                A Loss instance to apply. See :class:`~loss.Loss` for allowed
-                loss definitions.
-
+                Loss instance to apply for each execution step.
             on (str | ModelNode):
-                The ModelNode on which the loss is applied. Can be a ModelNode
-                instance, its ID, or its label.
-
+                Node label/ID or :class:`ModelNode` object indicating where
+                the loss attaches.
             inputs (list[ReferenceLike] | dict[str, ReferenceLike]):
-                A list of ReferenceLike targets defining *positional* loss inputs,
-                or a dict mapping argument names (e.g., `"pred"`, `"true"`) to
-                those targets.
-
-            weight (float, optional):
+                Positional or keyword references resolved as loss arguments.
+            weight (float):
                 Scalar multiplier applied to the computed loss value.
-                Defaults to `1.0`.
+            label (str | None):
+                Optional label used when logging or summarizing this applied loss.
 
-            label (str | None, optional):
-                Optional label used when logging/visualizing this loss.
-                If omitted, the underlying Loss instance's name is used.
+        Raises:
+            TypeError:
+                If `on` is not a :class:`ModelNode` or string, or `inputs` has
+                an unsupported type.
 
         """
         self.loss = loss
@@ -105,6 +120,13 @@ class AppliedLoss(Summarizable):
     # ================================================
     @property
     def backend(self) -> Backend:
+        """
+        Backend used by the underlying :class:`Loss`.
+
+        Returns:
+            Backend: Backend declared on the wrapped :class:`Loss`.
+
+        """
         return self.loss.backend
 
     # ================================================
@@ -115,7 +137,21 @@ class AppliedLoss(Summarizable):
         spec: str,
         ctx: ExecutionContext,
     ) -> tuple[TensorLike, TensorLike, TensorLike]:
-        """Resolve a single loss input string to: (tensor data, weights, mask)."""
+        """
+        Resolve a loss input reference into tensor data, weights, and masks.
+
+        Args:
+            spec (str): Reference string such as `outputs.default` or a FeatureSet column path.
+            ctx (ExecutionContext): Execution context containing upstream batches and outputs.
+
+        Returns:
+            tuple[TensorLike, TensorLike, TensorLike]: Tuple of tensor-like data, weights, and masks.
+
+        Raises:
+            BackendMismatchError: If the :class:`Loss` backend does not match the :class:`ModelNode`.
+            ResolutionError: If the reference cannot be resolved to a model output or FeatureSet column.
+
+        """
         exp_ctx = ExperimentContext.get_active()
 
         # Validate node & backend
@@ -146,7 +182,24 @@ class AppliedLoss(Summarizable):
         node: ModelNode,
         ctx: ExecutionContext,
     ) -> tuple[TensorLike, TensorLike, TensorLike]:
-        """Returns (tensor data, weights, mask)."""
+        """
+        Resolve a model output reference into tensor, weight, and mask tuples.
+
+        Args:
+            spec (str):
+                Domain/role specification referencing :attr:`ExecutionContext.outputs`.
+            node (ModelNode):
+                Node supplying the outputs referenced by this loss.
+            ctx (ExecutionContext):
+                Execution context that holds model outputs for the current step.
+
+        Returns:
+            tuple[TensorLike, TensorLike, TensorLike]: Tuple containing tensor data, weights, and masks.
+
+        Raises:
+            ResolutionError: If the reference is malformed or the role cannot be inferred uniquely.
+
+        """
         # Extract role key
         domain, role = spec, None
         if "." in spec:
@@ -195,7 +248,26 @@ class AppliedLoss(Summarizable):
         node: ModelNode,
         ctx: ExecutionContext,
     ) -> tuple[TensorLike, TensorLike, TensorLike]:
-        """Returns (tensor data, weights, mask)."""
+        """
+        Resolve a FeatureSet column reference into tensor, weight, and mask tuples.
+
+        Args:
+            spec (str):
+                Column path referencing upstream FeatureSet data.
+            node (ModelNode):
+                Node consuming the upstream batch derived from the FeatureSet.
+            ctx (ExecutionContext):
+                Execution context providing FeatureSet :class:`BatchView` instances.
+
+        Returns:
+            tuple[TensorLike, TensorLike, TensorLike]:
+                Tuple containing tensor data, weights, and masks.
+
+        Raises:
+            ResolutionError:
+                If the upstream FeatureSet cannot be inferred or lacks a usable role.
+
+        """
         bv: BatchView = self._get_upstream_view(node=node, ctx=ctx)
         ref = FeatureSetColumnReference.from_string(
             val=spec,
@@ -240,10 +312,21 @@ class AppliedLoss(Summarizable):
         ctx: ExecutionContext,
     ) -> BatchView:
         """
-        Determines the BatchView that feeds into the head node on `nodes` branch.
+        Determine the :class:`BatchView` feeding the head node on this branch.
 
-        Recursively find the head node of the branch that `node` is on.
-        Then obtains the BatchView that feeds into it.
+        Args:
+            node (ModelNode):
+                Node whose upstream FeatureSet should be located.
+            ctx (ExecutionContext):
+                Execution context storing the head inputs per node.
+
+        Returns:
+            BatchView:
+                Upstream view that supplies data to the requested node.
+
+        Raises:
+            ResolutionError: If zero or multiple upstream FeatureSets feed the node.
+
         """
         # All head node IDs in this ExecutionContext
         head_node_ids = [x[0] for x in ctx.inputs]
@@ -286,6 +369,19 @@ class AppliedLoss(Summarizable):
     # Computation
     # ================================================
     def _apply_weights(self, raw_loss: Any, weights: Any) -> Any:
+        """
+        Apply sample weights to the raw backend loss output.
+
+        Args:
+            raw_loss (Any):
+                Backend-specific tensor or array returned by :class:`Loss`.
+            weights (Any):
+                Per-sample weights aligned with `raw_loss`.
+
+        Returns:
+            Any: Weighted scalar compatible with the configured backend.
+
+        """
         # Apply sample weighting -> convert mean_weights to correct backend tensor
         if self.backend == Backend.TORCH:
             torch = ensure_torch()
@@ -307,7 +403,25 @@ class AppliedLoss(Summarizable):
         return np.sum(raw_loss * w) * self.weight / len(raw_loss)
 
     def compute(self, ctx: ExecutionContext) -> Any:
-        """Compute loss for a single execution step."""
+        """
+        Compute the weighted loss for a single execution step.
+
+        Args:
+            ctx (ExecutionContext):
+                Execution context supplying model outputs and upstream batches.
+
+        Returns:
+            Any: Backend-specific scalar/tensor representing the weighted loss value.
+
+        Raises:
+            BackendMismatchError:
+                If the :class:`Loss` backend differs from the :class:`ModelNode`
+                backend.
+            ResolutionError:
+                If any configured reference cannot be resolved from the execution
+                context.
+
+        """
         # Map self.inputs.keys() to batch tensor data
         kw_data: dict[str, Any] = {}
         kw_weights: list[np.ndarray] = []
@@ -356,6 +470,13 @@ class AppliedLoss(Summarizable):
     # Representation
     # ================================================
     def _summary_rows(self) -> list[tuple]:
+        """
+        Return summary table rows representing this applied loss configuration.
+
+        Returns:
+            list[tuple]: Sequence of key/value tuples rendered in summaries.
+
+        """
         rows: list[tuple] = [
             ("label", str(self.label)),
             (
@@ -380,10 +501,11 @@ class AppliedLoss(Summarizable):
     # ================================================
     def get_config(self) -> dict[str, Any]:
         """
-        Return configuration required to reconstruct this loss.
+        Return configuration required to reconstruct this applied loss.
 
         Returns:
-            dict[str, Any]: Loss configuration.
+            dict[str, Any]:
+                Serialized dictionary capturing loss, node, inputs, weight, and label.
 
         """
         return {
@@ -397,13 +519,14 @@ class AppliedLoss(Summarizable):
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> AppliedLoss:
         """
-        Construct an AppliedLoss from configuration.
+        Construct an :class:`AppliedLoss` from configuration.
 
         Args:
-            config (dict[str, Any]): Loss configuration.
+            config (dict[str, Any]):
+                Dictionary produced by :meth:`get_config`.
 
         Returns:
-            AppliedLoss: Reconstructed applied loss.
+            AppliedLoss: Rehydrated applied loss instance.
 
         """
         return cls(**config)

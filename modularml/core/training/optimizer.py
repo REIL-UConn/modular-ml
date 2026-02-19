@@ -1,3 +1,5 @@
+"""Backend-agnostic optimizer utilities for ModularML training."""
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -19,6 +21,19 @@ if TYPE_CHECKING:
 
 
 def _safe_infer_backend(obj_or_cls: Any) -> Backend:
+    """
+    Infer the backend for an optimizer object or class and enforce validity.
+
+    Args:
+        obj_or_cls (Any): Instance or class exposing backend metadata.
+
+    Returns:
+        Backend: Resolved backend enum value.
+
+    Raises:
+        ValueError: If the backend cannot be determined.
+
+    """
     backend = infer_backend(obj_or_cls=obj_or_cls)
 
     if backend == Backend.NONE:
@@ -32,11 +47,28 @@ def _safe_infer_backend(obj_or_cls: Any) -> Backend:
 
 class Optimizer(Configurable, Stateful):
     """
-    Backend-agnostic optimizer wrapper with lazy construction.
+    Backend-agnostic optimizer wrapper that lazily constructs backend objects.
 
-    Supported initialization modes:
-        1. Class + kwargs (string or class)
-        2. Callable factory: Callable[[params], optimizer]
+    Description:
+        Supports initialization from optimizer names, classes, or callables while
+        normalizing backend selection for PyTorch and TensorFlow.
+
+    Attributes:
+        name (str | None):
+            Lowercase name of the optimizer when known.
+        cls (type | None):
+            Backend optimizer class resolved via introspection.
+        kwargs (dict[str, Any]):
+            Keyword arguments applied when instantiating the optimizer.
+        _backend (Backend | None):
+            Resolved backend enum for this optimizer.
+        instance (Any | None):
+            Concrete optimizer object once built.
+        parameters (Any | None):
+            Stored model parameters used for PyTorch optimizer construction.
+        _pending_state (dict[str, Any] | None):
+            Deferred backend state restored after :meth:`Optimizer.build`.
+
     """
 
     def __init__(
@@ -47,6 +79,26 @@ class Optimizer(Configurable, Stateful):
         factory: Callable | None = None,
         backend: Backend | None = None,
     ):
+        """
+        Initialize the optimizer wrapper from a name, class, or factory.
+
+        Args:
+            opt (str | type | None):
+                Optimizer name or class, mutually exclusive with `factory`.
+            opt_kwargs (dict[str, Any] | None):
+                Keyword arguments provided when instantiating the optimizer.
+            factory (Callable | None):
+                Callable returning an optimizer when invoked during :meth:`Optimizer.build`.
+            backend (Backend | None):
+                Backend enum required for name/factory initialization.
+
+        Raises:
+            ValueError:
+                If arguments conflict, `backend` is missing when required, or inputs are invalid.
+            TypeError:
+                If `opt` is neither a string nor a type.
+
+        """
         if opt is not None and factory is not None:
             msg = (
                 "Provide either an optimizer (`opt`) or a `factory` callable, not both."
@@ -113,6 +165,17 @@ class Optimizer(Configurable, Stateful):
 
     @classmethod
     def from_factory(cls, factory: Callable, *, backend: Backend) -> Optimizer:
+        """
+        Instantiate an :class:`Optimizer` directly from a factory and backend.
+
+        Args:
+            factory (Callable): Callable that produces an optimizer instance.
+            backend (Backend): Backend enum applied to the optimizer.
+
+        Returns:
+            Optimizer: New wrapper configured to call the provided factory.
+
+        """
         return cls(factory=factory, backend=backend)
 
     def __eq__(self, other):
@@ -134,10 +197,18 @@ class Optimizer(Configurable, Stateful):
     # ================================================
     @property
     def is_built(self) -> bool:
+        """Whether the backend optimizer instance has been constructed."""
         return self.instance is not None
 
     @property
     def backend(self) -> Backend | None:
+        """
+        Backend enum associated with this optimizer.
+
+        Returns:
+            Backend | None: Resolved backend value if available.
+
+        """
         return self._backend
 
     @backend.setter
@@ -148,6 +219,13 @@ class Optimizer(Configurable, Stateful):
     # Representation
     # ================================================
     def _summary_rows(self) -> list[tuple]:
+        """
+        Return summary rows describing the optimizer configuration.
+
+        Returns:
+            list[tuple]: Key/value pairs rendered in textual summaries.
+
+        """
         return [
             ("name", self.name),
             ("cls", str(self.cls.__name__ if self.cls else None)),
@@ -167,12 +245,15 @@ class Optimizer(Configurable, Stateful):
     # ================================================
     def _resolve(self) -> Callable:
         """
-        Resolve a named optimizer to its backend-specific class by introspection.
+        Resolve a named optimizer to its backend-specific class via introspection.
 
-        Strategy:
-            1. Determine backend-specific optimizer module path
-            2. Inspect all classes defined in that module
-            3. Match class name case-insensitively against `self.name`
+        Returns:
+            Callable: Optimizer class pulled from the backend module.
+
+        Raises:
+            OptimizerError: If the name is missing or cannot be matched.
+            BackendNotSupportedError: If the backend lacks optimizer resolution support.
+
         """
         if not isinstance(self.name, str):
             raise OptimizerError(
@@ -220,10 +301,24 @@ class Optimizer(Configurable, Stateful):
         return opt_cls
 
     def _check_optimizer(self):
+        """
+        Ensure the optimizer has been built before performing backend operations.
+
+        Raises:
+            OptimizerNotSetError: If the optimizer instance is missing.
+
+        """
         if not self.is_built:
             raise OptimizerNotSetError(message="Optimizer has not been built.")
 
     def _extract_kwargs_from_instance(self):
+        """
+        Populate metadata fields based on an instantiated backend optimizer.
+
+        Raises:
+            ValueError: If the optimizer instance has not been set yet.
+
+        """
         if self.instance is None:
             raise ValueError("Instance cannot be None.")
 
@@ -256,12 +351,22 @@ class Optimizer(Configurable, Stateful):
         Instantiate the backend optimizer if not already provided.
 
         Args:
-            parameters (any, optional):
-                Trainable parameters of the model (required for PyTorch).
+            parameters (Any | None):
+                Trainable parameters required when building PyTorch optimizers.
             backend (Backend | None):
-                Backend to use for optimizer, if not already set.
-            force_rebuild (bool, optional):
-                Whether to force rebuild optimizer.
+                Backend override enforced before construction.
+            force_rebuild (bool):
+                Whether to rebuild even if the optimizer is already instantiated.
+
+        Raises:
+            OptimizerNotSetError:
+                If attempting to rebuild without `force_rebuild`.
+            ValueError:
+                If backend validations fail or parameters are missing for PyTorch.
+            BackendNotSupportedError:
+                If an unsupported backend is requested.
+            RuntimeError:
+                If the initialization mode is unsupported.
 
         """
         if self.is_built and not force_rebuild:
@@ -337,10 +442,19 @@ class Optimizer(Configurable, Stateful):
     # ================================================
     def step(self, grads=None, variables=None):
         """
-        Perform optimizer step.
+        Perform a backend-specific optimizer step.
 
-        For PyTorch: calls `optimizer.step()`.
-        For TensorFlow: requires `grads` and `variables` and applies gradients.
+        Args:
+            grads (Any | None):
+                Gradient tensors required by TensorFlow optimizers.
+            variables (Any | None):
+                Trainable variables paired with `grads` in TensorFlow.
+
+        Raises:
+            OptimizerNotSetError: If the optimizer has not been built.
+            ValueError: If TensorFlow requires gradients or variables that are missing.
+            BackendNotSupportedError: If the backend is unsupported.
+
         """
         self._check_optimizer()
 
@@ -363,7 +477,14 @@ class Optimizer(Configurable, Stateful):
             )
 
     def zero_grad(self):
-        """Resets the optimizer gradients."""
+        """
+        Reset accumulated gradients on the backend optimizer.
+
+        Raises:
+            OptimizerNotSetError: If the optimizer has not been built.
+            BackendNotSupportedError: If the backend is unsupported.
+
+        """
         self._check_optimizer()
 
         if self._backend == Backend.TORCH:
@@ -384,7 +505,14 @@ class Optimizer(Configurable, Stateful):
     # Configurable
     # ================================================
     def get_config(self) -> dict[str, Any]:
-        """Get config of this optimizer."""
+        """
+        Return the serialized configuration for this optimizer.
+
+        Returns:
+            dict[str, Any]:
+                Dictionary capturing optimizer definition for reconstruction.
+
+        """
         # Prefer to return only cls (str name) + kwargs
         if self.is_built:
             return {
@@ -406,18 +534,44 @@ class Optimizer(Configurable, Stateful):
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> Optimizer:
+        """
+        Instantiate an optimizer from serialized configuration.
+
+        Args:
+            config (dict[str, Any]):
+                Configuration dictionary produced by :meth:`get_config`.
+
+        Returns:
+            Optimizer: Reconstructed optimizer wrapper.
+
+        """
         return cls(**config)
 
     # ================================================
     # Stateful
     # ================================================
     def get_state(self) -> dict[str, Any]:
+        """
+        Capture serialized optimizer state including backend internals.
+
+        Returns:
+            dict[str, Any]: State payload containing build flag and backend data.
+
+        """
         state = {"is_built": self.is_built}
         if self.is_built:
             state["internal"] = self._capture_internal_state()
         return state
 
     def set_state(self, state: dict[str, Any]) -> None:
+        """
+        Store serialized state for later restoration during :meth:`build`.
+
+        Args:
+            state (dict[str, Any]):
+                Serialized optimizer state produced by :meth:`get_state`.
+
+        """
         # Stash pending optimizer internal state; will be applied in build()
         if state.get("is_built") is not None:
             self._pending_state = state.get("internal")
@@ -427,10 +581,11 @@ class Optimizer(Configurable, Stateful):
     # ================================================
     def _capture_internal_state(self) -> dict[str, Any] | None:
         """
-        Capture backend-specific internal optimizer state.
+        Capture backend-specific optimizer state for serialization.
 
         Returns:
-            dict or None
+            dict[str, Any] | None:
+                Backend payload such as `state_dict` or weights.
 
         """
         if not self.is_built:
@@ -450,10 +605,15 @@ class Optimizer(Configurable, Stateful):
 
     def _restore_internal_state(self, state: dict[str, Any]) -> None:
         """
-        Restore backend-specific internal optimizer state.
+        Restore backend-specific optimizer state captured during serialization.
 
-        Assumes the backend optimizer (`self.instance`) has already been
-        constructed and attached to the correct parameters/variables.
+        Args:
+            state (dict[str, Any]):
+                Serialized backend state captured by :meth:`_capture_internal_state`.
+
+        Raises:
+            BackendNotSupportedError: If the backend is unsupported during restoration.
+
         """
         if not self.is_built or state is None:
             return
@@ -479,18 +639,16 @@ class Optimizer(Configurable, Stateful):
     # ================================================
     def save(self, filepath: Path, *, overwrite: bool = False) -> Path:
         """
-        Serializes this Optimizer to the specified filepath.
+            Serialize the optimizer to disk using the built-in serializer.
 
         Args:
             filepath (Path):
-                File location to save to. Note that the suffix may be overwritten
-                to enforce the ModularML file extension schema.
-            overwrite (bool, optional):
-                Whether to overwrite any existing file at the save location.
-                Defaults to False.
+                Destination path; suffix may be adjusted to match conventions.
+            overwrite (bool):
+                Whether to overwrite an existing artifact.
 
         Returns:
-            Path: The actual filepath to write the Optimizer is saved.
+            Path: Actual file path written by the serializer.
 
         """
         from modularml.core.io.serialization_policy import SerializationPolicy
@@ -506,16 +664,14 @@ class Optimizer(Configurable, Stateful):
     @classmethod
     def load(cls, filepath: Path, *, allow_packaged_code: bool = False) -> Optimizer:
         """
-        Load a Optimizer from file.
+        Load a serialized optimizer from disk.
 
         Args:
-            filepath (Path):
-                File location of a previously saved Optimizer.
-            allow_packaged_code : bool
-                Whether bundled code execution is allowed.
+            filepath (Path): Path to a serialized optimizer artifact.
+            allow_packaged_code (bool): Whether bundled code execution is permitted.
 
         Returns:
-            Optimizer: The reloaded optimizer.
+            Optimizer: Reloaded optimizer instance.
 
         """
         from modularml.core.io.serializer import _enforce_file_suffix, serializer

@@ -1,3 +1,5 @@
+"""Backend-agnostic loss wrapper supporting serialization and registry hooks."""
+
 from __future__ import annotations
 
 import inspect
@@ -14,21 +16,45 @@ if TYPE_CHECKING:
 
 
 def _safe_infer_backend(obj_or_cls: Any) -> Backend:
+    """
+    Infer the backend for a loss object or class and enforce validity.
+
+    Args:
+        obj_or_cls (Any): Backend-aware instance or class to inspect.
+
+    Returns:
+        Backend: Resolved backend enum value.
+
+    Raises:
+        ValueError: If the backend cannot be inferred.
+
+    """
     backend = infer_backend(obj_or_cls=obj_or_cls)
 
     if backend == Backend.NONE:
-        raise ValueError("Could not infer backend from loss class. Specify backend explicitly.")
+        msg = "Could not infer backend from loss class. Specify backend explicitly."
+        raise ValueError(msg)
 
     return backend
 
 
 class Loss:
     """
-    A backend-agnostic wrapper around loss functions used in model training.
+    Backend-agnostic wrapper around loss functions used in model training.
 
-    This class allows the use of built-in loss functions from supported backends (PyTorch, TensorFlow)
-    or custom-defined loss functions (e.g., scikit-learn, numpy-based) and ensures compatibility with
-    the modular training workflow.
+    Description:
+        Supports built-in loss classes from PyTorch and TensorFlow along with custom
+        callables. Provides serialization, backend normalization, and config/state
+        handling to slot into ModularML training workflows.
+
+    Attributes:
+        name (str | None): Lowercase name of the selected loss when applicable.
+        cls (type | None): Backing loss class when using backend libraries.
+        fn (Callable | None): Direct loss callable if provided.
+        reduction (str): Reduction passed to backend constructors.
+        kwargs (dict[str, Any] | None): Keyword arguments used for construction.
+        _backend (Backend | None): Resolved backend enum.
+
     """
 
     def __init__(
@@ -40,30 +66,70 @@ class Loss:
         reduction: str = "none",
         factory: Callable | None = None,
     ):
+        """
+        Initialize the loss wrapper with a name, class, callable, or factory.
+
+        Args:
+            loss (str | type | Callable | None):
+                Loss identifier, class, or callable; mutually exclusive with `factory`.
+            loss_kwargs (dict[str, Any] | None):
+                Keyword arguments passed to loss construction.
+            backend (Backend | None):
+                Backend enum; required when `loss` is a string or factory.
+            reduction (str):
+                Reduction argument forwarded to backend constructors.
+            factory (Callable | None):
+                Callable producing a loss instance when invoked.
+
+        Returns:
+            None: This initializer does not return a value.
+
+        Raises:
+            ValueError:
+                If both `loss` and `factory` are provided, backend inference fails, or
+                inputs are invalid.
+            LossError
+                If initialization does not provide a valid loss definition.
+
+        """
         # Supported initialization modes:
         # 1. Name + backend
         # 2. Loss class
         # 3. Callable loss function
         # 4. Callable factory
         if loss is not None and factory is not None:
-            raise ValueError("Provide either a loss fnc/cls/name (`loss`) or a factory `factory`, not both.")
+            msg = (
+                "Provide either a loss fnc/cls/name (`loss`) or a factory "
+                "`factory`, not both."
+            )
+            raise ValueError(msg)
 
         # Runtime attributes
         self.name: str | None = None  # name of importable class (eg, torch "MSELoss")
         self.cls: type | None = None  # loss class (eg, torch.nn.MSELoss)
         self.fn: Callable | None = None  # loss function (callable)
-        self._factory: Callable | None = factory  # factory to generate a loss class during __call__
+        self._factory: Callable | None = (
+            factory  # factory to generate a loss class during __call__
+        )
 
-        self.reduction = reduction  # reduction argument to pass during class construction
+        self.reduction = (
+            reduction  # reduction argument to pass during class construction
+        )
         self.kwargs = loss_kwargs  # other kwargs to pass to class construction
         self._backend: Backend | None = normalize_backend(backend) if backend else None
-        self._callable: Callable | None = None  # built callable -> this is used during __call__
+        self._callable: Callable | None = (
+            None  # built callable -> this is used during __call__
+        )
 
         # Case 1: loss name
         if isinstance(loss, str):
             self.name = loss.lower()
             if backend is None:
-                raise ValueError("Backend must be specified when initializing a loss with a string-name.")
+                msg = (
+                    "Backend must be specified when initializing a loss with a "
+                    "string-name."
+                )
+                raise ValueError(msg)
             self._backend = normalize_backend(backend)
             self.cls = self._resolve()
             self.kwargs = loss_kwargs or {}
@@ -124,12 +190,15 @@ class Loss:
     # ================================================
     def _resolve(self) -> Callable:
         """
-        Resolve a named loss to its backend-specific class by introspection.
+        Resolve the configured :class:`Loss` name to a backend-specific class.
 
-        Strategy:
-            1. Determine backend-specific loss module path
-            2. Inspect all classes defined in that module
-            3. Match class name case-insensitively against `self.name`
+        Returns:
+            Callable: Backend loss class matching `self.name`.
+
+        Raises:
+            LossError: If the loss name is missing or cannot be resolved.
+            BackendNotSupportedError: If the backend lacks known loss modules.
+
         """
         if not isinstance(self.name, str):
             raise LossError("Loss name must be a string to resolve dynamically.")
@@ -146,7 +215,10 @@ class Loss:
             module = tf.keras.losses
             keywords = []
         else:
-            raise BackendNotSupportedError(backend=self.backend, method="Loss._resolve()")
+            raise BackendNotSupportedError(
+                backend=self.backend,
+                method="Loss._resolve()",
+            )
 
         # Inspect available classes
         candidates: dict[str, type] = {}
@@ -181,10 +253,13 @@ class Loss:
     @property
     def allowed_keywords(self) -> list[str]:
         """
-        Returns the list of valid keyword arguments for the current loss function.
+        List valid keyword arguments for the currently built loss callable.
 
         Returns:
-            List[str]: A list of argument names accepted by the loss function.
+            list[str]: Argument names accepted by :attr:`_callable`.
+
+        Raises:
+            RuntimeError: If the loss has not been built yet.
 
         """
         if self._callable is None:
@@ -199,12 +274,29 @@ class Loss:
 
     @property
     def backend(self) -> Backend:
+        """
+        Backend configured for this :class:`Loss`.
+
+        Returns:
+            Backend: Resolved backend enum.
+
+        Raises:
+            LossError: If the backend has not been set.
+
+        """
         if self._backend is None:
             raise LossError("Loss backend has not been resolved.")
         return self._backend
 
     @property
     def is_built(self) -> bool:
+        """
+        Whether the underlying loss callable has been instantiated.
+
+        Returns:
+            bool: True if :attr:`_callable` is available.
+
+        """
         return self._callable is not None
 
     # ================================================
@@ -222,12 +314,19 @@ class Loss:
 
         Args:
             backend (Backend | None):
-                Backend to use for loss, if not already set.
-            force_rebuild (bool, optional):
-                Whether to force rebuild loss.
-            kwargs:
-                Additional keyword-arguments to use in loss class
-                instantiation.
+                Backend to use, overriding the inferred backend if provided.
+            force_rebuild (bool):
+                Whether to rebuild even if already instantiated.
+            **kwargs (Any):
+                Additional keyword arguments forwarded to loss construction.
+
+        Raises:
+            LossError:
+                If rebuilding an already built loss without `force_rebuild`.
+            ValueError:
+                If backend mismatches occur or no backend is set before building.
+            BackendNotSupportedError:
+                If the backend lacks constructor support.
 
         """
         if self.is_built and not force_rebuild:
@@ -241,7 +340,10 @@ class Loss:
         # Set/validate backend
         if backend is not None:
             if self.backend is not None and backend != self.backend:
-                msg = f"Backend passed to Loss.build differs from backend at init: {backend} != {self.backend}"
+                msg = (
+                    "Backend passed to Loss.build differs from backend at init: "
+                    f"{backend} != {self.backend}"
+                )
                 raise ValueError(msg)
             self.backend = backend
         if self.backend is None:
@@ -275,13 +377,17 @@ class Loss:
     # ================================================
     def __call__(self, *args, **kwargs):
         """
-        Executes the underlying loss callable with given arguments.
+        Execute the underlying loss callable.
+
+        Args:
+            *args (Any): Positional arguments forwarded to the backend callable.
+            **kwargs (Any): Keyword arguments forwarded to the backend callable.
 
         Returns:
             Any: Output of the loss callable.
 
         Raises:
-            LossError: If the loss callable fails during execution.
+            LossError: If the callable fails during execution.
 
         """
         if not self.is_built:
@@ -297,18 +403,36 @@ class Loss:
     # Configurable
     # ================================================
     def get_config(self) -> dict[str, Any]:
-        """Get config of this loss."""
+        """
+        Return configuration required to reconstruct this loss wrapper.
+
+        Returns:
+            dict[str, Any]: Serialized configuration capturing loss definition.
+
+        """
         name = None if self.name is None else str(self.name).lower()
         return {
             "loss": self.fn or name or None,
             "loss_kwargs": self.kwargs,
-            "backend": None if self.backend is None else str(self.backend.value).lower(),
+            "backend": None
+            if self.backend is None
+            else str(self.backend.value).lower(),
             "reduction": self.reduction,
             "factory": self._factory,
         }
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> Loss:
+        """
+        Construct a :class:`Loss` from configuration.
+
+        Args:
+            config (dict[str, Any]): Serialized configuration dictionary.
+
+        Returns:
+            Loss: Rebuilt loss wrapper instance.
+
+        """
         return cls(**config)
 
     # ================================================
@@ -322,18 +446,16 @@ class Loss:
     # ================================================
     def save(self, filepath: Path, *, overwrite: bool = False) -> Path:
         """
-        Serializes this Loss to the specified filepath.
+        Serialize this loss wrapper to disk.
 
         Args:
             filepath (Path):
-                File location to save to. Note that the suffix may be overwritten
-                to enforce the ModularML file extension schema.
-            overwrite (bool, optional):
-                Whether to overwrite any existing file at the save location.
-                Defaults to False.
+                Destination path; suffix may be adjusted to match ModularML conventions.
+            overwrite (bool):
+                Whether to overwrite existing files.
 
         Returns:
-            Path: The actual filepath to write the Loss is saved.
+            Path: Actual file path written by the serializer.
 
         """
         from modularml.core.io.serialization_policy import SerializationPolicy
@@ -349,16 +471,14 @@ class Loss:
     @classmethod
     def load(cls, filepath: Path, *, allow_packaged_code: bool = False) -> Loss:
         """
-        Load a Loss from file.
+        Load a loss wrapper from disk.
 
         Args:
-            filepath (Path):
-                File location of a previously saved Loss.
-            allow_packaged_code : bool
-                Whether bundled code execution is allowed.
+            filepath (Path): Path to a serialized loss artifact.
+            allow_packaged_code (bool): Whether packaged code execution is allowed.
 
         Returns:
-            Loss: The reloaded optimizer.
+            Loss: Reloaded loss instance.
 
         """
         from modularml.core.io.serializer import _enforce_file_suffix, serializer
