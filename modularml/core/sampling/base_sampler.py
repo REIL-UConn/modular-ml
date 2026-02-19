@@ -1,3 +1,5 @@
+"""Abstract base sampler with batching utilities and state tracking."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -28,6 +30,17 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class Samples:
+    """
+    Container describing aligned role indices (and optional weights) for a stream.
+
+    Attributes:
+        role_indices (dict[str, NDArray[np.int_]]):
+            Absolute sample indices keyed by role name.
+        role_weights (dict[str, NDArray[np.float32]] | None):
+            Optional per-role weights aligned with `role_indices`.
+
+    """
+
     role_indices: dict[str, NDArray[np.int_]]
     role_weights: dict[str, NDArray[np.float32]] | None = None
 
@@ -35,12 +48,16 @@ class Samples:
 @dataclass(frozen=True)
 class SamplerStreamSpec:
     """
-    Specifications of sampler's output streams and roles.
+    Specification of sampler output streams and roles.
 
     Description:
-        Sampler streams should be a static property of the Sampler class.
-        The produces stream names and underlying roles should be known
-        before actual sampling occurs.
+        Sampler streams should be a static property on each sampler class so that
+        downstream consumers know which streams/roles exist before sampling.
+
+    Attributes:
+        stream_names (tuple[str, ...]): Names for each logical output stream.
+        roles (tuple[str, ...]): Ordered list of roles produced within each stream.
+
     """
 
     stream_names: tuple[str, ...]
@@ -49,11 +66,18 @@ class SamplerStreamSpec:
 
 class BaseSampler(Configurable, Stateful, ABC):
     """
-    Base class for all samplers.
+    Base class for all samplers that emit aligned :class:`BatchView` objects.
 
-    Accepts a list of either a FeatureSet or FeatureSetView.
-    Always converts to a FeatureSetView internally.
-    Produces zero-copy BatchView objects (not materialized batches).
+    Description:
+        Accepts one or more :class:`FeatureSet` or :class:`FeatureSetView` inputs,
+        normalizes them to views, and produces zero-copy :class:`BatchView` objects.
+
+    Attributes:
+        sources (dict[str, FeatureSetView] | None): Bound source views keyed by label.
+        rng (np.random.Generator): Random generator used for shuffling.
+        show_progress (bool): Whether materialization uses progress reporting.
+        batcher (Batcher): Helper responsible for turning indices into batches.
+
     """
 
     __SPECS__ = SamplerStreamSpec(
@@ -76,6 +100,48 @@ class BaseSampler(Configurable, Stateful, ABC):
         show_progress: bool = True,
         sources: list[FeatureSet | FeatureSetView] | None = None,
     ):
+        """
+        Initialize sampler hyperparameters and optional sources.
+
+        Args:
+            batch_size (int):
+                Number of samples per batch.
+
+            shuffle (bool):
+                Whether to shuffle role indices prior to batching.
+
+            group_by (list[str] | None):
+                Column keys used to keep groups together per batch.
+
+            group_by_role (str):
+                Role whose indices determine grouping when multiple roles exist.
+
+            stratify_by (list[str] | None):
+                Column keys used to balance strata per batch.
+
+            stratify_by_role (str):
+                Role used when interpreting `stratify_by`.
+
+            strict_stratification (bool):
+                Whether batching stops when any stratum exhausts.
+
+            drop_last (bool):
+                Whether to drop incomplete batches.
+
+            seed (int | None):
+                Random-seed passed to the internal RNG.
+
+            show_progress (bool):
+                Whether to enable progress updates during materialization.
+
+            sources (list[FeatureSet | FeatureSetView] | None):
+                Optional data sources to bind immediately.
+
+        Raises:
+            ValueError:
+                If both `group_by` and `stratify_by` are provided simultaneously.
+
+        """
         self.sources: dict[str, FeatureSetView] | None = None
         self.seed = seed
         self.rng = np.random.default_rng(self.seed)
@@ -118,7 +184,10 @@ class BaseSampler(Configurable, Stateful, ABC):
 
     def __eq__(self, other):
         if not isinstance(other, BaseSampler):
-            msg = f"Equality can only be compared between two samplers. Received: {type(other)}."
+            msg = (
+                "Equality can only be compared between two samplers. "
+                f"Received: {type(other)}."
+            )
             raise TypeError(msg)
 
         # Check config first
@@ -146,12 +215,13 @@ class BaseSampler(Configurable, Stateful, ABC):
     @property
     def sampled(self) -> SampledView:
         """
-        Sampled batch views keyed by output stream.
+        Return the materialized :class:`SampledView` (materializing if needed).
 
-        Notes:
-            This will trigger batch materialization if a source if bound but batches
-            have not been created. It is recommended to first call `materialize_batches`
-            directly to configure the execution process.
+        Returns:
+            SampledView: Object containing batches for each stream.
+
+        Raises:
+            RuntimeError: If sources have not been bound yet.
 
         """
         if self.is_bound and not self.is_materialized:
@@ -217,32 +287,33 @@ class BaseSampler(Configurable, Stateful, ABC):
 
     def get_stream(self, name: str) -> list[BatchView]:
         """
-        Explicit stream accessor.
+        Return the batches for a specific stream.
 
-        Notes:
-            This will trigger batch materialization if a source if bound but batches
-            have not been created. It is recommended to first call `materialize_batches`
-            directly to configure the execution process.
+        Args:
+            name (str): Stream label returned by :attr:`stream_names`.
+
+        Returns:
+            list[BatchView]: Sequence of batches for the requested stream.
+
+        Raises:
+            KeyError: If the stream name does not exist.
 
         """
         return self.sampled.get_stream(name=name)
 
     def get_batches(self, stream: str | None = None) -> list[BatchView]:
         """
-        Obtains the list of BatchViews for a given sampler output stream.
-
-        Notes:
-            This will trigger batch materialization if a source if bound but batches
-            have not been created. It is recommended to first call `materialize_batches`
-            directly to configure the execution process.
+        Return the batches for a stream, defaulting when only one exists.
 
         Args:
-            stream (str, optional):
-                The name of an output stream. Typically the label of
-                the source FeatureSet. None is allowed only when a single output stream exists.
+            stream (str | None):
+                Stream label. When omitted, only valid if a single stream exists.
 
         Returns:
-            list[BatchView]: The list of batches created by this sampler.
+            list[BatchView]: Batches emitted for the requested stream.
+
+        Raises:
+            ValueError: If `stream` is omitted but multiple streams exist.
 
         """
         if stream is None:
@@ -257,10 +328,14 @@ class BaseSampler(Configurable, Stateful, ABC):
     # ================================================
     def _build_sampled_view(self) -> SampledView:
         """
-        Construct and return a SampledView.
+        Construct and return a :class:`SampledView` from bound sources.
 
-        SampledView keyed multiple output streams, where each stream holds a
-        list of BatchViews. Each BatchView groups row indices into roles.
+        Returns:
+            SampledView: Materialized batches for each stream.
+
+        Raises:
+            RuntimeError: If :meth:`build_samples` fails to produce indices.
+
         """
         if self._progress_task is not None:
             self._progress_task.reset()
@@ -287,9 +362,15 @@ class BaseSampler(Configurable, Stateful, ABC):
 
     def bind_sources(self, sources: list[FeatureSet | FeatureSetView]):
         """
-        Attaches sources to this sampler.
+        Attach :class:`FeatureSet` or :class:`FeatureSetView` sources to this sampler.
 
-        Batches are not constructed until `materialize_batches` is called.
+        Args:
+            sources (list[FeatureSet | FeatureSetView]):
+                Objects to bind; each is converted to a view internally.
+
+        Raises:
+            TypeError: If any source is neither a FeatureSet nor a FeatureSetView.
+
         """
         src_views: dict[str, FeatureSetView] = {}
         for src in ensure_list(sources):
@@ -312,15 +393,13 @@ class BaseSampler(Configurable, Stateful, ABC):
         show_progress: bool = True,
     ):
         """
-        Executes sampling of source data and batch instantiation.
-
-        Notes:
-            Data sources from which to build batches from must fist be bound to
-            this sampler via the `bind_sources` method.
+        Execute sampling of bound sources and instantiate batches.
 
         Args:
-            show_progress (bool, optional):
-                Whether to show a progress bar of the batch construction process.
+            show_progress (bool): Whether to display progress updates during materialization.
+
+        Raises:
+            RuntimeError: If sources have not been bound via :meth:`bind_sources`.
 
         """
         if not self.is_bound:
@@ -335,12 +414,15 @@ class BaseSampler(Configurable, Stateful, ABC):
     @abstractmethod
     def build_samples(self) -> dict[tuple[str, str], Samples]:
         """
-        Builds sample streams from source data.
+        Build sample streams from bound source data.
 
-        The returned mapping must use 2-tuple-based keys.
-        The first tuple element is the stream name, the second is the
-        name of the source FeatureSet.
-        E.g. `{("streamA", "MyFeatureSet"): Samples(...)}`
+        Returns:
+            dict[tuple[str, str], Samples]:
+                Mapping with keys of `(stream_name, source_label)`.
+
+        Raises:
+            NotImplementedError: Must be supplied by subclasses.
+
         """
         raise NotImplementedError
 
@@ -351,11 +433,8 @@ class BaseSampler(Configurable, Stateful, ABC):
         """
         Return configuration required to reconstruct this sampler.
 
-        Description:
-            This *does not* restore the source, only the sampler configurtion.
-
         Returns:
-            dict[str, Any]: Sampler configuration.
+            dict[str, Any]: Configuration excluding bound sources and batch state.
 
         """
         return {
@@ -377,16 +456,23 @@ class BaseSampler(Configurable, Stateful, ABC):
         Construct a sampler from configuration.
 
         Args:
-            config (dict[str, Any]): Sampler configuration.
+            config (dict[str, Any]):
+                Serialized sampler configuration (must include `sampler_name`).
 
         Returns:
             BaseSampler: Unfitted sampler instance.
+
+        Raises:
+            KeyError: If `sampler_name` is missing.
 
         """
         from modularml.samplers import sampler_registry
 
         if "sampler_name" not in config:
-            msg = "Sampler config must store 'sampler_name' if using BaseSampler to instantiate."
+            msg = (
+                "Sampler config must store 'sampler_name' if "
+                "using BaseSampler to instantiate."
+            )
             raise KeyError(msg)
 
         sampler_cls: BaseSampler = sampler_registry[str(config["sampler_name"])]
@@ -397,10 +483,10 @@ class BaseSampler(Configurable, Stateful, ABC):
     # ================================================
     def get_state(self) -> dict[str, Any]:
         """
-        Return runtime state (i.e. rng and source)  of the splitter.
+        Return runtime state (sources, RNG, and batches) for this sampler.
 
         Returns:
-            dict[str, Any]: Splitter state.
+            dict[str, Any]: State payload consumable by :meth:`set_state`.
 
         """
         # Construct reference of each source
@@ -432,11 +518,10 @@ class BaseSampler(Configurable, Stateful, ABC):
 
     def set_state(self, state: dict[str, Any]) -> None:
         """
-        Restore runtime state of the splitter.
+        Restore runtime state captured via :meth:`get_state`.
 
         Args:
-            state (dict[str, Any]):
-                State produced by get_state().
+            state (dict[str, Any]): State payload produced by :meth:`get_state`.
 
         """
         # If state has sources, rebuild views
@@ -483,18 +568,17 @@ class BaseSampler(Configurable, Stateful, ABC):
     # ================================================
     def save(self, filepath: Path, *, overwrite: bool = False) -> Path:
         """
-        Serializes this Sampler to the specified filepath.
+        Serialize this sampler to disk.
 
         Args:
             filepath (Path):
-                File location to save to. Note that the suffix may be overwritten
-                to enforce the ModularML file extension schema.
-            overwrite (bool, optional):
-                Whether to overwrite any existing file at the save location.
-                Defaults to False.
+                Destination path; suffix may be adjusted to match ModularML
+                conventions.
+            overwrite (bool):
+                Whether to overwrite existing files.
 
         Returns:
-            Path: The actual filepath to write the Sampler is saved.
+            Path: Actual file path written by the serializer.
 
         """
         from modularml.core.io.serialization_policy import SerializationPolicy
@@ -510,16 +594,16 @@ class BaseSampler(Configurable, Stateful, ABC):
     @classmethod
     def load(cls, filepath: Path, *, allow_packaged_code: bool = False) -> BaseSampler:
         """
-        Load a Sampler from file.
+        Load a sampler from disk.
 
         Args:
             filepath (Path):
-                File location of a previously saved Sampler.
-            allow_packaged_code : bool
-                Whether bundled code execution is allowed.
+                File path to a serialized sampler artifact.
+            allow_packaged_code (bool):
+                Whether packaged code execution is allowed.
 
         Returns:
-            BaseSampler: The reloaded sampler.
+            BaseSampler: Reloaded sampler instance.
 
         """
         from modularml.core.io.serializer import _enforce_file_suffix, serializer

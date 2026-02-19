@@ -1,3 +1,5 @@
+"""Declarative similarity/dissimilarity rules for sampler roles."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -78,6 +80,7 @@ class SimilarityCondition(Configurable):
     allow_fallback: bool = False
 
     def __postinit__(self):
+        """Validate mode and weight-mode configuration."""
         valid_modes = ["similar", "dissimilar"]
         if self.mode not in valid_modes:
             msg = f"`mode` must be one of: {valid_modes}. Received: {self.mode}"
@@ -85,7 +88,10 @@ class SimilarityCondition(Configurable):
 
         valid_weight_modes = ["binary", "linear", "exp"]
         if self.weight_mode not in valid_weight_modes:
-            msg = f"`weight_mode` must be one of: {valid_weight_modes}. Received: {self.weight_mode}"
+            msg = (
+                f"`weight_mode` must be one of: {valid_weight_modes}. "
+                f"Received: {self.weight_mode}"
+            )
             raise ValueError(msg)
 
     def score(self, a, b) -> float:
@@ -110,7 +116,10 @@ class SimilarityCondition(Configurable):
         # Step 1: compute difference
         if self.metric:
             diff = abs(self.metric(a, b))
-        elif isinstance(a, (int, float, np.number)) and isinstance(b, (int, float, np.number)):
+        elif isinstance(a, (int, float, np.number)) and isinstance(
+            b,
+            (int, float, np.number),
+        ):
             diff = abs(a - b)
         else:
             diff = 0 if a == b else float("inf")
@@ -170,6 +179,13 @@ class SimilarityCondition(Configurable):
     # Configuration
     # ================================================
     def get_config(self) -> dict[str, Any]:
+        """
+        Return a JSON-serializable configuration for this condition.
+
+        Returns:
+            dict[str, Any]: Configuration capturing all constructor arguments.
+
+        """
         return {
             "mode": self.mode,
             "tolerance": self.tolerance,
@@ -182,4 +198,14 @@ class SimilarityCondition(Configurable):
 
     @classmethod
     def from_config(cls, cfg: dict[str, Any]) -> SimilarityCondition:
+        """
+        Reconstruct a condition from configuration.
+
+        Args:
+            cfg (dict[str, Any]): Dictionary previously produced by :meth:`get_config`.
+
+        Returns:
+            SimilarityCondition: Rehydrated similarity condition.
+
+        """
         return cls(**cfg)

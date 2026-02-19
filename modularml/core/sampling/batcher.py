@@ -1,3 +1,5 @@
+"""Batch construction utilities shared by modular samplers."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -18,12 +20,13 @@ if TYPE_CHECKING:
 
 class Batcher:
     """
-    Encapsulates batching logic for samplers.
+    Encapsulate batching logic for samplers.
 
     Description:
         Handles grouping, stratification, shuffling, and slicing of absolute
-        sample indices into zero-copy BatchView objects. This class does not
-        perform sampling; it only batches already-selected indices.
+        sample indices into zero-copy :class:`BatchView` objects. Batching occurs
+        after sampling—this class simply converts aligned indices into batches.
+
     """
 
     def __init__(
@@ -39,6 +42,34 @@ class Batcher:
         stratify_by_role: str | None = None,
         seed: int | None = None,
     ):
+        """
+        Configure batching behavior.
+
+        Args:
+            batch_size (int):
+                Number of samples per batch.
+            shuffle (bool):
+                Whether to shuffle aligned indices before batching.
+            drop_last (bool):
+                Whether to drop incomplete batches.
+            group_by (list[str] | None):
+                Column selectors used to keep groups together.
+            stratify_by (list[str] | None):
+                Column selectors used to balance strata.
+            strict_stratification (bool):
+                Whether stratification stops once a stratum is exhausted.
+            group_by_role (str | None):
+                Role providing data for grouping in multi-role scenarios.
+            stratify_by_role (str | None):
+                Role providing data for stratification in multi-role scenarios.
+            seed (int | None):
+                Random seed for the internal RNG.
+
+        Raises:
+            ValueError:
+                If both grouping and stratification are requested simultaneously.
+
+        """
         self.batch_size = int(batch_size)
         self.shuffle = bool(shuffle)
         self.drop_last = bool(drop_last)
@@ -63,19 +94,23 @@ class Batcher:
         role_weights: dict[str, NDArray[np.float32]] | None = None,
     ) -> list[BatchView]:
         """
-        Slice aligned role indices into BatchView objects.
+        Slice aligned role indices into :class:`BatchView` objects.
 
         Args:
-            view:
-                FeatureSetView used for BatchView construction.
-            role_indices (dict[str, np.ndarray]):
-                Mapping of role name to aligned absolute indices.
-            role_weights (dict[str, np.ndarray] | None):
+            view (FeatureSetView):
+                Source view used when constructing :class:`BatchView` objects.
+            role_indices (dict[str, NDArray]):
+                Mapping from role name to aligned absolute indices.
+            role_weights (dict[str, NDArray] | None):
                 Optional mapping of role name to aligned weights.
 
         Returns:
             list[BatchView]:
-                List of zero-copy BatchView objects.
+                Zero-copy batches respecting grouping/stratification options.
+
+        Raises:
+            ValueError:
+                If aligned roles disagree on sample counts or if grouping/stratification is misconfigured.
 
         """
         # Get sample indices (each role must have same number of samples)
@@ -158,21 +193,17 @@ class Batcher:
         """
         Build batches ensuring balanced representation across strata.
 
-        Description:
-            Samples are partitioned into strata defined by `stratify_by` columns. \
-            Batches are created by interleaving samples from each stratum.
-
-            - If `strict_stratification=True`, interleaving stops when the first \
-              stratum is exhausted (perfectly balanced).
-            - Otherwise, interleaving continues until all strata are empty.
+        Args:
+            view (FeatureSetView): Source view whose columns define strata.
+            role_indices (dict[str, NDArray]): Absolute indices keyed by role.
+            role_weights (dict[str, NDArray] | None): Optional aligned weights.
 
         Returns:
-            list[BatchView]:
-                BatchViews where each batch contains samples from all strata.
+            list[BatchView]: Batches interleaving samples from each stratum.
 
         Raises:
             ValueError:
-                If the number of strata exceeds `batch_size`.
+                If the number of strata exceeds `batch_size` or configuration is invalid.
 
         """
         # self.stratify_by contains a list of strings, each string can be any column in FeatureSet
@@ -295,19 +326,16 @@ class Batcher:
         """
         Build batches such that each batch contains samples only from a single group.
 
-        Description:
-            Samples are assigned to groups based on the `group_by` column values. \
-            Each group is independently shuffled (optional) and split into \
-            batches of size `batch_size`.
+        Args:
+            view (FeatureSetView): Source view whose columns define grouping keys.
+            role_indices (dict[str, NDArray]): Absolute indices keyed by role.
+            role_weights (dict[str, NDArray] | None): Optional aligned weights.
 
         Returns:
-            list[BatchView]:
-                One BatchView per constructed batch. Each batch has role "default".
+            list[BatchView]: Batches containing samples from a single group.
 
-        Notes:
-            - No cross-group mixing occurs.
-            - Groups with fewer samples than `batch_size` produce no batch \
-              when `drop_last=True`.
+        Raises:
+            ValueError: If grouping configuration is invalid.
 
         """
         # self.group_by contains a list of strings, each string can be any column in FeatureSet
@@ -382,9 +410,9 @@ class Batcher:
 
         return batches
 
-    # ============================================
+    # ================================================
     # Configuration
-    # ============================================
+    # ================================================
     def get_config(self) -> dict[str, Any]:
         return {
             "batch_size": self.batch_size,
