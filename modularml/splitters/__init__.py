@@ -1,3 +1,5 @@
+"""Built-in FeatureSet splitter registrations."""
+
 from modularml.utils.registries import CaseInsensitiveRegistry
 
 # Import all splitter
@@ -12,6 +14,16 @@ splitter_registry = CaseInsensitiveRegistry()
 
 
 def splitter_naming_fn(x):
+    """
+    Return the registry key for a splitter class.
+
+    Args:
+        x (type): Splitter class being registered.
+
+    Returns:
+        str: Qualname used to index the splitter in :data:`splitter_registry`.
+
+    """
     return x.__qualname__
 
 

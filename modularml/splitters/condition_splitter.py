@@ -1,3 +1,5 @@
+"""Condition-based sample partitioning utilities."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -16,44 +18,35 @@ if TYPE_CHECKING:
 
 class ConditionSplitter(BaseSplitter):
     """
-    Splits a FeatureSetView into subsets based on user-defined logical conditions.
+    Split a :class:`FeatureSetView` using user-defined logical conditions.
 
     Description:
-        Each subset is defined by one or more filtering rules expressed as
-        a mapping `{field_name: condition}`, where `condition` can be:
-          - A literal value (exact match)
-          - A sequence of allowed values
-          - A callable (predicate) that returns True/False
+        Each subset is defined by a mapping `{field_name: condition}`, where each
+        condition may be a literal value (exact match), a sequence of allowed values,
+        or a predicate callable returning a boolean. Field names can refer to features,
+        targets, or tags.
 
-        Fields may reference feature, target, or tag keys from the FeatureSet schema.
+        If a sample satisfies multiple subset conditions, a warning is emitted and the
+        sample will appear in every matching subset.
 
-    Example:
-        ```python
-        splitter = ConditionSplitter(
-            low_temp={"temperature": lambda x: x < 20},
-            high_temp={"temperature": lambda x: x >= 20},
-            cell_5={"cell_id": 5},
-        )
-        splits = splitter.split(fs_view, return_views=True)
-        ```
-
-        If a sample satisfies multiple subset conditions, a warning is raised and
-        the sample will appear in multiple subsets.
+    Attributes:
+        conditions (dict[str, Mapping[str, Any | Sequence | Callable]]):
+            Subset labels to condition dictionaries.
 
     """
 
-    def __init__(self, **conditions: Mapping[str, Mapping[str, Any | Sequence | Callable]]):
+    def __init__(
+        self,
+        **conditions: Mapping[str, Mapping[str, Any | Sequence | Callable]],
+    ):
         """
-        Initialize a ConditionSplitter.
+        Initialize the condition-based splitter.
 
         Args:
             **conditions:
-                Mapping of subset labels to condition dictionaries.
-                Each condition dictionary maps a key (feature/target/tag name)
-                to either:
-                  - A literal value (equality)
-                  - A list/tuple/set/array of allowed values
-                  - A callable predicate `f(x) -> bool`
+                Keyword arguments mapping subset labels to conditiondictionaries.
+                Each dictionary entry maps a FeatureSet key to a literal value, an
+                iterable of allowed values, or a predicate callable (`f(x) -> bool`).
 
         """
         self.conditions = conditions
@@ -65,18 +58,18 @@ class ConditionSplitter(BaseSplitter):
         return_views: bool = True,
     ) -> Mapping[str, FeatureSetView] | Mapping[str, Sequence[int]]:
         """
-        Split a FeatureSetView into subsets based on user-defined conditions.
+        Split a :class:`FeatureSetView` using the configured conditions.
 
         Args:
             view (FeatureSetView):
-                The input view to partition.
-            return_views (bool, optional):
-                If True, returns a mapping of subset labels to FeatureSetViews. \
-                If False, returns relative index arrays. Defaults to True.
+                Input view to partition.
+            return_views (bool):
+                If True, return :class:`FeatureSetView` objects; otherwise
+                return relative index arrays.
 
         Returns:
             Mapping[str, FeatureSetView] | Mapping[str, Sequence[int]]:
-                A mapping of subset label to either FeatureSetViews or index arrays.
+                Subset label mapped to either views or relative indices.
 
         """
         split_indices: dict[str, np.ndarray] = {}
@@ -100,10 +93,13 @@ class ConditionSplitter(BaseSplitter):
                 sample_to_subsets.setdefault(idx, []).append(sub_label)
 
         # Warn if any sample appears in more than one subset
-        overlapping = {i: subsets for i, subsets in sample_to_subsets.items() if len(subsets) > 1}
+        overlapping = {
+            i: subsets for i, subsets in sample_to_subsets.items() if len(subsets) > 1
+        }
         if overlapping:
             examples_str = ", ".join(
-                f"Sample {k} is in {v}" for k, v in list(overlapping.items())[: min(2, len(overlapping))]
+                f"Sample {k} is in {v}"
+                for k, v in list(overlapping.items())[: min(2, len(overlapping))]
             )
             msg = (
                 f"\n{len(overlapping)} samples were assigned to multiple subsets. "
@@ -126,7 +122,7 @@ class ConditionSplitter(BaseSplitter):
         Return configuration required to reconstruct this splitter.
 
         Returns:
-            dict[str, Any]: Splitter configuration.
+            dict[str, Any]: Serializable splitter configuration (sources excluded).
 
         """
         return {
@@ -137,13 +133,13 @@ class ConditionSplitter(BaseSplitter):
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> ConditionSplitter:
         """
-        Construct a Splitter from configuration.
+        Construct a splitter from configuration.
 
         Args:
-            config (dict[str, Any]): Splitter configuration.
+            config (dict[str, Any]): Serialized splitter configuration.
 
         Returns:
-            BaseSplitter: Unfitted splitter instance.
+            BaseSplitter: Unbound splitter instance.
 
         """
         return cls(conditions=config["conditions"])

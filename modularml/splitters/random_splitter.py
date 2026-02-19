@@ -1,3 +1,5 @@
+"""Randomized partitioning utilities for FeatureSet views."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -17,23 +19,19 @@ if TYPE_CHECKING:
 
 class RandomSplitter(BaseSplitter):
     """
-    Randomly splits a FeatureSetView into subsets according to user-specified ratios.
+    Randomly split a :class:`FeatureSetView` according to labeled ratios.
 
     Description:
-        This splitter partitions samples randomly into subsets (e.g., "train", "val", "test")
-        based on the given ratios. Optionally, samples can be grouped by one or more tag keys
-        before splitting, ensuring that all samples from the same group fall into the same subs etc.
+        Partitions samples into subsets (for example, `train`, `val`, `test`) based on
+        specified ratios. Optional grouping ensures all samples sharing the same tag
+        values stay together, while stratification preserves per-stratum proportions.
 
-        The split operates on **relative indices** within the provided FeatureSetView,
-        preserving full traceability via SAMPLE_ID in the source FeatureSet.
-
-    Example:
-        ```python
-        splitter = RandomSplitter(
-            ratios={"train": 0.8, "val": 0.2}, group_by="cell_id", seed=42
-        )
-        splits = splitter.split(fs_view, return_views=True)
-        ```
+    Attributes:
+        ratios (dict[str, float]): Mapping of subset labels to ratios that sum to 1.0.
+        group_by (list[str] | None): Tag keys that enforce group-wise assignment.
+        stratify_by (list[str] | None): Tag keys that enforce stratified sampling.
+        seed (int): Seed used to initialize the NumPy random generator.
+        rng (np.random.Generator): Random generator used for shuffling/group assignment.
 
     """
 
@@ -45,21 +43,27 @@ class RandomSplitter(BaseSplitter):
         seed: int = 13,
     ):
         """
-        Initialize the RandomSplitter.
+        Initialize the randomized splitter.
 
         Args:
             ratios (Mapping[str, float]):
-                Dictionary mapping subset labels to relative ratios. Must sum to 1.0.
-                Example: {"train": 0.7, "val": 0.2, "test": 0.1}.
-            group_by (str | Sequence[str] | None, optional):
-                One or more tag keys to group samples by before splitting.
-                If None, samples are split individually. Mutually exclusive with `stratify_by`.
-            stratify_by (str | Sequence[str] | None, optional):
-                One or more tag keys to stratify samples by during splitting.
-                Ensures each split maintains the same proportion of each stratum as the original data.
+                Subset ratios that sum to 1.0
+                (e.g., `{"train": 0.7, "val": 0.2, "test": 0.1}`).
+
+            group_by (str | Sequence[str] | None):
+                Tag keys that ensure grouped samples are sent to the same subset.
+                Mutually exclusive with `stratify_by`.
+
+            stratify_by (str | Sequence[str] | None):
+                Tag keys that enforce proportional representation across subsets.
                 Mutually exclusive with `group_by`.
-            seed (int, optional):
-                Random seed for reproducibility. Default is 13.
+
+            seed (int): Random seed used to initialize the generator.
+
+        Raises:
+            ValueError:
+                If ratios fall outside [0, 1], do not sum to 1.0, or
+                grouping/stratification are both requested.
 
         """
         if not all((v >= 0) and (v <= 1) for v in ratios.values()):
@@ -94,23 +98,27 @@ class RandomSplitter(BaseSplitter):
         return_views: bool = True,
     ) -> Mapping[str, FeatureSetView] | Mapping[str, Sequence[int]]:
         """
-        Randomly split a FeatureSetView into multiple subsets.
+        Split a :class:`FeatureSetView` into labeled subsets.
 
         Description:
-            Splits are based on sample order, shuffled using a fixed random seed. \
-            If `group_by` is provided, all samples sharing the same tag values \
-            are assigned to the same subset.
+            Samples (or sample groups/strata) are shuffled using the configured random
+            generator before allocating according to `ratios`. Grouping guarantees
+            all samples with the same tag values move together, while stratification
+            preserves per-stratum proportions.
 
         Args:
             view (FeatureSetView):
-                The input FeatureSetView to partition.
-            return_views (bool, optional):
-                If True, returns a mapping of labels to FeatureSetViews. \
-                If False, returns relative index arrays. Defaults to True.
+                Input view to partition.
+            return_views (bool):
+                If True, return :class:`FeatureSetView` objects; otherwise return
+                relative index arrays.
 
         Returns:
             Mapping[str, FeatureSetView] | Mapping[str, Sequence[int]]:
-                A mapping of subset label to either FeatureSetViews or index arrays.
+                Subset label mapped to either views or relative indices.
+
+        Raises:
+            ValueError: If grouping/stratification yields empty subsets.
 
         """
         n = len(view)
@@ -249,21 +257,18 @@ class RandomSplitter(BaseSplitter):
     # ================================================
     def _compute_split_boundaries(self, n: int) -> dict[str, tuple[int, int]]:
         """
-        Compute index boundaries for each split given n total elements.
-
-        Uses the Largest Remainder Method to ensure:
-        - Total count equals `n`
-        - Allocation is proportional to `self.ratios`
-        - No systematic bias toward the last group
+        Compute start/end indices for each split using the largest remainder method.
 
         Args:
-            n (int):
-                The total number of samples.
+            n (int): Total number of elements to distribute.
 
         Returns:
             dict[str, tuple[int, int]]:
-                A dictionary where keys are subset labels and values are tuples representing
-                the start and end indices for each subset.
+                Mapping from subset label to `[start, end)` index boundaries.
+
+        Raises:
+            ValueError:
+                If no samples are provided or any subset would receive zero samples.
 
         """
         if n <= 0:
@@ -321,7 +326,7 @@ class RandomSplitter(BaseSplitter):
         Return configuration required to reconstruct this splitter.
 
         Returns:
-            dict[str, Any]: Splitter configuration.
+            dict[str, Any]: Serializable splitter configuration (sources excluded).
 
         """
         return {
@@ -335,13 +340,13 @@ class RandomSplitter(BaseSplitter):
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> BaseSplitter:
         """
-        Construct a Splitter from configuration.
+        Construct a splitter from configuration.
 
         Args:
-            config (dict[str, Any]): Splitter configuration.
+            config (dict[str, Any]): Serialized splitter configuration.
 
         Returns:
-            BaseSplitter: Unfitted splitter instance.
+            BaseSplitter: Unbound splitter instance.
 
         """
         return cls(
@@ -356,21 +361,20 @@ class RandomSplitter(BaseSplitter):
     # ================================================
     def get_state(self) -> dict[str, Any]:
         """
-        Return runtime (i.e. rng) state of the splitter.
+        Return the runtime RNG state of the splitter.
 
         Returns:
-            dict[str, Any]: Splitter state.
+            dict[str, Any]: Splitter state dictionary suitable for :meth:`set_state`.
 
         """
         return {"rng_state": self.rng.bit_generator.state}
 
     def set_state(self, state: dict[str, Any]) -> None:
         """
-        Restore runtime state of the splitter.
+        Restore the runtime RNG state of the splitter.
 
         Args:
-            state (dict[str, Any]):
-                State produced by get_state().
+            state (dict[str, Any]): State previously produced by :meth:`get_state`.
 
         """
         self.rng.bit_generator.state = state["rng_state"]
