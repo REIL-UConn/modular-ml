@@ -1,5 +1,8 @@
+"""Mixin that equips FeatureSets and views with splitting helpers."""
+
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
@@ -32,21 +35,20 @@ if TYPE_CHECKING:
 
 class SplitMixin:
     """
-    Shared mixin providing split-related functionality for both FeatureSet and FeatureSetView.
+    Provides split-related functionality for both FeatureSet and FeatureSetView.
 
     Description:
-        This mixin unifies split operations across the FeatureSet hierarchy. It allows \
-        either a `FeatureSet` or `FeatureSetView` to invoke high-level splitting \
-        methods (`split`, `split_random`, `split_by_condition`) without code duplication.
+        This mixin unifies split operations across the FeatureSet hierarchy. It
+        allows either a :class:`FeatureSet` or :class:`FeatureSetView` to invoke
+        high-level splitting methods (`split`, `split_random`, `split_by_condition`).
 
-        - When called from a **FeatureSet**, the operation targets the entire \
+        - When called from a :class:`FeatureSet`, the operation targets the entire
           SampleCollection.
-        - When called from a **FeatureSetView**, the operation applies only to the \
-          subset of samples represented by that view.
+        - When called from a :class:`FeatureSetView`, the operation applies only to
+          the subset of samples represented by that view.
 
-        Resulting splits are represented as `FeatureSetView` objects and may optionally \
-        be registered into the parent FeatureSet's `_splits` and `_split_configs` \
-        registries when invoked from a FeatureSet.
+        Resulting splits are represented as :class:`FeatureSetView` objects and may
+        optionally be registered into the parent FeatureSet's split registry.
     """
 
     # ================================================
@@ -54,28 +56,28 @@ class SplitMixin:
     # ================================================
     def _get_split_context(self) -> tuple[FeatureSet, bool]:
         """
-        Identify the FeatureSet context for a split operation.
+        Identify the :class:`FeatureSet` context for a split operation.
 
         Description:
-            Determines the parent FeatureSet and whether the calling instance is a \
-            FeatureSetView or a FeatureSet. This allows the same split logic to \
-            adapt to both types of objects.
+            Determines the parent FeatureSet and whether the calling instance is a
+            :class:`FeatureSetView` or a :class:`FeatureSet`. This allows common split
+            logic to adapt to both object types.
 
-            - If called on a `FeatureSet`, the method returns the instance itself as \
-              the source.
-            - If called on a `FeatureSetView`, the method returns the parent FeatureSet \
-              (`.source`).
-            - If the caller is neither, a `TypeError` is raised.
+            - If called on a :class:`FeatureSet`, the method returns that instance as
+              the source, marking the caller as not-a-view.
+            - If called on a :class:`FeatureSetView`, the method returns the parent
+              FeatureSet via :attr:`FeatureSetView.source`.
+            - If the caller is neither, a :class:`TypeError` is raised.
 
         Returns:
             tuple[FeatureSet, bool]:
-                A 2-tuple containing:
-                - `FeatureSet`: Reference to the source FeatureSet instance.
-                - `bool`: `True` if the caller is a FeatureSetView, `False` otherwise.
+                Pair of the source FeatureSet and a flag indicating whether the caller
+                was a view.
 
         Raises:
             TypeError:
-                If the caller is neither a FeatureSet nor a FeatureSetView.
+                If the caller is neither a :class:`FeatureSet` nor a
+                :class:`FeatureSetView`.
 
         """
         from modularml.core.data.featureset import FeatureSet
@@ -92,7 +94,10 @@ class SplitMixin:
             return source, True
 
         # Case 3: unknown caller
-        msg = f"{self.__class__.__name__} is not a valid split context host. Expected FeatureSet or FeatureSetView."
+        msg = (
+            f"{self.__class__.__name__} is not a valid split context host. "
+            "Expected FeatureSet or FeatureSetView."
+        )
         raise TypeError(msg)
 
     # ================================================
@@ -104,21 +109,27 @@ class SplitMixin:
         label: str | None = None,
     ) -> FeatureSetView:
         """
-        Create a new FeatureSetView derived from this one using relative indices.
+        Creates a new :class:`FeatureSetView` from this one using relative indices.
 
         Description:
-            Produces a new view referencing the same collection and parent \
-            FeatureSet but restricted to a subset of rows. The provided indices \
-            are interpreted *relative to this view* and mapped to *absolute* \
+            Produces a new view referencing the same collection and parent
+            FeatureSet but restricted to a subset of rows. The provided indices
+            are interpreted *relative to this view* and mapped to **absolute**
             indices in the underlying collection.
 
         Args:
             rel_indices (Sequence[int]):
-                Relative indices of the current FeaturSet/View to project into
-                a new view.
+                Relative indices of the current view to include in the new view.
+            label (str | None):
+                Optional label for the returned :class:`FeatureSetView`.
 
-            label (str, optional):
-                The label to assign to the returned FeatureSetView.
+        Returns:
+            FeatureSetView:
+                View referencing the same collection but restricted to the requested rows.
+
+        Raises:
+            ValueError: If `rel_indices` is not one-dimensional.
+            IndexError: If any relative index exceeds `len(self) - 1`.
 
         """
         from modularml.core.data.featureset_view import FeatureSetView
@@ -156,11 +167,11 @@ class SplitMixin:
     def filter(
         self,
         *,
-        conditions: dict[str | FeatureSetColumnReference, Any | list[Any], Callable],
+        conditions: dict[str | FeatureSetColumnReference, Any | list[Any] | Callable],
         label: str | None = None,
     ) -> FeatureSetView | None:
         """
-        Create a filtered FeatureSetView using reference-aware conditions.
+        Create a filtered :class:`FeatureSetView` using reference-aware conditions.
 
         Description:
             Applies row-level filtering using fully-qualified column references.
@@ -173,25 +184,27 @@ class SplitMixin:
                 - tags.<key>.<rep>
 
         Args:
-            conditions (dict[str, Any | list[Any], Callable]):
-                Mapping of column names (from any domain) to filter criteria.
-                Values may be:
-                - `scalar`: selects rows where the column equals the value.
-                - `sequence`: selects rows where the column is in the given list/set.
-                - `callable`: a function that takes a NumPy array and returns a boolean mask.
-            label (str, optional):
-                The label to assign to the returned FeatureSetView.
+            conditions (dict[str | FeatureSetColumnReference, Any | list[Any] | Callable]):
+                Mapping of column identifiers to filter criteria. Supported condition
+                values are:
+                * scalar literal values for equality matching
+                * sequences of allowed values
+                * callables returning either a boolean mask or scalar truth value
+            label (str | None):
+                Optional label for the returned :class:`FeatureSetView`.
 
         Returns:
-            FeatureSetView:
-                A view of this FeatureSet containing only rows that satisfy \
-                all specified conditions. If no rows match, an empty view is returned.
+            FeatureSetView | None:
+                Filtered view containing rows that satisfy all conditions; may be empty.
 
         Raises:
             KeyError:
-                If a specified key does not exist in any of the domains.
+                If a referenced column does not exist.
             TypeError:
-                If a condition value type is unsupported.
+                If a condition type is unsupported or iterable conditions target
+                multi-dimensional columns.
+            ValueError:
+                If a :class:`FeatureSetColumnReference` cannot be resolved.
 
         Example:
             For a FeatureSet where its samples have the following attributes:
@@ -205,13 +218,11 @@ class SplitMixin:
             - `group_id` is greater than 1, and
             - `pulse_type` equals 'charge'.
 
-        ``` python
-        FeatureSet.filter(where={
-            "tags.cell_id"=[1,2,3],
-            "tags.group_id"=(lambda x: x > 1),
-            "tags.pulse_type"="charge",
-        })
-        ```
+            FeatureSet.filter(where={
+                "tags.cell_id": [1, 2, 3],
+                "tags.group_id": (lambda x: x > 1),
+                "tags.pulse_type": "charge",
+            })
 
         """
         from modularml.core.data.featureset_view import FeatureSetView
@@ -230,7 +241,8 @@ class SplitMixin:
                     - scalar literal for equality
 
             Returns:
-                np.ndarray[bool]: Boolean mask indicating rows satisfying the condition.
+                np.ndarray[bool]:
+                    Boolean mask indicating rows satisfying the condition.
 
             """
             col_data = np.asarray(col_data, dtype=object)
@@ -318,7 +330,8 @@ class SplitMixin:
                 ref = arg
             else:
                 msg = (
-                    "Filter conditions must be keyed by a string or FeatureSetColumnReference object. "
+                    "Filter conditions must be keyed by a string or "
+                    "FeatureSetColumnReference object. "
                     f"Received key of type {type(ref)}"
                 )
                 raise TypeError(msg)
@@ -373,7 +386,7 @@ class SplitMixin:
         label: str | None = None,
     ) -> FeatureSetView:
         """
-        Select a subset of columns from this FeatureSet and return a FeatureSetView.
+        Select subset of columns from this object and return a :class:`FeatureSetView`.
 
         Description:
             Performs declarative column selection using a shared selector syntax
@@ -391,31 +404,21 @@ class SplitMixin:
 
         Args:
             columns (str | list[str] | None):
-                Fully-qualified column names to include
-                (e.g. "features.voltage.raw"). These must exactly match existing
-                columns in the FeatureSet.
-
+                Fully-qualified column names to include.
             features (str | list[str] | None):
-                Feature-domain selectors. May be bare keys ("voltage"),
-                key/rep pairs ("voltage.raw"), or wildcards.
-                The "features." prefix may be omitted.
-
+                Feature-domain selectors (bare keys, key/rep pairs, or wildcards).
             targets (str | list[str] | None):
                 Target-domain selectors, following the same rules as `features`.
-
             tags (str | list[str] | None):
                 Tag-domain selectors, following the same rules as `features`.
-
             rep (str | None):
-                Default representation suffix to apply when a selector omits a
-                representation. Explicit representations are never overridden.
-
-            label (str, optional):
-                The label to assign to the returned FeatureSetView.
+                Default representation suffix when a selector omits the representation.
+            label (str | None):
+                Optional label for the returned :class:`FeatureSetView`.
 
         Returns:
             FeatureSetView:
-                A row-preserving, column-filtered view over this FeatureSet.
+                Row-preserving, column-filtered view over the same collection.
 
         """
         from modularml.core.data.featureset_view import FeatureSetView
@@ -479,17 +482,27 @@ class SplitMixin:
 
         Args:
             other (FeatureSet | FeatureSetView):
-                Other indice-containing FeatureSet object.
-            order (str):
-                Whether the intersecting view should use the indice order defined
-                in `'self'` or `'other'`. Defaults to `'self'`.
-            label (str, optional):
-                Label assigned to the returned FeatureSetView.
-                Defaults to "<self.label>_intersection".
+                Object providing the comparison indices.
+            order (Literal["self", "other"]):
+                Determines whether the intersection respects `self` or `other` ordering.
+            label (str | None):
+                Optional label for the returned :class:`FeatureSetView`.
+
+        Returns:
+            FeatureSetView: View containing the shared rows.
+
+        Raises:
+            TypeError:
+                If `other` is not a :class:`FeatureSet` or :class:`FeatureSetView`.
+            ValueError:
+                If the two inputs originate from different FeatureSets.
 
         """
         if not isinstance(other, SplitMixin):
-            msg = f"Intersection is only possible between FeatureSets or FeatureSetViews. Received: {type(other)}."
+            msg = (
+                "Intersection is only possible between FeatureSets or "
+                f"FeatureSetViews. Received: {type(other)}."
+            )
             raise TypeError(msg)
 
         # Get indices of caller
@@ -553,12 +566,14 @@ class SplitMixin:
 
         Returns:
             FeatureSetView:
-                A new view containing only samples from `self`
-                that do not overlap with `other`.
+                View containing only samples from `self` that do not overlap
+                with `other`.
 
         Raises:
             TypeError:
-                If `other` is not a FeatureSet or FeatureSetView.
+                If `other` is not a :class:`FeatureSet` or :class:`FeatureSetView`.
+            ValueError:
+                If the two inputs originate from different FeatureSets.
 
         """
         if not isinstance(other, SplitMixin):
@@ -606,7 +621,7 @@ class SplitMixin:
         label: str | None = None,
     ) -> FeatureSetView:
         """
-        Create a new FeatureSetView over the specified samples.
+        Create a new :class:`FeatureSetView` restricted to specific sample UUIDs.
 
         Description:
             Produces a new view referencing the same collection and parent
@@ -617,11 +632,15 @@ class SplitMixin:
 
         Args:
             sample_uuids (Sequence[str]):
-                A list of sample UUIDs to include in the returned view.
-                The order is preserved in the returned view.
+                Sample UUIDs to include; order is preserved.
+            label (str | None):
+                Optional label for the returned :class:`FeatureSetView`.
 
-            label (str, optional):
-                The label to assign to the returned FeatureSetView.
+        Returns:
+            FeatureSetView: View containing only the requested UUIDs.
+
+        Raises:
+            ValueError: If any UUID does not exist in the source collection.
 
         """
         # Get indices of the calling class
@@ -633,7 +652,12 @@ class SplitMixin:
 
         # Get rel indices of subsamples
         take_sids = np.asarray(list(sample_uuids), dtype=str)
-        rel_idxs = np.where(all_sids[:, None] == take_sids)[0]
+        matches = all_sids[:, None] == take_sids
+        if not np.all(matches.any(axis=0)):
+            missing = take_sids[~matches.any(axis=0)]
+            msg = f"Sample UUIDs not found in collection: {missing.tolist()}."
+            raise ValueError(msg)
+        rel_idxs = np.where(matches)[0]
         return self.take(rel_indices=rel_idxs, label=label)
 
     # ================================================
@@ -647,7 +671,7 @@ class SplitMixin:
         register: bool = True,
     ) -> list[FeatureSetView] | None:
         """
-        Apply a splitter to this FeatureSe.
+        Apply a splitter to this :class:`FeatureSet` or :class:`FeatureSetView`.
 
         Description:
             Runs the provided `BaseSplitter` instance on a view of the caller. \
@@ -656,26 +680,25 @@ class SplitMixin:
 
         Args:
             splitter (BaseSplitter):
-                The splitter instance (e.g., RandomSplitter, ConditionSplitter).
-            return_views (bool, optional):
-                Whether to return FeatureSetViews or not. Defaults to False.
-            register (bool, optional):
-                Whether to record the resulting views and splitter config. \
-                Defaults to True.
+                Splitter instance (for example, :class:`RandomSplitter`).
+            return_views (bool):
+                Whether to return the resulting :class:`FeatureSetView` objects.
+            register (bool):
+                Whether to register outputs and splitter config on the source
+                :class:`FeatureSet`.
 
         Returns:
             list[FeatureSetView] | None:
-                The created splits are returned only if `return_views=True`.
+                Split views when `return_views=True`; otherwise `None`.
 
         """
         # Get context of instance calling this mixin
         source, is_view = self._get_split_context()
 
-        # Choose base view (use self if called on FeatureSetView, otherwise convert FeatureSet to a view)
+        # Choose base view
+        # - use self if called on FeatureSetView
+        # - otherwise convert FeatureSet to a view
         base_view = self if is_view else source.to_view()
-        if ".fold_" in base_view.label:
-            msg = "Splitting of a fold (`base_view.label`) is not supported."
-            raise NotImplementedError(msg)
 
         # Perform the split (return splits as FeatureSetView instances)
         results: dict[str, FeatureSetView] = splitter.split(
@@ -690,7 +713,7 @@ class SplitMixin:
                 source.add_split(split)
 
             # Record this splitter configuration
-            # Splitter is cloned to prevent user from modifying state outside of ModularML
+            # Splitter is cloned to prevent user from modifying state
             cloned_splitter: BaseSplitter = clone_via_serialization(obj=splitter)
             order = (
                 max([rec.order for rec in source._split_recs]) + 1
@@ -724,45 +747,43 @@ class SplitMixin:
         register: bool = True,
     ) -> list[FeatureSetView] | None:
         """
-        Randomly partition this FeatureSet (or FeatureSetView) into subsets.
+        Randomly partition this object into subsets.
 
         Description:
-            A convenience wrapper around :class:`RandomSplitter`, which randomly divides \
-            the samples of the specified collection into multiple subsets according to \
-            user-defined ratios (e.g., `{"train": 0.8, "val": 0.2}`).
+            A convenience wrapper around
+            :class:`~modularml.splitters.random_splitter.RandomSplitter`, which
+            randomly divides the samples of the specified collection into multiple
+            subsets according to user-defined ratios (eg, `{"train": 0.8, "val": 0.2}`).
 
-            Optionally, one or more tag keys can be provided via `group_by` to ensure \
-            that all samples sharing the same tag values (e.g., a common cell ID or batch ID) \
-            are placed into the same subset.
+            Optionally, one or more tag keys can be provided via `group_by` to ensure
+            that all samples sharing the same tag values (e.g., a common cell ID or
+            batch ID) are placed into the same subset.
 
         Args:
             ratios (Mapping[str, float]):
-                Dictionary mapping subset labels to relative ratios.
-                Must sum to 1.0. Example: `{"train": 0.7, "val": 0.2, "test": 0.1}`.
-            group_by (str | Sequence[str] | None, optional):
-                One or more tag keys to group samples by before splitting.
-                If `None`, samples are split individually.
-            seed (int, optional):
-                Random seed for reproducibility. Defaults to 13.
-            return_views (bool, optional):
-                Whether to return the resulting FeatureSetViews. Defaults to `False`.
-            register (bool, optional):
-                Whether to register the resulting splits and splitter configuration in
-                `FeatureSet._splits` for future reference. Defaults to `True`.
+                Subset ratios that sum to 1.0 (e.g., `{"train": 0.7, "val": 0.3}`).
+            group_by (str | Sequence[str] | None):
+                Tag keys that ensure grouped samples stay together.
+            seed (int):
+                Random seed used by :class:`RandomSplitter`.
+            return_views (bool):
+                Whether to return generated :class:`FeatureSetView` objects.
+            register (bool):
+                Whether to register the splits and splitter configuration on the
+                source :class:`FeatureSet`.
 
         Returns:
             list[FeatureSetView] | None:
-                The resulting FeatureSetViews (if `return_views=True`).
-                Otherwise, returns `None`.
+                Resulting views if `return_views=True`; else `None`.
 
         Example:
-            ```python
+        ```python
             fs.split_random(
                 ratios={"train": 0.8, "val": 0.2},
                 group_by="cell_id",
                 seed=42,
             )
-            ```
+        ```
 
         """
         from modularml.splitters.random_splitter import RandomSplitter
@@ -782,20 +803,38 @@ class SplitMixin:
         register: bool = True,
     ) -> list[FeatureSetView] | None:
         """
-        Split this FeatureSet (or FeatureSetView) based on logical conditions.
+        Split this object based on logical conditions.
 
         Description:
-            A convenience wrapper around :class:`ConditionSplitter`, which partitions \
-            samples into subsets based on user-defined filter expressions.
+            A convenience wrapper around
+            :class:`~modularml.splitters.condition_splitter.ConditionSplitter`,
+            which partitions samples into subsets based on user-defined filter
+            expressions.
 
-            Each subset is defined by a dictionary mapping feature, target, or tag keys \
-            to condition values, which may be:
+            Each subset is defined by a dictionary mapping feature, target, or tag
+            keys to condition values, which may be:
             - A literal value for equality matching.
             - A list, tuple, or set of allowed values.
-            - A callable predicate ``f(x) -> bool`` that returns a boolean mask.
+            - A callable predicate `f(x) -> bool` that returns a boolean mask.
 
-            For example:
-            ```python
+            **Note:** Overlapping subsets are permitted, but a warning will be issued
+            if any sample satisfies multiple conditions.
+
+        Args:
+            conditions (Mapping[str, Mapping[str, Any | Sequence | Callable]]):
+                Mapping from subset labels to condition dictionaries.
+            return_views (bool):
+                Whether to return :class:`FeatureSetView` outputs.
+            register (bool):
+                Whether to register splits and configuration in the parent
+                :class:`FeatureSet`.
+
+        Returns:
+            list[FeatureSetView] | None:
+                Resulting views if `return_views=True`; else `None`.
+
+        Example:
+        ```python
             fs.split_by_condition(
                 {
                     "low_temp": {"temperature": lambda x: x < 20},
@@ -803,36 +842,7 @@ class SplitMixin:
                     "cell_5": {"cell_id": 5},
                 }
             )
-            ```
-
-            **Note:** Overlapping subsets are permitted, but a warning will be issued \
-            if any sample satisfies multiple conditions.
-
-        Args:
-            conditions (Mapping[str, Mapping[str, Any | Sequence | Callable]]):
-                Mapping of subset labels → condition dictionaries. \
-                Each condition dictionary maps a key (feature/target/tag name) \
-                to a condition (scalar, sequence, or callable).
-            return_views (bool, optional):
-                Whether to return the resulting FeatureSetViews. Defaults to `False`.
-            register (bool, optional):
-                Whether to register the resulting splits and splitter configuration in \
-                `FeatureSet._splits` for future reference. Defaults to `True`.
-
-        Returns:
-            list[FeatureSetView] | None:
-                The resulting FeatureSetViews (if `return_views=True`). \
-                Otherwise, returns `None`.
-
-        Example:
-            ```python
-            fs.split_by_condition(
-                {
-                    "train": {"cell_type": "A"},
-                    "test": {"cell_type": "B"},
-                }
-            )
-            ```
+        ```
 
         """
         from modularml.splitters.condition_splitter import ConditionSplitter

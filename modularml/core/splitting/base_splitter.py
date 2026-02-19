@@ -1,3 +1,5 @@
+"""Abstract base utilities for dataset splitting strategies."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -14,25 +16,18 @@ if TYPE_CHECKING:
 
 class BaseSplitter(Configurable, Stateful, ABC):
     """
-    Abstract base class for algorithms that derive FeatureSetViews from a FeatureSet.
+    Abstract base class for algorithms that derive :class:`FeatureSetView` objects.
 
     Description:
-        Defines the core API for all splitters used to partition FeatureSets
-        or FeatureSetViews into multiple subsets (e.g., train/val/test).
-        Splitters may be called directly on FeatureSetViews, or indirectly
-        through a FeatureSet convenience method (e.g., `fs.split_random()`).
+        Defines the shared API for all splitters used to partition FeatureSets
+        or :class:`FeatureSetView` instances into multiple subsets (for example,
+        train/validation/test). Splitters may be invoked directly via
+        :meth:`split` or through FeatureSet convenience wrappers such as
+        :meth:`SplitMixin.split_random`.
 
-        All subclasses must implement `split()`, `get_config()`, and
-        `from_config()` methods. The base class handles consistent typing,
-        return conventions, and metadata tracking for reproducibility.
-
-    Usage:
-        ```python
-        splitter = RandomSplitter(ratios={"train": 0.8, "val": 0.2})
-        splits = splitter.split(fs.as_view(), return_views=True)
-        # or equivalently
-        fs.split_random(ratios={"train": 0.8, "val": 0.2})
-        ```
+        Subclasses must implement :meth:`split`, :meth:`get_config`, and
+        :meth:`from_config`. The base class provides helpers for returning
+        consistent types, managing serialization, and tracking random state.
 
     """
 
@@ -47,27 +42,27 @@ class BaseSplitter(Configurable, Stateful, ABC):
         return_views: bool = True,
     ) -> Mapping[str, FeatureSetView] | Mapping[str, Sequence[int]]:
         """
-        Split a FeatureSetView into multiple subsets.
+        Split a :class:`FeatureSetView` into multiple subsets.
 
         Description:
-            Generates one or more subsets (as either index arrays or FeatureSetViews) \
-            derived from the provided FeatureSetView. Subclasses implement the \
+            Generates one or more subsets (as either index arrays or FeatureSetViews)
+            derived from the provided FeatureSetView. Subclasses implement the
             internal logic that determines which sample indices belong to each subset.
 
-            All indices returned by subclasses must be **relative** to the input \
+            All indices returned by subclasses must be **relative** to the input
             `FeatureSetView` (i.e., ranging from 0 to len(view)-1).
 
         Args:
             view (FeatureSetView):
                 The input view to partition.
             return_views (bool, optional):
-                If True, return a mapping of labels to FeatureSetViews. \
-                If False, return a mapping of labels to relative index sequences. \
+                If True, return a mapping of labels to FeatureSetViews.
+                If False, return a mapping of labels to relative index sequences.
                 Defaults to True.
 
         Returns:
             Mapping[str, FeatureSetView] | Mapping[str, Sequence[int]]:
-                A mapping from subset label (e.g., "train", "val", "test") to \
+                A mapping from subset label (e.g., "train", "val", "test") to
                 either a FeatureSetView or an array/list of integer indices.
 
         """
@@ -83,11 +78,12 @@ class BaseSplitter(Configurable, Stateful, ABC):
         return_views: bool,
     ) -> Mapping[str, FeatureSetView] | Mapping[str, Sequence[int]]:
         """
-        Standardized return helper for splitter subclasses.
+        Convert relative index arrays into the desired output format.
 
         Description:
             Converts a dictionary of relative index arrays into either
-            FeatureSetViews or raw index arrays depending on `return_views`.
+            :class:`FeatureSetView` objects or raw index arrays depending on
+            `return_views`.
 
             Subclasses should always produce **relative indices** for the
             provided view. This method ensures they are safely converted
@@ -103,7 +99,10 @@ class BaseSplitter(Configurable, Stateful, ABC):
 
         Returns:
             Mapping[str, FeatureSetView] | Mapping[str, Sequence[int]]:
-                Either derived FeatureSetViews or the raw relative index mapping.
+                Either derived views or the raw relative index mapping.
+
+        Raises:
+            IndexError: If any relative index falls outside `[0, len(view) - 1]`.
 
         """
         # Validate indices are within the current view
@@ -134,7 +133,10 @@ class BaseSplitter(Configurable, Stateful, ABC):
         Return configuration required to reconstruct this splitter.
 
         Returns:
-            dict[str, Any]: Splitter configuration.
+            dict[str, Any]: Serializable splitter configuration.
+
+        Raises:
+            NotImplementedError: Must be implemented by subclasses.
 
         """
         raise NotImplementedError
@@ -142,19 +144,25 @@ class BaseSplitter(Configurable, Stateful, ABC):
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> BaseSplitter:
         """
-        Construct a Splitter from configuration.
+        Construct a splitter from configuration.
 
         Args:
-            config (dict[str, Any]): Splitter configuration.
+            config (dict[str, Any]): Serialized splitter configuration.
 
         Returns:
             BaseSplitter: Unfitted splitter instance.
+
+        Raises:
+            KeyError: If `splitter_name` is missing from `config`.
 
         """
         from modularml.splitters import splitter_registry
 
         if "splitter_name" not in config:
-            msg = "Splitter config must store 'splitter_name' if using BaseSplitter to instantiate."
+            msg = (
+                "Splitter config must store 'splitter_name' if using "
+                "BaseSplitter to instantiate."
+            )
             raise KeyError(msg)
         splitter_cls: BaseSplitter = splitter_registry.get(config["splitter_name"])
         return splitter_cls.from_config(config)
@@ -164,21 +172,26 @@ class BaseSplitter(Configurable, Stateful, ABC):
     # ================================================
     def get_state(self) -> dict[str, Any]:
         """
-        Return runtime (i.e. rng) state of the splitter.
+        Return runtime state (for example, RNG) of the splitter.
 
         Returns:
-            dict[str, Any]: Splitter state.
+            dict[str, Any]: Splitter state dictionary.
+
+        Raises:
+            NotImplementedError: Must be implemented by subclasses.
 
         """
         raise NotImplementedError
 
     def set_state(self, state: dict[str, Any]) -> None:
         """
-        Restore runtime state of the splitter.
+        Restore runtime state previously produced by :meth:`get_state`.
 
         Args:
-            state (dict[str, Any]):
-                State produced by get_state().
+            state (dict[str, Any]): State dictionary produced by :meth:`get_state`.
+
+        Raises:
+            NotImplementedError: Must be implemented by subclasses.
 
         """
         raise NotImplementedError
@@ -188,18 +201,17 @@ class BaseSplitter(Configurable, Stateful, ABC):
     # ================================================
     def save(self, filepath: Path, *, overwrite: bool = False) -> Path:
         """
-        Serializes this Splitter to the specified filepath.
+        Serialize this splitter to the specified filepath.
 
         Args:
             filepath (Path):
-                File location to save to. Note that the suffix may be overwritten
-                to enforce the ModularML file extension schema.
-            overwrite (bool, optional):
-                Whether to overwrite any existing file at the save location.
-                Defaults to False.
+                File location to save to (suffix may be adjusted to match the
+                ModularML schema).
+            overwrite (bool):
+                Whether to overwrite an existing file.
 
         Returns:
-            Path: The actual filepath to write the Splitter is saved.
+            Path: Actual filepath written by the serializer.
 
         """
         from modularml.core.io.serialization_policy import SerializationPolicy
@@ -215,16 +227,14 @@ class BaseSplitter(Configurable, Stateful, ABC):
     @classmethod
     def load(cls, filepath: Path, *, allow_packaged_code: bool = False) -> BaseSplitter:
         """
-        Load a Splitter from file.
+        Load a splitter from disk.
 
         Args:
-            filepath (Path):
-                File location of a previously saved Splitter.
-            allow_packaged_code : bool
-                Whether bundled code execution is allowed.
+            filepath (Path): Location of a previously saved splitter artifact.
+            allow_packaged_code (bool): Whether packaged code execution is allowed.
 
         Returns:
-            BaseSplitter: The reloaded sampler.
+            BaseSplitter: Reloaded splitter instance.
 
         """
         from modularml.core.io.serializer import _enforce_file_suffix, serializer
