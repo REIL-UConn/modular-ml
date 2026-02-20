@@ -111,3 +111,36 @@ class Trainable(Evaluable[T], Protocol):
         ctx: ExecutionContext,
         losses: list[AppliedLoss],
     ) -> None: ...
+
+
+# ================================================
+# Fittable
+# ================================================
+@runtime_checkable
+class Fittable(Forwardable[T], Protocol):
+    """A node that supports batch fitting (e.g., scikit-learn `.fit()`)."""
+
+    @property
+    def is_frozen(self) -> bool:
+        """
+        Indicates whether this object is frozen (not fittable).
+
+        Returns:
+            bool: True if frozen, False if fittable.
+
+        """
+        ...
+
+    def freeze(self, *args, **kwargs):
+        """Freezes the fittable state (prevents fitting updates)."""
+        ...
+
+    def unfreeze(self, *args, **kwargs):
+        """Unfreezes the fittable state (allows fitting updates)."""
+        ...
+
+    def fit_step(
+        self,
+        ctx: ExecutionContext,
+        losses: list[AppliedLoss] | None = None,
+    ) -> None: ...

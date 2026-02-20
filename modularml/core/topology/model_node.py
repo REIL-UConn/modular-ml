@@ -600,8 +600,68 @@ class ModelNode(ComputeNode):
         ctx: ExecutionContext,
         losses: list[AppliedLoss],
     ):
-        # TODO:
-        raise NotImplementedError("Training for scikit model not implemented yet.")
+        """
+        Runs a training step using scikit-learn's `partial_fit`.
+
+        Only applicable to models that support incremental learning (e.g.,
+        SGDRegressor, MLPRegressor). Batch-fit models should use `FitPhase`
+        instead.
+
+        Args:
+            ctx (ExecutionContext):
+                Context (input/output data) for the given execution step.
+            losses (list[AppliedLoss]):
+                List of losses to be applied in this execution step.
+
+        """
+        from modularml.core.models.scikit_wrapper import (
+            ScikitModelWrapper,
+            ScikitTrainingMode,
+        )
+
+        if (
+            isinstance(self._model, ScikitModelWrapper)
+            and self._model.resolved_training_mode != ScikitTrainingMode.PARTIAL_FIT
+        ):
+            msg = (
+                f"ModelNode '{self.label}' wraps a batch-fit scikit model "
+                f"({type(self._model.model).__name__}) that does not support "
+                "incremental training. Use `fit_step` instead of `train_step`."
+            )
+            raise RuntimeError(msg)
+
+        # Get input batch
+        input_batch: Batch = self._get_input_batch(ctx=ctx)
+
+        # Merge data from all roles, then partial fit on joint set
+        joint_sd = SampleData.concat(
+            *list(input_batch.role_data.values()),
+            fmt=get_data_format_for_backend(self.backend),
+        )
+        # Perform incremental fit on this merged data
+        self._model.partial_fit(
+            joint_sd.features,
+            joint_sd.targets,
+        )
+
+        # Forward pass to record outputs (equivalent to .predict())
+        out_batch: Batch = self.forward_single(input_batch)
+        ctx.set_output(node_id=self.node_id, batch=out_batch)
+
+        # Compute losses (recorded as auxiliary since no gradient backprop)
+        loss_records: list[LossRecord] = []
+        if losses:
+            for loss in losses:
+                weighted_raw_loss = loss.compute(ctx=ctx)
+                lr = LossRecord(
+                    label=loss.label,
+                    node_id=loss.node_id,
+                    auxiliary=weighted_raw_loss,
+                )
+                loss_records.append(lr)
+
+        lc = LossCollection(records=loss_records)
+        ctx.add_losses(lc)
 
     def train_step(
         self,
@@ -738,8 +798,34 @@ class ModelNode(ComputeNode):
         ctx: ExecutionContext,
         losses: list[AppliedLoss] | None = None,
     ):
-        # TODO:
-        raise NotImplementedError("Evaluation for scikit model not implemented yet.")
+        """
+        Runs an evaluation step for a scikit-learn model: forward pass + optional loss.
+
+        Args:
+            ctx (ExecutionContext):
+                Context (input/output data) for the given execution step.
+            losses (list[AppliedLoss]):
+                Optional list of losses to be applied in this execution step.
+
+        """
+        # Forward pass
+        out_batch: Batch = self.forward_single(self._get_input_batch(ctx=ctx))
+        ctx.set_output(node_id=self.node_id, batch=out_batch)
+
+        # Compute losses (auxiliary only)
+        loss_records: list[LossRecord] = []
+        if losses is not None:
+            for loss in losses:
+                weighted_raw_loss = loss.compute(ctx=ctx)
+                lr = LossRecord(
+                    label=loss.label,
+                    node_id=loss.node_id,
+                    auxiliary=weighted_raw_loss,
+                )
+                loss_records.append(lr)
+
+        lc = LossCollection(records=loss_records)
+        ctx.add_losses(lc)
 
     def eval_step(
         self,
@@ -784,6 +870,72 @@ class ModelNode(ComputeNode):
 
         msg = f"Unknown backend: {self.backend}"
         raise ValueError(msg)
+
+    # ================================================
+    # Fittable Protocol
+    # ================================================
+    def fit_step(
+        self,
+        ctx: ExecutionContext,
+        losses: list[AppliedLoss] | None = None,
+    ):
+        """
+        Fits this node on complete data (for batch-fit scikit-learn models).
+
+        Calls the underlying model's `.fit(X, y)` method using the full
+        dataset provided in the execution context. After fitting, a forward
+        pass is performed to record outputs for downstream nodes.
+
+        Args:
+            ctx (ExecutionContext):
+                Context containing full-dataset inputs.
+            losses (list[AppliedLoss] | None):
+                Optional losses to compute after fitting (for metrics only).
+
+        Raises:
+            RuntimeError: If this node is frozen.
+
+        """
+        if self.is_frozen:
+            msg = f"Cannot fit a frozen node '{self.label}'."
+            raise RuntimeError(msg)
+        if not hasattr(self, "fit"):
+            msg = f"Node `{self.label}` does not implement a `.fit()` method."
+            raise AttributeError(msg)
+
+        self._validate_ctx(ctx=ctx)
+
+        # Get input batch
+        input_batch: Batch = self._get_input_batch(ctx=ctx)
+
+        # Merge data from all roles, then fit on joint set
+        joint_sd = SampleData.concat(
+            *list(input_batch.role_data.values()),
+            fmt=get_data_format_for_backend(self.backend),
+        )
+        # Perform incremental fit on this merged data
+        self._model.fit(
+            joint_sd.features,
+            joint_sd.targets,
+        )
+
+        # Forward pass to record outputs for downstream nodes
+        out_batch: Batch = self.forward_single(input_batch)
+        ctx.set_output(node_id=self.node_id, batch=out_batch)
+
+        # Optional loss computation (auxiliary only)
+        if losses is not None:
+            valid_losses = [loss for loss in losses if loss.node_id == self.node_id]
+            loss_records: list[LossRecord] = []
+            for loss in valid_losses:
+                weighted_raw_loss = loss.compute(ctx=ctx)
+                lr = LossRecord(
+                    label=loss.label,
+                    node_id=loss.node_id,
+                    auxiliary=weighted_raw_loss,
+                )
+                loss_records.append(lr)
+            ctx.add_losses(LossCollection(records=loss_records))
 
     # ================================================
     # Configurable

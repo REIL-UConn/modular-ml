@@ -13,7 +13,12 @@ from modularml.core.references.featureset_reference import FeatureSetReference
 from modularml.core.topology.compute_node import ComputeNode, TForward
 from modularml.core.topology.graph_node import GraphNode
 from modularml.core.topology.model_node import ModelNode
-from modularml.core.topology.protocols import Evaluable, Forwardable, Trainable
+from modularml.core.topology.protocols import (
+    Evaluable,
+    Fittable,
+    Forwardable,
+    Trainable,
+)
 from modularml.core.training.loss_record import LossCollection, LossRecord
 from modularml.core.training.optimizer import Optimizer
 from modularml.utils.data.comparators import deep_equal
@@ -107,7 +112,10 @@ class ModelGraph(Configurable, Stateful):
                     if self.exp_ctx.has_node(label=n):
                         cn = self.exp_ctx.get_node(label=n)
                     else:
-                        msg = f"String value given in `nodes` ('{n}') does not exist in the active Experiment Context."
+                        msg = (
+                            f"String value given in `nodes` ('{n}') does not exist "
+                            "in the active Experiment Context."
+                        )
                         raise ValueError(msg)
 
                 if not isinstance(cn, GraphNode):
@@ -1766,6 +1774,83 @@ class ModelGraph(Configurable, Stateful):
         # Record loss collection
         lc = LossCollection(records=loss_records)
         ctx.add_losses(lc)
+
+    # ================================================
+    # Fittable Protocol
+    # ================================================
+    def fit_step(
+        self,
+        ctx: ExecutionContext,
+        losses: list[AppliedLoss] | None = None,
+        *,
+        active_nodes: list[str | GraphNode] | None = None,
+        freeze_after_fit: bool = True,
+    ):
+        """
+        Fit batch-fit nodes in topological order.
+
+        Description:
+            Iterates through active nodes in topological order. Nodes that
+            implement the `Fittable` protocol and are not frozen will have
+            `fit_step()` called. All other forwardable nodes perform a
+            forward-only pass to propagate outputs downstream.
+
+            After fitting, nodes are optionally frozen to prevent interference
+            during subsequent gradient-based training phases.
+
+        Args:
+            ctx (ExecutionContext):
+                Execution context containing full-dataset inputs.
+
+            losses (list[AppliedLoss] | None, optional):
+                Optional losses to compute after fitting (for metrics only).
+
+            active_nodes (list[str | GraphNode] | None, optional):
+                Optional subset of nodes to fit. If None, all nodes in the
+                graph are considered.
+
+            freeze_after_fit (bool, optional):
+                Whether to freeze fitted nodes after completion.
+                Defaults to True.
+
+        """
+        # Ensure graph is built
+        if not self.is_built:
+            self.build()
+
+        # Resolve active nodes (and all upstream dependencies)
+        if active_nodes is None:
+            active_node_ids: set[str] = set(self._nodes.keys())
+        else:
+            active_node_ids = get_subgraph_nodes(
+                graph=self,
+                roots=active_nodes,
+                direction="upstream",
+                include_roots=True,
+            )
+
+        # Maintain execution order
+        exec_order: list[str] = [
+            nid for nid in self._sorted_node_ids if nid in active_node_ids
+        ]
+        for node_id in exec_order:
+            node = self._nodes[node_id]
+
+            # If node is Fittable and not frozen -> fit it
+            if isinstance(node, Fittable) and not node.is_frozen:
+                node.fit_step(ctx=ctx, losses=losses)
+                if freeze_after_fit:
+                    node.freeze()
+
+            # Otherwise, if forwardable -> forward pass only (record outputs)
+            elif isinstance(node, Forwardable):
+                inp_data = node.get_input_data(
+                    inputs=ctx.inputs,
+                    outputs=ctx.outputs,
+                    fmt=get_data_format_for_backend(node.backend),
+                )
+                out = node.forward(inp_data)
+                ctx.outputs[node_id] = out
 
     # ================================================
     # Configurable

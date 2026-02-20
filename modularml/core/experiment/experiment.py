@@ -22,6 +22,7 @@ from modularml.core.experiment.experiment_context import (
     RegistrationPolicy,
 )
 from modularml.core.experiment.phases.eval_phase import EvalPhase
+from modularml.core.experiment.phases.fit_phase import FitPhase
 from modularml.core.experiment.phases.phase import ExperimentPhase
 from modularml.core.experiment.phases.phase_group import PhaseGroup
 from modularml.core.experiment.phases.train_phase import TrainPhase
@@ -31,6 +32,7 @@ from modularml.core.experiment.results.execution_meta import (
     PhaseGroupExecutionMeta,
 )
 from modularml.core.experiment.results.experiment_run import ExperimentRun
+from modularml.core.experiment.results.fit_results import FitResults
 from modularml.core.experiment.results.group_results import PhaseGroupResults
 from modularml.core.experiment.results.train_results import TrainResults
 from modularml.core.io.checkpoint import Checkpoint
@@ -619,9 +621,42 @@ class Experiment:
 
         return res
 
+    def _execute_fit(
+        self,
+        phase: FitPhase,
+    ) -> FitResults:
+        """
+        Executes a fit phase on this experiment.
+
+        Description:
+            The provided FitPhase will be executed regardless of whether it
+            is registered to this Experiment (`execution_plan`).
+            **This will mutate the experiment state, but history will not be
+            recorded.**
+
+        Args:
+            phase (FitPhase):
+                Fit phase to be executed.
+
+        Returns:
+            FitResults: Tracked results from fitting.
+
+        """
+        res = FitResults(label=phase.label)
+        for ctx in phase.iter_execution(results=res):
+            self.model_graph.fit_step(
+                ctx=ctx,
+                losses=phase.losses,
+                active_nodes=phase.active_nodes,
+                freeze_after_fit=phase.freeze_after_fit,
+            )
+            res.add_execution_context(ctx=ctx)
+
+        return res
+
     def _execute_phase_with_meta(
         self,
-        phase: TrainPhase | EvalPhase,
+        phase: TrainPhase | EvalPhase | FitPhase,
         **kwargs,
     ) -> tuple[PhaseResults, PhaseExecutionMeta]:
         """
@@ -695,8 +730,10 @@ class Experiment:
                 phase,
                 **{k: v for k, v in kwargs.items() if k in eval_keys},
             )
+        elif isinstance(phase, FitPhase):
+            phase_res: FitResults = self._execute_fit(phase)
         else:
-            msg = f"Expected type of TrainPhase or EvalPhase. Received: {type(phase)}."
+            msg = f"Expected type of TrainPhase, EvalPhase, or FitPhase. Received: {type(phase)}."
             raise TypeError(msg)
 
         # Create meta for run
@@ -867,6 +904,12 @@ class Experiment:
         show_eval_progress: bool = False,
         persist_progress: bool = IN_NOTEBOOK,
     ) -> EvalResults: ...
+
+    @overload
+    def run_phase(
+        self,
+        phase: FitPhase,
+    ) -> FitResults: ...
 
     def run_phase(
         self,

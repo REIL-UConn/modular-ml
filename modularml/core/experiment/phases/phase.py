@@ -794,5 +794,10 @@ class ExperimentPhase(ABC):
 
             return TrainPhase.from_config(config=config)
 
+        if phase_type == "FitPhase":
+            from modularml.core.experiment.phases.fit_phase import FitPhase
+
+            return FitPhase.from_config(config=config)
+
         msg = f"Unknown ExperimentPhase subclass: {phase_type}."
         raise ValueError(msg)
