@@ -4,7 +4,9 @@ from modularml.core.models.base_model import BaseModel
 from modularml.utils.nn.backend import Backend, infer_backend
 
 from .scikit_wrapper import ScikitModelWrapper
+from .tensorflow_base_model import TensorflowBaseModel
 from .tensorflow_wrapper import TensorflowModelWrapper
+from .torch_base_model import TorchBaseModel
 from .torch_wrapper import TorchModelWrapper
 
 
@@ -65,7 +67,7 @@ def wrap_model(model: Any) -> BaseModel:
             model,
             tf.keras.Model,
         ):
-            return TensorflowModelWrapper(model)
+            return TensorflowModelWrapper(model=model)
         msg = (
             "Received Tensorflow backend but model is not a subclass or instance "
             "of `tf.keras.Model`."
