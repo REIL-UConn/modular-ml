@@ -4,6 +4,12 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from modularml.core.data.schema_constants import (
+    DOMAIN_FEATURES,
+    DOMAIN_SAMPLE_UUIDS,
+    DOMAIN_TAGS,
+    DOMAIN_TARGETS,
+)
 from modularml.utils.data.conversion import convert_to_format
 from modularml.utils.data.data_format import (
     _TENSORLIKE_FORMATS,
@@ -67,8 +73,10 @@ class ConcatNode(MergeNode):
         self,
         label: str,
         upstream_refs: list[ExperimentNode | ExperimentNodeReference],
-        axis: int = 0,
+        concat_axis: int = 0,
         *,
+        concat_axis_targets: int = -1,
+        concat_axis_tags: int = -1,
         pad_inputs: bool = False,
         pad_mode: str | PadMode = "constant",
         pad_value: float = 0.0,
@@ -85,16 +93,25 @@ class ConcatNode(MergeNode):
             upstream_refs (list[ExperimentNode | ExperimentNodeReference]):
                 Upstream node references from which inputs will be received.
 
-            axis (int):
-                The axis along which to concatenate inputs.
-                * axis=0: concat along samples. E.g, (32,10) + (32,10) -> (64,10))
-                * axis=1: concat along features. E.g, (32,10) + (32,5) -> (32,15))
-                * axis>1: concat within features. E.g, (32,1,10) + (32,1,5) -> (32,1,15))
-                    All data must have at least `axis` dimension (this applies across
-                    features and targets).
-                * axis=-1: concat along last axis of all data. E.g, (32, 1, 10) +
-                    (32, 1, 5) -> concat along axis 2. All data must have the same
-                    number of dimensions.
+            concat_axis (int):
+                The axis along which to concatenate inputs. Does not include the batch
+                dimension. That is, for shape (with batch) of (32,1,16), axis=0 refers
+                to "1". The example given below omit the batch dimension.
+                * axis=0: concat along features. E.g, (1,16) + (1,16) -> (2,16))
+                * axis>1: concat within features. E.g, (1,16,16) + (1,16,8) -> (1,16,24))
+                    All data must have at least `concat_axis` dimensions.
+                * axis=-1: concat along last axis of all data. E.g, (1, 16, 16) +
+                    (1, 16, 8) -> (1, 16, 24).
+
+            concat_axis_targets (int, optional):
+                If applying concatenation to a domain-based data structure (e.g.,
+                SampleData, RoleData, or Batch), concantenation can be applied to
+                each domain with different concatenation axes.
+                Typically, targets are just concatenated along their last axis (-1).
+
+            concat_axis_tags (int, optional):
+                Similarly to `concat_axis_targets`, an axis to concatenate the "tags"
+                domains can be specified. Defaults to -1.
 
             pad_inputs (bool, optional):
                 Whether to pad inputs before merging. Defaults to False.
@@ -119,7 +136,9 @@ class ConcatNode(MergeNode):
             node_id=node_id,
             register=register,
         )
-        self.concat_axis = int(axis)
+        self.concat_axis = int(concat_axis)
+        self.target_axis = int(concat_axis_targets)
+        self.tags_axis = int(concat_axis_tags)
         self.pad_inputs = bool(pad_inputs)
         self.pad_mode = pad_mode if isinstance(pad_mode, PadMode) else PadMode(pad_mode)
         self.pad_value = pad_value
@@ -261,6 +280,7 @@ class ConcatNode(MergeNode):
         *,
         includes_batch_dim: bool = True,
         fmt: DataFormat | None = None,
+        domain: str = DOMAIN_FEATURES,
     ) -> Any:
         """
         Concatenate input tensors along the configured axis.
@@ -279,6 +299,9 @@ class ConcatNode(MergeNode):
                 The data format expected for the returned tensor. If None,
                 the data format will be inferred from the `backend` property.
                 Defaults to None.
+            domain (str, optional):
+                The domain in which the data belongs. This allows for domain-specific
+                merge logic (e.g., different concat axes for each domain).
 
         Returns:
             Any: Concatenated tensor, in the specified format.
@@ -302,13 +325,25 @@ class ConcatNode(MergeNode):
         # Ensure all elements in list are converted to fmt
         values = [convert_to_format(x, fmt=fmt) for x in values]
 
+        # Get domain-specific axis
+        if domain == DOMAIN_FEATURES:
+            effective_axis = self.concat_axis
+        elif domain == DOMAIN_TARGETS:
+            effective_axis = self.target_axis
+        elif domain == DOMAIN_TAGS:
+            effective_axis = self.tags_axis
+        elif domain == DOMAIN_SAMPLE_UUIDS:
+            effective_axis = -1
+        else:
+            msg = f"Unknown domain: {domain}"
+            raise ValueError(msg)
+
         # Get true concat axis (-1 = max dimension)
-        effective_axis = self.concat_axis
-        if self.concat_axis == -1:
+        if effective_axis == -1:
             effective_axis = max([len(x.shape) for x in values]) - 1
         else:
             # Adjust for batch dimension
-            effective_axis += 0 if includes_batch_dim else -1
+            effective_axis += 1 if includes_batch_dim else 0
 
         # Apply padding if defined
         if self.pad_inputs:

@@ -8,6 +8,12 @@ import numpy as np
 from modularml.core.data.batch import Batch
 from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.sample_data import RoleData, SampleData
+from modularml.core.data.schema_constants import (
+    DOMAIN_FEATURES,
+    DOMAIN_SAMPLE_UUIDS,
+    DOMAIN_TAGS,
+    DOMAIN_TARGETS,
+)
 from modularml.core.experiment.experiment_node import ExperimentNode
 from modularml.core.references.experiment_reference import ExperimentNodeReference
 from modularml.core.topology.compute_node import ComputeNode, TForward
@@ -156,6 +162,7 @@ class MergeNode(ComputeNode):
         *,
         includes_batch_dim: bool = True,
         fmt: DataFormat | None = None,
+        domain: str = DOMAIN_FEATURES,
     ) -> Any:
         """
         Merge logic to be implemented by subclasses.
@@ -170,6 +177,9 @@ class MergeNode(ComputeNode):
                 The data format expected for the returned tensor. If None,
                 the data format will be inferred from the `backend` property.
                 Defaults to None.
+            domain (str, optional):
+                The domain in which the data belongs. This allows for domain-specific
+                merge logic (e.g., different concat axes for each domain).
 
         Returns:
             Any: Merged tensor.
@@ -258,6 +268,7 @@ class MergeNode(ComputeNode):
             values=dummy_data,
             includes_batch_dim=includes_batch_dim,
             fmt=fmt,
+            domain=DOMAIN_FEATURES,
         )
 
         # Return shape (without batch dimension)
@@ -395,7 +406,7 @@ class MergeNode(ComputeNode):
             # Merge within attributes of sample data
             merged_attrs: dict[str, Any] = {}
             for attr, attr_fmt in zip(
-                ["features", "targets", "tags", "sample_uuids"],
+                [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS, DOMAIN_SAMPLE_UUIDS],
                 (fmt, fmt, DataFormat.NUMPY, DataFormat.NUMPY),
                 strict=True,
             ):
@@ -423,6 +434,7 @@ class MergeNode(ComputeNode):
                     values=[getattr(d, attr) for d in data],
                     includes_batch_dim=True,
                     fmt=attr_fmt,
+                    domain=attr,
                 )
 
             # Return a new, merged SampleData instance
