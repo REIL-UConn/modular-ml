@@ -34,7 +34,6 @@ from modularml.utils.nn.backend import (
     is_valid_backend,
 )
 from modularml.utils.topology.graph_search_utils import (
-    find_upstream_featuresets,
     get_subgraph_nodes,
     is_head_node,
     is_tail_node,
@@ -1211,7 +1210,10 @@ class ModelGraph(Configurable, Stateful):
         self._rebuild_connections()
 
         # Ensure all nodes are built
-        node_out_shapes: dict[str, tuple[int, ...]] = {}
+        # Track feature and target output shapes per node (keyed by node_id)
+        node_feature_shapes: dict[str, tuple[int, ...]] = {}
+        node_target_shapes: dict[str, tuple[int, ...]] = {}
+
         for node_id in self._sorted_node_ids:
             node = self._nodes[node_id]
 
@@ -1219,50 +1221,48 @@ class ModelGraph(Configurable, Stateful):
             if not isinstance(node, ComputeNode) or (node.is_built and not force):
                 continue
 
-            # Infer input shapes for this node
-            in_shapes: dict[ExperimentNodeReference, tuple[int, ...]] | None = None
-            dummy_inputs: dict[ExperimentNodeReference, SampleData] = {}
+            # ------------------------------------------------
+            # Collect input feature shapes and target shapes per upstream ref
+            # ------------------------------------------------
+            ups_refs = node.get_upstream_refs()
+            is_single_input = len(ups_refs) == 1
+            in_shapes: dict[ExperimentNodeReference, tuple[int, ...]] = {}
+            in_target_shapes: dict[ExperimentNodeReference, tuple[int, ...]] = {}
 
-            for ups_ref in node.get_upstream_refs():
-                if in_shapes is None:
-                    in_shapes = {}
-
-                # If upstream is a FeatureSet, use feature/target data for shape inference
+            for ups_ref in ups_refs:
                 if isinstance(ups_ref, FeatureSetReference):
-                    # Get feature and target shapes (drops leading dim of n_samples)
+                    # Upstream is a FeatureSet
+                    # - pull feature and target shapes directly
+                    # - note that batch dimension is dropped (via [1:])
                     fsv = ups_ref.resolve()
-                    f_shape = fsv.get_features(fmt=DataFormat.NUMPY).shape[1:]
-
-                    # Record input shape for this ref
-                    in_shapes[ups_ref] = tuple(f_shape)
-
-                # Otherwise, we must use dummy output data from a prior node
+                    in_shapes[ups_ref] = tuple(
+                        fsv.get_features(fmt=DataFormat.NUMPY).shape[1:],
+                    )
+                    in_target_shapes[ups_ref] = tuple(
+                        fsv.get_targets(fmt=DataFormat.NUMPY).shape[1:],
+                    )
                 else:
-                    # Use tracked output shape of upstream node
-                    if ups_ref.node_id not in node_out_shapes:
+                    # Upstream is another graph node
+                    # - use its tracked output shapes
+                    if ups_ref.node_id not in node_feature_shapes:
                         msg = f"Input shape could not be inferred for node '{node.label}'."
                         raise RuntimeError(msg)
-                    in_shapes[ups_ref] = node_out_shapes[ups_ref.node_id]
+                    in_shapes[ups_ref] = node_feature_shapes[ups_ref.node_id]
+                    in_target_shapes[ups_ref] = node_target_shapes[ups_ref.node_id]
 
-                # Create a dummy input for later use
-                dummy_inputs[ups_ref] = make_dummy_sample_data(
-                    batch_size=4,
-                    feature_shape=in_shapes[ups_ref],
-                )
-
-            # Infer output shape
+            # ------------------------------------------------
+            # Determine output shape for tail nodes
+            # ------------------------------------------------
+            # For single-input tail nodes, the output shape equals the
+            # propagated target shape (which may have been modified by
+            # upstream MergeNodes).
             out_shape: tuple[int, ...] | None = None
-            if node_id in self.tail_nodes:
-                # If this is a tail node, and is downstream of only one FeatureSet, we
-                # can infer the output shape to be the FeatureSet.targets shape
-                ups_fs_refs = find_upstream_featuresets(node=node)
-                ups_fs_ids = {ref.node_id for ref in ups_fs_refs}
-                if len(ups_fs_ids) == 1:
-                    fsv = ups_fs_refs[0].resolve()
-                    t_shape = fsv.get_targets(fmt=DataFormat.NUMPY).shape[1:]
-                    out_shape = tuple(t_shape)
+            if node_id in self.tail_nodes and is_single_input:
+                out_shape = next(iter(in_target_shapes.values()))
 
-            # Build ComputeNode
+            # ------------------------------------------------
+            # Build the node
+            # ------------------------------------------------
             backend = self._optimizer.backend if self._optimizer is not None else None
             node.build(
                 input_shapes=in_shapes,
@@ -1272,12 +1272,48 @@ class ModelGraph(Configurable, Stateful):
                 backend=backend,  # For MergeNode
             )
 
-            # Perform dummy pass if output wasn't inferred
-            if out_shape is None:
-                sd_out: SampleData = node.forward(dummy_inputs)
-                node_out_shapes[node_id] = tuple(sd_out.shapes.features_shape)
+            # ------------------------------------------------
+            # Track output shapes for downstream nodes
+            # ------------------------------------------------
+            if is_single_input:
+                # Single-input nodes (ModelNode)
+                # - feature shape comes from build
+                # - target shape passes through unchanged
+                if out_shape is not None:
+                    node_feature_shapes[node_id] = out_shape
+                else:
+                    # Run a dummy forward pass to infer output feature shape
+                    dummy_inputs = {
+                        ref: make_dummy_sample_data(
+                            batch_size=4,
+                            feature_shape=in_shapes[ref],
+                        )
+                        for ref in ups_refs
+                    }
+                    sd_out: SampleData = node.forward(dummy_inputs)
+                    node_feature_shapes[node_id] = tuple(sd_out.shapes.features_shape)
+
+                # Target shape is unchanged for single-input nodes
+                node_target_shapes[node_id] = next(iter(in_target_shapes.values()))
+
             else:
-                node_out_shapes[node_id] = out_shape
+                # Multi-input nodes (MergeNode)
+                # - both feature and target shapes may change
+                # - run a dummy forward pass to determine both
+                dummy_inputs = {
+                    ref: make_dummy_sample_data(
+                        batch_size=4,
+                        feature_shape=in_shapes[ref],
+                        target_shape=in_target_shapes[ref],
+                    )
+                    for ref in ups_refs
+                }
+                sd_out: SampleData = node.forward(dummy_inputs)
+                node_feature_shapes[node_id] = tuple(sd_out.shapes.features_shape)
+                if sd_out.shapes.targets_shape is not None:
+                    node_target_shapes[node_id] = tuple(sd_out.shapes.targets_shape)
+                else:
+                    node_target_shapes[node_id] = next(iter(in_target_shapes.values()))
 
         # Build/rebuild optimizer
         if self._optimizer is not None:
