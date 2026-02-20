@@ -1,5 +1,5 @@
 fix = true
-line-length = 120
+line-length = 88
 indent-width = 4
 target-version = "py310"
 
@@ -26,6 +26,7 @@ ignore = [
 
     "TD003", "PLR0913", "C901", "TD002", "SLF001", "PD002",
     "PLR2004", "PLR0912", "PLR0915", "S301", "PLC0415", "PLR0911",
+    "DTZ005", "DTZ006",
 ]
 
 
@@ -36,3 +37,7 @@ ignore = [
 "docs/*" = ["INP001", "A001", "PTH100", ]
 "**/__init__.py" = ["I", "F401", "F841", ]
 "**/registry.py" = ["E402", "I001", ]
+"modularml/callbacks/*.py" = ["ARG002", ]
+"modularml/core/experiment/callbacks/*.py" = ["ARG002", ]
+"modularml/scalers/*.py" = ["ARG002", "N803", "N806", ]
+"modularml/api.py" = ["I001", "E402", "F401", ]
