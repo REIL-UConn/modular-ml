@@ -95,6 +95,18 @@ class SampleData(Summarizable):
             kind=kind,
         )
 
+        sample_sizes = [
+            len(self.data[k]) if k in self.data else 0
+            for k in [
+                DOMAIN_SAMPLE_ID,
+                DOMAIN_FEATURES,
+                DOMAIN_TARGETS,
+                DOMAIN_TAGS,
+            ]
+        ]
+
+        self._n_samples = max(sample_sizes)
+
     # ================================================
     # Shape access
     # ================================================
@@ -102,6 +114,11 @@ class SampleData(Summarizable):
     def shapes(self) -> SampleShapes:
         """Per-domain tensor shapes (excluding batch dimension)."""
         return self._shapes
+
+    @property
+    def n_samples(self) -> SampleShapes:
+        """Number of samples in this container (equal to batch size)."""
+        return self._n_samples
 
     # ================================================
     # Data access
@@ -466,10 +483,12 @@ class SampleData(Summarizable):
         f_lbl = DOMAIN_FEATURES
         if self._kind == "output":
             f_lbl = DOMAIN_OUTPUTS
-        f = self.shapes.features_shape
-        t = self.shapes.targets_shape
-        g = self.shapes.tags_shape
-        return f"SampleData({f_lbl}={f}, targets={t}, tags={g})"
+        return (
+            f"SampleData({f_lbl}={self.shapes.features_shape}, "
+            f"targets={self.shapes.targets_shape}, "
+            f"tags={self.shapes.tags_shape}, "
+            f"n_samples={self.n_samples})"
+        )
 
 
 class RoleData(Mapping[str, SampleData], Summarizable):

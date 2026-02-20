@@ -77,7 +77,7 @@ class ModelNode(ComputeNode):
         if isinstance(upstream_ref, FeatureSet):
             dup_rep_warnings = False
             with catch_warnings() as cw:
-                upstream_ref.reference()
+                ref = upstream_ref.reference()
                 if cw.match("Multiple representations selected"):
                     dup_rep_warnings = True
             if dup_rep_warnings:
@@ -116,13 +116,13 @@ class ModelNode(ComputeNode):
     def model(self) -> BaseModel:
         return self._model
 
-    # ================================================
-    # ComputeNode Interface
-    # ================================================
     @property
     def input_shape(self) -> tuple[int, ...]:
         return self.model.input_shape
 
+    # ================================================
+    # ComputeNode Interface
+    # ================================================
     @property
     def output_shape(self) -> tuple[int, ...]:
         return self.model.output_shape
@@ -141,6 +141,31 @@ class ModelNode(ComputeNode):
 
         """
         return self._model.is_built
+
+    def _build_impl(
+        self,
+        *,
+        input_shapes: dict[ExperimentNodeReference, tuple[int, ...]] | None = None,
+        output_shape: tuple[int, ...] | None = None,
+        force: bool = False,
+        **kwargs,  # noqa: ARG002
+    ):
+        if input_shapes is None:
+            input_shape = None
+        else:
+            if len(input_shapes) != 1:
+                msg = (
+                    f"{self.__class__.__name__} expects exactly one input. "
+                    f"Received {len(input_shapes)}."
+                )
+                raise ValueError(msg)
+            input_shape = next(iter(input_shapes.values()))
+
+        self.build_model(
+            input_shape=input_shape,
+            output_shape=output_shape,
+            force=force,
+        )
 
     def _build_optimizer(self, *, force: bool = False):
         if self._optimizer is None:
@@ -167,31 +192,6 @@ class ModelNode(ComputeNode):
                 backend=self.backend,
                 message="Unknown backend for optimizer building",
             )
-
-    def _build_impl(
-        self,
-        *,
-        input_shapes: dict[ExperimentNodeReference, tuple[int, ...]] | None = None,
-        output_shape: tuple[int, ...] | None = None,
-        force: bool = False,
-        **kwargs,  # noqa: ARG002
-    ):
-        if input_shapes is None:
-            input_shape = None
-        else:
-            if len(input_shapes) != 1:
-                msg = (
-                    f"{self.__class__.__name__} expects exactly one input. "
-                    f"Received {len(input_shapes)}."
-                )
-                raise ValueError(msg)
-            input_shape = next(iter(input_shapes.values()))
-
-        self.build_model(
-            input_shape=input_shape,
-            output_shape=output_shape,
-            force=force,
-        )
 
     def build_model(
         self,

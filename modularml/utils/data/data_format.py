@@ -186,7 +186,7 @@ def get_data_format_for_backend(backend: str | Backend) -> DataFormat:
         return DataFormat.TORCH
     if backend == Backend.TENSORFLOW:
         return DataFormat.TENSORFLOW
-    if backend in [Backend.SCIKIT, Backend.NONE]:
+    if backend in [Backend.SCIKIT, Backend.NUMPY, Backend.NONE]:
         return DataFormat.NUMPY
     msg = f"Unsupported backend: {backend}"
     raise ValueError(msg)

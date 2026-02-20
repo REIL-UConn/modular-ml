@@ -111,7 +111,10 @@ class ModelGraph(Configurable, Stateful):
                         raise ValueError(msg)
 
                 if not isinstance(cn, GraphNode):
-                    msg = f"All objects in `nodes` must be of type GraphNode. Received: {type(cn)}."
+                    msg = (
+                        "All objects in `nodes` must be of type GraphNode. "
+                        f"Received: {type(cn)}."
+                    )
                     raise TypeError(msg)
                 self._nodes[cn.node_id] = cn
         else:
@@ -413,11 +416,17 @@ class ModelGraph(Configurable, Stateful):
 
             - It also verifies that all optimizers share a consistent backend (e.g., PyTorch).
 
+            - If a node without a `backend` attribute exists on a path between two
+              optimizer-requiring nodes, a global optimizer cannot be used (e.g., a
+              static merge node that doesn't support gradient propagation).
+
         Raises:
             RuntimeError: If any stage that requires an optimizer is missing one and no
                         global optimizer is provided.
             RuntimeError: If a global optimizer is provided but its backend doesn't match
                         a stage's backend.
+            RuntimeError: If a node without a backend sits between optimizer-requiring
+                        nodes when a global optimizer is used.
             UserWarning: If a stage has its own optimizer but is being overwritten by the
                         graph-level optimizer.
 
@@ -461,6 +470,37 @@ class ModelGraph(Configurable, Stateful):
                     "differing backends. All backends must match to use a single optimizer."
                 )
                 raise RuntimeError(msg)
+
+            # Check for intermediate nodes without a backend between optimizer-requiring nodes
+            opt_node_ids = set(self._nodes_req_opt.keys())
+            if len(opt_node_ids) > 1:
+                upstream_of_opt: set[str] = set()
+                downstream_of_opt: set[str] = set()
+                for nid in opt_node_ids:
+                    upstream_of_opt |= get_subgraph_nodes(
+                        self,
+                        nid,
+                        direction="upstream",
+                        include_roots=False,
+                    )
+                    downstream_of_opt |= get_subgraph_nodes(
+                        self,
+                        nid,
+                        direction="downstream",
+                        include_roots=False,
+                    )
+
+                between_ids = (upstream_of_opt & downstream_of_opt) - opt_node_ids
+                for nid in between_ids:
+                    node = self._nodes[nid]
+                    if not hasattr(node, "backend"):
+                        msg = (
+                            f"A global optimizer was provided to ModelGraph, but node "
+                            f"'{node.label}' sits between optimizer-requiring stages and "
+                            f"does not have a backend. Cannot use a global optimizer."
+                        )
+                        raise RuntimeError(msg)
+
             self._optimizer.backend = used_backends[0]
 
     def _rebuild_connections(self):
@@ -1174,6 +1214,7 @@ class ModelGraph(Configurable, Stateful):
             # Infer input shapes for this node
             in_shapes: dict[ExperimentNodeReference, tuple[int, ...]] | None = None
             dummy_inputs: dict[ExperimentNodeReference, SampleData] = {}
+
             for ups_ref in node.get_upstream_refs():
                 if in_shapes is None:
                     in_shapes = {}
@@ -1214,16 +1255,19 @@ class ModelGraph(Configurable, Stateful):
                     out_shape = tuple(t_shape)
 
             # Build ComputeNode
+            backend = self._optimizer.backend if self._optimizer is not None else None
             node.build(
                 input_shapes=in_shapes,
                 output_shape=out_shape,
-                force=force,
+                force=force,  # For ModelNode
+                includes_batch_dim=False,  # For MergeNode
+                backend=backend,  # For MergeNode
             )
 
             # Perform dummy pass if output wasn't inferred
             if out_shape is None:
                 sd_out: SampleData = node.forward(dummy_inputs)
-                node_out_shapes[node_id] = tuple(sd_out.shapes.features_shape[1:])
+                node_out_shapes[node_id] = tuple(sd_out.shapes.features_shape)
             else:
                 node_out_shapes[node_id] = out_shape
 
