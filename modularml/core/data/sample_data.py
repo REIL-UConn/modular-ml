@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from modularml.core.data.schema_constants import (
     DOMAIN_FEATURES,
     DOMAIN_OUTPUTS,
-    DOMAIN_SAMPLE_ID,
+    DOMAIN_SAMPLE_UUIDS,
     DOMAIN_TAGS,
     DOMAIN_TARGETS,
 )
@@ -82,7 +82,7 @@ class SampleData(Summarizable):
             # Construct standardized mapping
             self.data = {}
             if sample_uuids is not None:
-                self.data[DOMAIN_SAMPLE_ID] = sample_uuids
+                self.data[DOMAIN_SAMPLE_UUIDS] = sample_uuids
             if features is not None:
                 self.data[DOMAIN_FEATURES] = features
             if targets is not None:
@@ -98,7 +98,7 @@ class SampleData(Summarizable):
         sample_sizes = [
             len(self.data[k]) if k in self.data else 0
             for k in [
-                DOMAIN_SAMPLE_ID,
+                DOMAIN_SAMPLE_UUIDS,
                 DOMAIN_FEATURES,
                 DOMAIN_TARGETS,
                 DOMAIN_TAGS,
@@ -125,8 +125,8 @@ class SampleData(Summarizable):
     # ================================================
     @property
     def sample_uuids(self):
-        """Tensor-like data stored under DOMAIN_SAMPLE_ID."""
-        return self.data.get(DOMAIN_SAMPLE_ID)
+        """Tensor-like data stored under DOMAIN_SAMPLE_UUIDS."""
+        return self.data.get(DOMAIN_SAMPLE_UUIDS)
 
     @property
     def features(self):
@@ -426,7 +426,7 @@ class SampleData(Summarizable):
                 DOMAIN_FEATURES,
                 DOMAIN_TARGETS,
                 DOMAIN_TAGS,
-                DOMAIN_SAMPLE_ID,
+                DOMAIN_SAMPLE_UUIDS,
             ]
             for d in domain_order:
                 row_lbl = d
@@ -456,7 +456,7 @@ class SampleData(Summarizable):
             DOMAIN_FEATURES,
             DOMAIN_TARGETS,
             DOMAIN_TAGS,
-            DOMAIN_SAMPLE_ID,
+            DOMAIN_SAMPLE_UUIDS,
         ]
         for d in domain_order:
             row_lbl = d

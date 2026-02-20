@@ -13,7 +13,7 @@ from modularml.core.data.featureset_view import FeatureSetView
 from modularml.core.data.sample_data import RoleData, SampleData
 from modularml.core.data.schema_constants import (
     DOMAIN_FEATURES,
-    DOMAIN_SAMPLE_ID,
+    DOMAIN_SAMPLE_UUIDS,
     DOMAIN_TAGS,
     DOMAIN_TARGETS,
 )
@@ -297,7 +297,7 @@ class BatchView(Summarizable):
                 include_domain_prefix=True,
                 include_rep_suffix=True,
             )
-            all_cols.remove(DOMAIN_SAMPLE_ID)
+            all_cols.remove(DOMAIN_SAMPLE_UUIDS)
 
             # Fill any empty domain keys with all columns
             selected: dict[str, set[str]] = resolve_column_selectors(

@@ -9,7 +9,7 @@ import numpy as np
 
 from modularml.core.data.schema_constants import (
     DOMAIN_FEATURES,
-    DOMAIN_SAMPLE_ID,
+    DOMAIN_SAMPLE_UUIDS,
     DOMAIN_TAGS,
     DOMAIN_TARGETS,
 )
@@ -449,7 +449,7 @@ class SplitMixin:
         for d in [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS]:
             if d in selected:
                 sel_cols.extend(sorted(selected[d]))
-        sel_cols.append(DOMAIN_SAMPLE_ID)
+        sel_cols.append(DOMAIN_SAMPLE_UUIDS)
 
         # Maintain same indices of the calling class
         mask = np.ones(source.n_samples, dtype=bool)

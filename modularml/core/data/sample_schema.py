@@ -16,7 +16,7 @@ import pyarrow as pa
 
 from modularml.core.data.schema_constants import (
     DOMAIN_FEATURES,
-    DOMAIN_SAMPLE_ID,
+    DOMAIN_SAMPLE_UUIDS,
     DOMAIN_TAGS,
     DOMAIN_TARGETS,
     INVALID_LABEL_CHARACTERS,
@@ -52,7 +52,7 @@ class SampleSchema:
         data types, and separation across these domains.
 
         Every Arrow table that follows this schema must also contain a \
-        global identifier column, `DOMAIN_SAMPLE_ID`, storing a unique \
+        global identifier column, `DOMAIN_SAMPLE_UUIDS`, storing a unique \
         per-row ID string (UUID or hash).
 
     """
@@ -208,7 +208,7 @@ class SampleSchema:
         tags: dict[str, dict[str, pa.DataType]] = {}
 
         for col in table.schema.names:
-            if col == DOMAIN_SAMPLE_ID:
+            if col == DOMAIN_SAMPLE_UUIDS:
                 continue
 
             parts = col.split(".")
@@ -234,7 +234,7 @@ class SampleSchema:
 
 def ensure_sample_id(table: pa.Table) -> pa.Table:
     """
-    Ensure that the Arrow table contains a unique `DOMAIN_SAMPLE_ID` column.
+    Ensure that the Arrow table contains a unique `DOMAIN_SAMPLE_UUIDS` column.
 
     Description:
         - If the column exists, validates that it is of type string.
@@ -245,13 +245,13 @@ def ensure_sample_id(table: pa.Table) -> pa.Table:
         table (pa.Table): Input Arrow table.
 
     Returns:
-        pa.Table: A table guaranteed to contain a valid DOMAIN_SAMPLE_ID.
+        pa.Table: A table guaranteed to contain a valid DOMAIN_SAMPLE_UUIDS.
 
     """
-    if DOMAIN_SAMPLE_ID in table.column_names:
-        col = table[DOMAIN_SAMPLE_ID]
+    if DOMAIN_SAMPLE_UUIDS in table.column_names:
+        col = table[DOMAIN_SAMPLE_UUIDS]
         if not pa.types.is_string(col.type):
-            msg = f"'{DOMAIN_SAMPLE_ID}' column must be of type string, got {col.type}."
+            msg = f"'{DOMAIN_SAMPLE_UUIDS}' column must be of type string, got {col.type}."
             raise TypeError(msg)
         return table
 
@@ -259,7 +259,7 @@ def ensure_sample_id(table: pa.Table) -> pa.Table:
         [str(uuid.uuid4()) for _ in range(table.num_rows)],
         type=pa.string(),
     )
-    return table.append_column(DOMAIN_SAMPLE_ID, sample_ids)
+    return table.append_column(DOMAIN_SAMPLE_UUIDS, sample_ids)
 
 
 def validate_str_list(keys: list[str]):
@@ -272,7 +272,7 @@ def validate_str_list(keys: list[str]):
         enforces:
           - Uniqueness of all keys.
           - Absence of invalid characters (see `INVALID_LABEL_CHARACTERS`).
-          - Exclusion of reserved schema keywords (e.g., `DOMAIN_SAMPLE_ID`,
+          - Exclusion of reserved schema keywords (e.g., `DOMAIN_SAMPLE_UUIDS`,
             `DOMAIN_FEATURES`, etc.).
           - Exclusion of internal metadata prefixes/postfixes used in column
             naming conventions.
@@ -315,7 +315,7 @@ def validate_str_list(keys: list[str]):
 
     # Ensure reserved names are not used
     for res_key in (
-        DOMAIN_SAMPLE_ID,
+        DOMAIN_SAMPLE_UUIDS,
         DOMAIN_FEATURES,
         DOMAIN_TARGETS,
         DOMAIN_TAGS,

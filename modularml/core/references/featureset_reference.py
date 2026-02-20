@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, get_args
 
 from modularml.core.data.schema_constants import (
     DOMAIN_FEATURES,
-    DOMAIN_SAMPLE_ID,
+    DOMAIN_SAMPLE_UUIDS,
     DOMAIN_TAGS,
     DOMAIN_TARGETS,
     REP_RAW,
@@ -302,7 +302,7 @@ class FeatureSetColumnReference(ExperimentReference):
 
     def __post_init__(self):
         """Validate the configured domain."""
-        valid_ds = [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS, DOMAIN_SAMPLE_ID]
+        valid_ds = [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS, DOMAIN_SAMPLE_UUIDS]
         if self.domain not in valid_ds:
             msg = f"Domain must be one of: {valid_ds}. Received: {self.domain}."
             raise ValueError(msg)
@@ -519,7 +519,7 @@ class FeatureSetColumnReference(ExperimentReference):
                     include_domain_prefix=True,
                     include_rep_suffix=False,
                 )
-                all_keys.remove(DOMAIN_SAMPLE_ID)
+                all_keys.remove(DOMAIN_SAMPLE_UUIDS)
             # Parse available into domain, colummn key
             avail_parsed: list[tuple[str, str | None]] = []
             for k in all_keys:
@@ -574,7 +574,7 @@ class FeatureSetColumnReference(ExperimentReference):
                 raise ResolutionError(msg)
 
         # Final validation
-        if parsed["domain"] == DOMAIN_SAMPLE_ID:
+        if parsed["domain"] == DOMAIN_SAMPLE_UUIDS:
             if parsed["key"] is not None and parsed["rep"] is not None:
                 msg = f"Failed to resolved '{val}' into column reference."
                 raise ResolutionError(msg)

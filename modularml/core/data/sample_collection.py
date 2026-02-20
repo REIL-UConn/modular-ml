@@ -22,7 +22,7 @@ from modularml.core.data.sample_schema import (
 )
 from modularml.core.data.schema_constants import (
     DOMAIN_FEATURES,
-    DOMAIN_SAMPLE_ID,
+    DOMAIN_SAMPLE_UUIDS,
     DOMAIN_TAGS,
     DOMAIN_TARGETS,
     REP_RAW,
@@ -123,16 +123,16 @@ class SampleCollection:
         colnames = set(self.table.column_names)
 
         # Case 1: Add new column if missing
-        if DOMAIN_SAMPLE_ID not in colnames:
+        if DOMAIN_SAMPLE_UUIDS not in colnames:
             n = self.table.num_rows
             ids = pa.array([str(uuid.uuid4()) for _ in range(n)], type=pa.string())
-            self.table = self.table.append_column(DOMAIN_SAMPLE_ID, ids)
+            self.table = self.table.append_column(DOMAIN_SAMPLE_UUIDS, ids)
             return
 
         # Case 2: Validate existing column
-        col = self.table[DOMAIN_SAMPLE_ID]
+        col = self.table[DOMAIN_SAMPLE_UUIDS]
         if not pa.types.is_string(col.type):
-            msg = f"'{DOMAIN_SAMPLE_ID}' column must be of type string, got {col.type}."
+            msg = f"'{DOMAIN_SAMPLE_UUIDS}' column must be of type string, got {col.type}."
             raise TypeError(msg)
 
         # Extract and check uniqueness
@@ -145,8 +145,8 @@ class SampleCollection:
                 type=pa.string(),
             )
             self.table = self.table.set_column(
-                self.table.schema.get_field_index(DOMAIN_SAMPLE_ID),
-                DOMAIN_SAMPLE_ID,
+                self.table.schema.get_field_index(DOMAIN_SAMPLE_UUIDS),
+                DOMAIN_SAMPLE_UUIDS,
                 unique_ids,
             )
 
@@ -671,7 +671,7 @@ class SampleCollection:
     @property
     def available_domains(self) -> list[str]:
         """List of all domain names present in this collection."""
-        return [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS, DOMAIN_SAMPLE_ID]
+        return [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS, DOMAIN_SAMPLE_UUIDS]
 
     @property
     def n_samples(self) -> int:
@@ -809,7 +809,7 @@ class SampleCollection:
             keys.extend(sorted(d_cols))
 
         if include_domain_prefix:
-            keys.append(DOMAIN_SAMPLE_ID)
+            keys.append(DOMAIN_SAMPLE_UUIDS)
 
         return keys
 
@@ -1063,7 +1063,7 @@ class SampleCollection:
 
         data = {}
         for col in columns:
-            if col == DOMAIN_SAMPLE_ID:
+            if col == DOMAIN_SAMPLE_UUIDS:
                 data[col] = self.get_sample_uuids(fmt=DataFormat.NUMPY)
                 continue
 
@@ -1234,7 +1234,7 @@ class SampleCollection:
 
         """
         # Access the sample_id column as an Arrow array
-        pa_arr = self.table.column(DOMAIN_SAMPLE_ID).combine_chunks()
+        pa_arr = self.table.column(DOMAIN_SAMPLE_UUIDS).combine_chunks()
 
         # Return raw pyarrow array is no format is specified
         if fmt is None:
@@ -1463,8 +1463,8 @@ class SampleCollection:
         if raw_only:
             cols = []
             for domain in self.available_domains:
-                if domain == DOMAIN_SAMPLE_ID:
-                    cols.append(DOMAIN_SAMPLE_ID)
+                if domain == DOMAIN_SAMPLE_UUIDS:
+                    cols.append(DOMAIN_SAMPLE_UUIDS)
                     continue
                 if (domain == DOMAIN_TAGS) and not self.has_tags:
                     continue
@@ -1547,7 +1547,7 @@ class SampleCollection:
 
         # Always include sample_id column (guaranteed unique)
         uuids = self.get_sample_uuids(fmt=DataFormat.NUMPY)
-        all_data[DOMAIN_SAMPLE_ID] = stack_nested_numpy(uuids, shape=())
+        all_data[DOMAIN_SAMPLE_UUIDS] = stack_nested_numpy(uuids, shape=())
 
         return all_data
 

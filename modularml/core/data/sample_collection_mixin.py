@@ -12,7 +12,7 @@ from modularml.core.data.sample_collection import SampleCollection
 from modularml.core.data.sample_data import SampleData
 from modularml.core.data.schema_constants import (
     DOMAIN_FEATURES,
-    DOMAIN_SAMPLE_ID,
+    DOMAIN_SAMPLE_UUIDS,
     DOMAIN_TAGS,
     DOMAIN_TARGETS,
 )
@@ -56,8 +56,8 @@ class SampleCollectionMixin:
     def _resolve_collection(self) -> tuple[SampleCollection, np.ndarray | None]:
         """Returns :class:`SampleCollection` and mask over caller's columns and indices."""
         collection, columns, indices = self._resolve_caller_attributes()
-        if columns is not None and DOMAIN_SAMPLE_ID not in columns:
-            columns.append(DOMAIN_SAMPLE_ID)
+        if columns is not None and DOMAIN_SAMPLE_UUIDS not in columns:
+            columns.append(DOMAIN_SAMPLE_UUIDS)
 
         # Column filtering
         sub_table = (
@@ -545,7 +545,7 @@ class SampleCollectionMixin:
 
         # Order and flatten columns: features -> targets -> tags
         sel_cols: list[str] = []
-        for d in [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS, DOMAIN_SAMPLE_ID]:
+        for d in [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS, DOMAIN_SAMPLE_UUIDS]:
             if d in selected:
                 sel_cols.extend(sorted(selected[d]))
 

@@ -16,7 +16,7 @@ from modularml.core.data.sample_schema import (
 )
 from modularml.core.data.schema_constants import (
     DOMAIN_FEATURES,
-    DOMAIN_SAMPLE_ID,
+    DOMAIN_SAMPLE_UUIDS,
     DOMAIN_TAGS,
     DOMAIN_TARGETS,
     REP_RAW,
@@ -658,7 +658,7 @@ def build_sample_schema_table(
     # Ensure table has at least 1 column
     if len(all_cols) == 0:
         # Create an "empty" placeholder column of correct row count
-        all_cols = {DOMAIN_SAMPLE_ID: pa.array([None] * n_rows, type=pa.string())}
+        all_cols = {DOMAIN_SAMPLE_UUIDS: pa.array([None] * n_rows, type=pa.string())}
 
     # Build table
     table = pa.table(all_cols)

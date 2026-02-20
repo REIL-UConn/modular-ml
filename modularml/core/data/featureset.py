@@ -15,7 +15,7 @@ from modularml.core.data.sample_collection_mixin import SampleCollectionMixin
 from modularml.core.data.sample_schema import validate_str_list
 from modularml.core.data.schema_constants import (
     DOMAIN_FEATURES,
-    DOMAIN_SAMPLE_ID,
+    DOMAIN_SAMPLE_UUIDS,
     DOMAIN_TAGS,
     DOMAIN_TARGETS,
     REP_RAW,
@@ -579,7 +579,7 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
             include_domain_prefix=True,
             include_rep_suffix=False,
         )
-        all_cols.remove(DOMAIN_SAMPLE_ID)
+        all_cols.remove(DOMAIN_SAMPLE_UUIDS)
         used_cols: list[str] = []
         for rec in self._scaler_recs:
             for k in rec.keys:
@@ -1378,7 +1378,7 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
             include_domain_prefix=True,
             include_rep_suffix=True,
         )
-        all_cols.remove(DOMAIN_SAMPLE_ID)
+        all_cols.remove(DOMAIN_SAMPLE_UUIDS)
 
         # Perform column selection (organized by domain)
         selected: dict[str, set[str]] = resolve_column_selectors(
@@ -1434,11 +1434,11 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
 
         """
         # Early return if column=sample_id
-        if column == DOMAIN_SAMPLE_ID:
+        if column == DOMAIN_SAMPLE_UUIDS:
             return FeatureSetColumnReference(
                 node_id=self.node_id,
                 node_label=self.label,
-                domain=DOMAIN_SAMPLE_ID,
+                domain=DOMAIN_SAMPLE_UUIDS,
                 key=None,
                 rep=None,
             )
@@ -1460,7 +1460,7 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
             include_domain_prefix=True,
             include_rep_suffix=True,
         )
-        all_cols.remove(DOMAIN_SAMPLE_ID)
+        all_cols.remove(DOMAIN_SAMPLE_UUIDS)
 
         # Perform column selection (organized by domain)
         selected: dict[str, set[str]] = resolve_column_selectors(

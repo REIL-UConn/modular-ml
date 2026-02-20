@@ -15,21 +15,21 @@ from typing import Final, Literal
 DOMAIN_FEATURES: Final[str] = "features"
 DOMAIN_TARGETS: Final[str] = "targets"
 DOMAIN_TAGS: Final[str] = "tags"
-DOMAIN_SAMPLE_ID: Final[str] = "sample_id"
+DOMAIN_SAMPLE_UUIDS: Final[str] = "sample_uuids"
 DOMAIN_OUTPUTS: Final[str] = "outputs"
 
 ALL_DOMAINS: Final[tuple[str, ...]] = (
     DOMAIN_FEATURES,
     DOMAIN_TARGETS,
     DOMAIN_TAGS,
-    DOMAIN_SAMPLE_ID,
+    DOMAIN_SAMPLE_UUIDS,
     DOMAIN_OUTPUTS,
 )
 T_ALL_DOMAINS = Literal[
     "features",
     "targets",
     "tags",
-    "sample_id",
+    "sample_uuids",
     "outputs",
 ]
 

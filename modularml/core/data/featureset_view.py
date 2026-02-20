@@ -11,7 +11,7 @@ import pyarrow as pa
 from modularml.core.data.sample_collection_mixin import SampleCollectionMixin
 from modularml.core.data.schema_constants import (
     DOMAIN_FEATURES,
-    DOMAIN_SAMPLE_ID,
+    DOMAIN_SAMPLE_UUIDS,
     DOMAIN_TAGS,
     DOMAIN_TARGETS,
 )
@@ -140,7 +140,7 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
         Description:
             If both views share the same source :class:`FeatureSet`, comparison
             is based on indices. If they originate from different sources,
-            comparison falls back to `DOMAIN_SAMPLE_ID` to ensure identity
+            comparison falls back to `DOMAIN_SAMPLE_UUIDS` to ensure identity
             consistency across saved or merged datasets.
 
         Args:
@@ -163,11 +163,11 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
 
         # Otherwise compare SAMPLE_IDs
         ids_self = {
-            self.source.collection.table[DOMAIN_SAMPLE_ID].to_pylist()[i]
+            self.source.collection.table[DOMAIN_SAMPLE_UUIDS].to_pylist()[i]
             for i in self.indices
         }
         ids_other = {
-            other.source.collection.table[DOMAIN_SAMPLE_ID].to_pylist()[i]
+            other.source.collection.table[DOMAIN_SAMPLE_UUIDS].to_pylist()[i]
             for i in other.indices
         }
         return ids_self.isdisjoint(ids_other)
@@ -180,7 +180,7 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
             other (FeatureSetView): The other view to compare against.
 
         Returns:
-            list[str]: A list of overlapping `DOMAIN_SAMPLE_ID` values.
+            list[str]: A list of overlapping `DOMAIN_SAMPLE_UUIDS` values.
 
         """
         if not isinstance(other, FeatureSetView):
@@ -191,18 +191,18 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
         if self.source is other.source:
             overlap = np.intersect1d(self.indices, other.indices, assume_unique=True)
             return (
-                self.source.collection.table[DOMAIN_SAMPLE_ID]
+                self.source.collection.table[DOMAIN_SAMPLE_UUIDS]
                 .take(pa.array(overlap))
                 .to_pylist()
             )
 
         # Otherwise compare SAMPLE_IDs
         ids_self = {
-            self.source.collection.table[DOMAIN_SAMPLE_ID].to_pylist()[i]
+            self.source.collection.table[DOMAIN_SAMPLE_UUIDS].to_pylist()[i]
             for i in self.indices
         }
         ids_other = {
-            other.source.collection.table[DOMAIN_SAMPLE_ID].to_pylist()[i]
+            other.source.collection.table[DOMAIN_SAMPLE_UUIDS].to_pylist()[i]
             for i in other.indices
         }
         return list(ids_self.intersection(ids_other))
