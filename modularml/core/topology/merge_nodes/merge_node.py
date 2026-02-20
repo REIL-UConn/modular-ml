@@ -36,11 +36,12 @@ class MergeNode(ComputeNode):
 
     Description:
         A MergeNode represents a node in the model graph that takes multiple upstream
-        nodes and merges their outputs into a single output. This class serves as an abstract
-        base for concrete merging strategies such as concatenation, averaging, or summation.
+        nodes and merges their outputs into a single output. This class serves as an
+        abstract base for concrete merging strategies such as concatenation, averaging,
+        or summation.
 
-        Subclasses must implement the `apply_merge()` method, which defines how multiple input
-        tensors are combined into a single output tensor.
+        Subclasses must implement the `apply_merge()` method, which defines how multiple
+        input tensors are combined into a single output tensor.
 
     Example:
     ```python
@@ -342,6 +343,101 @@ class MergeNode(ComputeNode):
         self._output_shape = out_shape
         self._built = True
 
+    def _merge_sample_data(
+        self,
+        data: list[SampleData],
+        fmt: DataFormat,
+    ) -> SampleData:
+        """
+        Merge a list of SampleData objects across all domains.
+
+        Args:
+            data (list[SampleData]):
+                Input SampleData objects to merge.
+            fmt (DataFormat):
+                Data format for features and targets. Tags and sample_uuids
+                always use NUMPY.
+
+        Returns:
+            SampleData: Merged output.
+
+        """
+        merged_attrs: dict[str, Any] = {}
+        for attr, attr_fmt in zip(
+            [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS, DOMAIN_SAMPLE_UUIDS],
+            (fmt, fmt, DataFormat.NUMPY, DataFormat.NUMPY),
+            strict=True,
+        ):
+            # Ensure we have data for the given attribute
+            have_vals: list[bool] = [getattr(d, attr) is not None for d in data]
+
+            # If none have data, just skip
+            if not any(have_vals):
+                continue
+
+            # If only some do, throw warning and skip
+            if not all(have_vals):
+                msg = (
+                    f"Not all inputs have data for the `{attr}` attribute. "
+                    f"The merged results will not contain `{attr}` data."
+                )
+                warn(msg, stacklevel=2)
+                continue
+
+            # For attributes with data, merge
+            merged_attrs[attr] = self.apply_merge(
+                values=[getattr(d, attr) for d in data],
+                includes_batch_dim=True,
+                fmt=attr_fmt,
+                domain=attr,
+            )
+
+        # Return a new, merged SampleData instance
+        return SampleData(
+            data=merged_attrs,
+            kind="output",
+        )
+
+    def _merge_role_data(
+        self,
+        rds: list[RoleData],
+        fmt: DataFormat,
+    ) -> RoleData:
+        """
+        Merge a list of RoleData objects.
+
+        Args:
+            rds (list[RoleData]):
+                Input RoleData objects to merge.
+            fmt (DataFormat):
+                Data format for features and targets.
+
+        Returns:
+            RoleData: Merged output.
+
+        """
+        ref = rds[0]
+        # Ensure all inputs have the same roles
+        for rd in rds[1:]:
+            if rd.available_roles != ref.available_roles:
+                msg = (
+                    "All inputs of type RoleData must have the same roles: "
+                    f"{ref.available_roles} != {rd.available_roles}."
+                )
+                raise ValueError(msg)
+
+        # Get list of sample data for each role
+        grouped_role_values: dict[str, list[SampleData]] = {}
+        for role in ref.available_roles:
+            grouped_role_values[role] = [rd.get_data(role=role) for rd in rds]
+
+        # Merge SampleData within each role
+        out = {
+            k: self._merge_sample_data(v, fmt=fmt)
+            for k, v in grouped_role_values.items()
+        }
+        return RoleData(data=out)
+
     @overload
     def merge(self, batches: list[Batch], **kwargs) -> Batch: ...
     @overload
@@ -396,72 +492,11 @@ class MergeNode(ComputeNode):
                 )
                 raise RuntimeError(msg) from e
 
-        def _merge_sample_data(data: list[SampleData]) -> SampleData:
-            # Get merge format (for features and targets)
-            if self.backend is not None:
-                fmt = get_data_format_for_backend(backend=self.backend)
-            else:
-                fmt = DataFormat.NUMPY
-
-            # Merge within attributes of sample data
-            merged_attrs: dict[str, Any] = {}
-            for attr, attr_fmt in zip(
-                [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS, DOMAIN_SAMPLE_UUIDS],
-                (fmt, fmt, DataFormat.NUMPY, DataFormat.NUMPY),
-                strict=True,
-            ):
-                # Ensure we have data for the given attribute
-                # 1 = has data, 0 = doesn't
-                have_vals: list[bool] = []
-                for d in data:
-                    have_vals.append(getattr(d, attr) is not None)
-
-                # If none have data, just skip
-                if not any(have_vals):
-                    continue
-
-                # If only some do, throw warning and skip
-                if not all(have_vals):
-                    msg = (
-                        f"Not all inputs have data for the `{attr}` attribute. "
-                        f"The merged results will not contain `{attr}` data."
-                    )
-                    warn(msg, stacklevel=2)
-                    continue
-
-                # For attributes with data, merge
-                merged_attrs[attr] = self.apply_merge(
-                    values=[getattr(d, attr) for d in data],
-                    includes_batch_dim=True,
-                    fmt=attr_fmt,
-                    domain=attr,
-                )
-
-            # Return a new, merged SampleData instance
-            return SampleData(
-                data=merged_attrs,
-                kind="output",
-            )
-
-        def _merge_role_data(rds: list[RoleData]) -> RoleData:
-            ref = rds[0]
-            # Ensure all inputs have the same roles
-            for rd in rds[1:]:
-                if rd.available_roles != ref.available_roles:
-                    msg = (
-                        "All inputs of type RoleData must have the same roles: "
-                        f"{ref.available_roles} != {rd.available_roles}."
-                    )
-                    raise ValueError(msg)
-
-            # Get list of sample data for each role
-            grouped_role_values: dict[str, list[SampleData]] = {}
-            for role in ref.available_roles:
-                grouped_role_values[role] = [rd.get_data(role=role) for rd in rds]
-
-            # Merge SampleData within each role
-            out = {k: _merge_sample_data(v) for k, v in grouped_role_values.items()}
-            return RoleData(data=out)
+        # Determine merge format (for features and targets)
+        if self.backend is not None:
+            fmt = get_data_format_for_backend(backend=self.backend)
+        else:
+            fmt = DataFormat.NUMPY
 
         # Determine input type
         first = x[0]
@@ -475,14 +510,14 @@ class MergeNode(ComputeNode):
 
         # Merge based on data type
         if isinstance(first, SampleData):
-            return _merge_sample_data(x)
+            return self._merge_sample_data(x, fmt=fmt)
 
         if isinstance(first, RoleData):
-            return _merge_role_data(x)
+            return self._merge_role_data(x, fmt=fmt)
 
         if isinstance(first, Batch):
             # Get merged role data
-            out_rd = _merge_role_data([b.role_data for b in x])
+            out_rd = self._merge_role_data([b.role_data for b in x], fmt=fmt)
 
             # Merge role_weights - take mean across sample axis
             m_weights = {}
@@ -576,9 +611,9 @@ class MergeNode(ComputeNode):
                 )
                 raise RuntimeError(msg) from e
 
-        # Sort inputs by reference for reproducible merge order
-        sorted_refs = sorted(inputs.keys(), key=str)
-        sorted_values = [inputs[ref] for ref in sorted_refs]
+        # To ensure reproducible order, we use the same order that upstream refs
+        # we added to this node
+        sorted_values = [inputs[ref] for ref in self.get_upstream_refs()]
 
         # Determine input type
         first = sorted_values[0]

@@ -10,6 +10,7 @@ from modularml.core.data.schema_constants import (
     DOMAIN_TAGS,
     DOMAIN_TARGETS,
 )
+from modularml.core.topology.merge_nodes.merge_strategy import MergeStrategy
 from modularml.utils.data.conversion import convert_to_format
 from modularml.utils.data.data_format import (
     _TENSORLIKE_FORMATS,
@@ -19,13 +20,19 @@ from modularml.utils.data.data_format import (
     normalize_format,
 )
 from modularml.utils.environment.optional_imports import ensure_tensorflow, ensure_torch
+from modularml.utils.logging.warnings import warn
 from modularml.utils.nn.padding import PadMode, map_pad_mode_to_backend
 
 from .merge_node import MergeNode
 
 if TYPE_CHECKING:
+    from modularml.core.data.sample_data import SampleData
     from modularml.core.experiment.experiment_node import ExperimentNode
     from modularml.core.references.experiment_reference import ExperimentNodeReference
+
+
+# Type alias for strategy parameters
+StrategyType = int | str | MergeStrategy
 
 
 class ConcatNode(MergeNode):
@@ -38,13 +45,25 @@ class ConcatNode(MergeNode):
         for flexible merging even when inputs vary in size. Padding behavior can be
         controlled via mode (e.g., 'constant', 'reflect', 'replicate') and value.
 
+        For the targets and tags domains, non-concatenation merge strategies can be
+        used instead of axis-based concatenation. For example, `"first"` selects
+        targets from the first input, `"mean"` computes an element-wise average,
+        or an `ExperimentNodeReference` can be passed to select targets from a
+        specific upstream input.
+
     Attributes:
         label (str):
             Unique identifier for this node.
         upstream_refs (list[ExperimentNode | ExperimentNodeReference]):
             Upstream node references from which inputs will be received.
-        axis (int):
-            The axis along which to concatenate inputs.
+        concat_axis (int):
+            The axis along which to concatenate feature inputs.
+        target_strategy (int | MergeStrategy | ExperimentNodeReference):
+            Strategy for merging targets. An int means concatenation along that
+            axis; a MergeStrategy applies an aggregation; an ExperimentNodeReference
+            selects targets from a specific upstream input.
+        tags_strategy (int | MergeStrategy | ExperimentNodeReference):
+            Strategy for merging tags (same semantics as target_strategy).
         pad_inputs (bool, optional):
             Whether to pad inputs before merging. Defaults to False.
         pad_mode (PadMode, optional):
@@ -57,13 +76,13 @@ class ConcatNode(MergeNode):
     ```python
         fs_ref = FeatureSet(...).reference(columns=...)
         mn = ModelNode(...)
+
+        # Concatenate features, use first input's targets
         stage = ConcatNode(
             label="merge",
             upstream_refs=[fs_ref, mn],
-            axis=1,
-            pad_inputs=True,
-            pad_mode="constant",
-            pad_value=0.0,
+            concat_axis=1,
+            concat_axis_targets="first", # first = fs_ref
         )
     ```
 
@@ -75,8 +94,8 @@ class ConcatNode(MergeNode):
         upstream_refs: list[ExperimentNode | ExperimentNodeReference],
         concat_axis: int = 0,
         *,
-        concat_axis_targets: int = -1,
-        concat_axis_tags: int = -1,
+        concat_axis_targets: StrategyType | ExperimentNodeReference = -1,
+        concat_axis_tags: StrategyType | ExperimentNodeReference = -1,
         pad_inputs: bool = False,
         pad_mode: str | PadMode = "constant",
         pad_value: float = 0.0,
@@ -94,24 +113,27 @@ class ConcatNode(MergeNode):
                 Upstream node references from which inputs will be received.
 
             concat_axis (int):
-                The axis along which to concatenate inputs. Does not include the batch
-                dimension. That is, for shape (with batch) of (32,1,16), axis=0 refers
-                to "1". The example given below omit the batch dimension.
+                The axis along which to concatenate feature inputs. Does not include
+                the batch dimension. That is, for shape (with batch) of (32,1,16),
+                axis=0 refers to "1". The examples below omit the batch dimension.
                 * axis=0: concat along features. E.g, (1,16) + (1,16) -> (2,16))
                 * axis>1: concat within features. E.g, (1,16,16) + (1,16,8) -> (1,16,24))
                     All data must have at least `concat_axis` dimensions.
                 * axis=-1: concat along last axis of all data. E.g, (1, 16, 16) +
                     (1, 16, 8) -> (1, 16, 24).
 
-            concat_axis_targets (int, optional):
-                If applying concatenation to a domain-based data structure (e.g.,
-                SampleData, RoleData, or Batch), concantenation can be applied to
-                each domain with different concatenation axes.
-                Typically, targets are just concatenated along their last axis (-1).
+            concat_axis_targets (int | str | MergeStrategy | ExperimentNodeReference):
+                Strategy for merging the targets domain. Accepts:
+                * int: Concatenate along this axis (same semantics as `concat_axis`).
+                    Defaults to -1 (last axis).
+                * str or MergeStrategy: Apply an aggregation strategy. Supported
+                    values: "first", "last", "mean".
+                * ExperimentNodeReference: Select targets from the upstream input
+                    matching this reference.
 
-            concat_axis_tags (int, optional):
-                Similarly to `concat_axis_targets`, an axis to concatenate the "tags"
-                domains can be specified. Defaults to -1.
+            concat_axis_tags (int | str | MergeStrategy | ExperimentNodeReference):
+                Strategy for merging the tags domain. Same semantics as
+                `concat_axis_targets`. Defaults to -1 (last axis).
 
             pad_inputs (bool, optional):
                 Whether to pad inputs before merging. Defaults to False.
@@ -137,8 +159,8 @@ class ConcatNode(MergeNode):
             register=register,
         )
         self.concat_axis = int(concat_axis)
-        self.target_axis = int(concat_axis_targets)
-        self.tags_axis = int(concat_axis_tags)
+        self.target_strategy = self._normalize_strategy(concat_axis_targets)
+        self.tags_strategy = self._normalize_strategy(concat_axis_tags)
         self.pad_inputs = bool(pad_inputs)
         self.pad_mode = pad_mode if isinstance(pad_mode, PadMode) else PadMode(pad_mode)
         self.pad_value = pad_value
@@ -147,6 +169,86 @@ class ConcatNode(MergeNode):
             msg = f"Pad mode is not supported yet: {self.pad_mode}"
             raise NotImplementedError(msg)
 
+    # ================================================
+    # Strategy normalization
+    # ================================================
+    @staticmethod
+    def _normalize_strategy(
+        value: int | str | MergeStrategy | ExperimentNodeReference,
+    ) -> int | MergeStrategy | ExperimentNodeReference:
+        """
+        Normalize a strategy parameter to its canonical form.
+
+        Args:
+            value: Raw strategy value from the constructor.
+
+        Returns:
+            int | MergeStrategy | ExperimentNodeReference:
+                Normalized strategy.
+
+        Raises:
+            ValueError: If the value is an unrecognized string.
+
+        """
+        from modularml.core.experiment.experiment_node import ExperimentNode
+        from modularml.core.references.experiment_reference import (
+            ExperimentNodeReference,
+        )
+
+        if isinstance(value, ExperimentNode):
+            return value.reference()
+        if isinstance(value, ExperimentNodeReference):
+            return value
+        if isinstance(value, int):
+            return value
+        if isinstance(value, MergeStrategy):
+            return value
+        if isinstance(value, str):
+            return MergeStrategy(value)
+
+        msg = (
+            "Expected type to be one of int, str, MergeStrategy, or "
+            f"ExperimentNodeReference. Received: {type(value)}."
+        )
+        raise TypeError(msg)
+
+    @property
+    def target_axis(self) -> int:
+        """
+        Target concatenation axis (only valid when target_strategy is int).
+
+        Raises:
+            TypeError: If the target strategy is not int-based.
+
+        """
+        if isinstance(self.target_strategy, int):
+            return self.target_strategy
+        msg = (
+            f"target_axis is not available when target_strategy is "
+            f"{self.target_strategy!r}. Use target_strategy instead."
+        )
+        raise TypeError(msg)
+
+    @property
+    def tags_axis(self) -> int:
+        """
+        Tags concatenation axis (only valid when tags_strategy is int).
+
+        Raises:
+            TypeError: If the tags strategy is not int-based.
+
+        """
+        if isinstance(self.tags_strategy, int):
+            return self.tags_strategy
+        msg = (
+            f"tags_axis is not available when tags_strategy is "
+            f"{self.tags_strategy!r}. Use tags_strategy instead."
+        )
+        raise TypeError(msg)
+
+    # ================================================
+    # Padding & Validation
+    # ================================================
     def _pad_inputs(
         self,
         values: list[Any],
@@ -274,6 +376,9 @@ class ConcatNode(MergeNode):
                     )
                     raise ValueError(msg)
 
+    # ================================================
+    # Concatenation (apply_merge)
+    # ================================================
     def apply_merge(
         self,
         values: list[Any],
@@ -287,7 +392,9 @@ class ConcatNode(MergeNode):
 
         Description:
             Optionally pads the inputs to align non-concat dimensions before applying
-            backend-specific concatenation.
+            backend-specific concatenation. This method handles axis-based
+            concatenation only. Non-concat strategies (e.g., `"first"`, `"mean"`)
+            are handled by :meth:`_merge_sample_data` before reaching this method.
 
         Args:
             values (list[Any]):
@@ -329,9 +436,9 @@ class ConcatNode(MergeNode):
         if domain == DOMAIN_FEATURES:
             effective_axis = self.concat_axis
         elif domain == DOMAIN_TARGETS:
-            effective_axis = self.target_axis
+            effective_axis = self.target_strategy
         elif domain == DOMAIN_TAGS:
-            effective_axis = self.tags_axis
+            effective_axis = self.tags_strategy
         elif domain == DOMAIN_SAMPLE_UUIDS:
             effective_axis = -1
         else:
@@ -367,3 +474,195 @@ class ConcatNode(MergeNode):
 
         # Default: numpy concatenation
         return np.concatenate(values, axis=effective_axis)
+
+    # ================================================
+    # Non-concat merge strategies
+    # ================================================
+    def _apply_strategy(
+        self,
+        values: list[Any],
+        strategy: MergeStrategy,
+        fmt: DataFormat,
+    ) -> Any:
+        """
+        Apply a non-concat merge strategy to a list of tensors.
+
+        Args:
+            values (list[Any]):
+                Non-None tensors to aggregate.
+            strategy (MergeStrategy):
+                The aggregation strategy to apply.
+            fmt (DataFormat):
+                Data format for the output tensor.
+
+        Returns:
+            Any: Aggregated tensor.
+
+        """
+        values = [convert_to_format(x, fmt=fmt) for x in values]
+
+        if strategy == MergeStrategy.FIRST:
+            return values[0]
+        if strategy == MergeStrategy.LAST:
+            return values[-1]
+        if strategy == MergeStrategy.MEAN:
+            return self._compute_mean(values, fmt=fmt)
+
+        msg = f"Unsupported merge strategy: {strategy}"
+        raise ValueError(msg)
+
+    def _compute_mean(
+        self,
+        values: list[Any],
+        fmt: DataFormat,
+    ) -> Any:
+        """
+        Compute element-wise mean across inputs.
+
+        Args:
+            values (list[Any]):
+                Tensors to average. All must have the same shape.
+            fmt (DataFormat):
+                Data format of the tensors.
+
+        Returns:
+            Any: Mean tensor.
+
+        """
+        if fmt == DataFormat.TORCH:
+            torch = ensure_torch()
+            return torch.stack(values).mean(dim=0)
+
+        if fmt == DataFormat.TENSORFLOW:
+            tf = ensure_tensorflow()
+            return tf.reduce_mean(tf.stack(values), axis=0)
+
+        # Default: numpy
+        return np.mean(np.stack(values), axis=0)
+
+    def _select_by_reference(
+        self,
+        data: list[SampleData],
+        attr: str,
+        ref: ExperimentNodeReference,
+    ) -> Any | None:
+        """
+        Select a domain's data from the input matching the given reference.
+
+        Args:
+            data (list[SampleData]):
+                Sorted list of SampleData inputs (same order as
+                the references added to this node).
+            attr (str):
+                The domain attribute name (e.g., "targets").
+            ref (ExperimentNodeReference):
+                The upstream reference to select from.
+
+        Returns:
+            Any | None: The selected tensor, or None if that input has no
+                data for the given domain.
+
+        Raises:
+            RuntimeError: If called outside of a forward pass.
+            ValueError: If the reference is not among upstream refs.
+
+        """
+        # Find the index matching the reference
+        for idx, sorted_ref in enumerate(self.get_upstream_refs()):
+            if ref == sorted_ref:
+                return getattr(data[idx], attr)
+
+        available = [r.node_id for r in self.get_upstream_refs()]
+        msg = f"Reference '{ref.node_id}' is not among upstream refs: {available}"
+        raise ValueError(msg)
+
+    # ================================================
+    # Domain-aware sample data merging
+    # ================================================
+    def _merge_sample_data(
+        self,
+        data: list[SampleData],
+        fmt: DataFormat,
+    ) -> SampleData:
+        """
+        Merge SampleData with flexible per-domain strategies.
+
+        Description:
+            Features are always concatenated along `self.concat_axis`.
+            Targets and tags support non-concat strategies (e.g., "first",
+            "mean", or select-by-reference). Sample UUIDs are always
+            concatenated along the last axis.
+
+        Args:
+            data (list[SampleData]):
+                Input SampleData objects to merge.
+            fmt (DataFormat):
+                Data format for features and targets.
+
+        Returns:
+            SampleData: Merged output.
+
+        """
+        from modularml.core.data.sample_data import SampleData
+        from modularml.core.references.experiment_reference import (
+            ExperimentNodeReference,
+        )
+
+        merged_attrs: dict[str, Any] = {}
+
+        domain_config: list[
+            tuple[str, DataFormat, int | MergeStrategy | ExperimentNodeReference]
+        ] = [
+            (DOMAIN_FEATURES, fmt, self.concat_axis),
+            (DOMAIN_TARGETS, fmt, self.target_strategy),
+            (DOMAIN_TAGS, DataFormat.NUMPY, self.tags_strategy),
+            (DOMAIN_SAMPLE_UUIDS, DataFormat.NUMPY, -1),
+        ]
+
+        for attr, attr_fmt, strategy in domain_config:
+            values = [getattr(d, attr) for d in data]
+            has_data = [v is not None for v in values]
+
+            # If none have data, skip
+            if not any(has_data):
+                continue
+
+            if isinstance(strategy, int):
+                # Concatenation mode (original behavior)
+                if not all(has_data):
+                    msg = (
+                        f"Not all inputs have data for the `{attr}` attribute. "
+                        f"The merged results will not contain `{attr}` data."
+                    )
+                    warn(msg, stacklevel=2)
+                    continue
+
+                merged_attrs[attr] = self.apply_merge(
+                    values=values,
+                    includes_batch_dim=True,
+                    fmt=attr_fmt,
+                    domain=attr,
+                )
+
+            elif isinstance(strategy, MergeStrategy):
+                # Non-concat aggregation — silently filter out Nones
+                non_none = [v for v in values if v is not None]
+                if not non_none:
+                    continue
+                merged_attrs[attr] = self._apply_strategy(
+                    values=non_none,
+                    strategy=strategy,
+                    fmt=attr_fmt,
+                )
+
+            elif isinstance(strategy, ExperimentNodeReference):
+                # Select from a specific upstream input
+                selected = self._select_by_reference(
+                    data=data,
+                    attr=attr,
+                    ref=strategy,
+                )
+                if selected is not None:
+                    merged_attrs[attr] = selected
+
+        return SampleData(data=merged_attrs, kind="output")
