@@ -11,5 +11,4 @@ Conceptual material that explains why ModularML is structured the way it is. Use
    architecture_overview
    model_graph_design
    training_phases
-   data_flow
-   execution_context
+   experiment_design
