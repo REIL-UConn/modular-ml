@@ -1,7 +1,7 @@
 
 <div align="center">
 
-[![ModularML Banner](assets/modularml_logo_banner.png)](https://github.com/REIL-UConn/modular-ml)
+[![ModularML Banner](modularml/docs/_static/logos/modularml_logo_banner.png)](https://github.com/REIL-UConn/modular-ml)
 
 **Modular, fast, and reproducible ML experimentation built for R\&D.**
 
@@ -14,50 +14,55 @@
 </div>
 
 
-ModularML is a flexible, backend-agnostic machine learning framework for designing, training, and evaluating modular ML pipelines, tailored specifically for research and scientific workflows.
+ModularML is a flexible, backend-agnostic machine learning framework for designing, training, and evaluating machine learning pipelines, tailored specifically for research and scientific workflows.
 It enables rapid experimentation with complex model architectures, supports domain-specific feature engineering, and provides full reproducibility through configuration-driven declaration.
 
 > ModularML provides a plug-and-play ecosystem of interoperable components for data preprocessing, sampling, modeling, training, and evaluation — all wrapped in a unified experiment container.
 
 
 <p align="center">
-  <img src="assets/modularml_overview_diagram.png" alt="ModularML Overview Diagram" width="600"/>
+  <img src="modularml/docs/_static/figures/modularml_overview_diagram.png" alt="ModularML Overview Diagram" width="600"/>
 </p>
 <p align="center"><em>Figure 1. Overview of the ModularML framework, highlighting the three core abstractions: feature set preprocessing and splitting, modular model graph construction, and staged training orchestration.</em></p>
 
 
 
+## Key Concepts and Features
 
-## Features
+### FeatureSet & FeatureSetView
+- **`FeatureSet`** is the primary user-facing container for structured data. It tracks features/targets/tags, reversible transforms, and named splits.
+- **`FeatureSetView`** gives a lightweight view into a FeatureSet (rows + selected columns) so you can feed exactly the slices required for a training phase.
 
-ModularML includes a comprehensive set of components for scientific ML workflows:
+### Splitters & Samplers
+- Built-in **splitters** (e.g., random, rule-based) generate labeled splits from any FeatureSet.
+- **Samplers** consume FeatureSets or views and emit `BatchView`s in the shape required by the model. They support stratification, grouping, triplets/pairs, and custom roles so you can express experiment-specific batching without re-implementing the training loop.
 
-### Data Handling
-- **`FeatureSet` abstraction** for organizing structured datasets with features, targets, tags, and metadata.
-- **`Data` class** with unified support for multiple backends (`torch.Tensor`, `tf.Tensor`, `np.ndarray`).
-- **Built-in splitters**: Supports sample-based and rule-based splitting with condition-based filtering by feature, target, or tags values.
-- **Sample grouping** and multi-part splits for paired, triplet, or grouped training tasks.
+### Models & Wrappers
+- Use your own **PyTorch or TensorFlow models**, select from pre-exiting templates, or wrap third-party estimators. ModularML provides backend wrappers (Torch, TensorFlow, scikit-learn) so any supported model exposes a consistent forward API and reports its backend.
 
-### Advanced Sampling
-- **Flexible `FeatureSampler` interface** with support for advanced sampling during different stages of model training, including:
-  - Triplet sampling (e.g., anchor/positive/negative)
-  - Paired samples
-  - Class-balanced, cluster-based, or time-windowed sampling strategies.
-- **Condition-aware sampling** using any tags or metadata fields.
+### ModelGraph and Node-based Connectivity
+- **`ModelNode`** attaches a wrapped model to an upstream FeatureSet or node, handles building, freezing, and optimizer wiring.
+- **`MergeNode`** (e.g., `ConcatNode`) combines outputs from multiple nodes when you need multi-branch architectures.
+- **`ModelGraph`** is the DAG that ties everything together. It resolves head/tail nodes, executes topological forward/backward passes, mixes backends, and lets you switch between stage-wise or global training with a single call.
 
-### Model Architecture
-- **`ModelGraph`**: A Directed Acyclic Graph (DAG)-based model builder where:
-  - Each node is a `ModelStage` (e.g., encoder, head, discriminator).
-  - Each stage can use a different backend (PyTorch, TensorFlow, scikit-learn, LightGBM, etc).
-  - Mixed-backend models are supported with seamless input/output routing.
-- **Stage-wise training**: Custom `TrainingPhase` configuration enables fine-tuning, freezing, and transfer learning across sub-models.
+### AppliedLoss
+- **`AppliedLoss`** instances bind user-defined loss functions to nodes within the ModelGraph. They carry labels, weights, and node scopes so multi-objective training is easy to configure from a phase or experiment.
 
-### Training & Experiments
-- **`Experiment` class** encapsulates all training logic (via multiple `TrainingPhase` objects), ModelGraph and FeatureSet definition, and a `TrackingManager` that logs all configuration files and training, validation, and evaluation metrics for rapid and reproducible ML experimentation.
-- Each `TrainingPhase` defines training loop logic with early stopping, validation hooks, loss weighting, and optimizer configs.
-- **Multi-objective loss support** with configurable stage-level targets, sample-based loss functions, and weighted combinations.
-- **Config-driven experiments**: Every experiment is fully seriallizable and reproducible from a single configuration file.
-- **Built-in experiment tracking** via a `TrackingManager`, with optional integration into external managers like MLflow or other logging backends.
+### Experiment Phases
+- **`TrainPhase`** runs iterative training with your sampler schedule, losses, callbacks, and optimizer configuration.
+- **`FitPhase`** (single-pass) is ideal for algorithms that expect a one-shot `.fit()` (e.g., scikit-learn estimators) after upstream neural components are frozen.
+- **`EvalPhase`** executes forward passes and records losses/metrics on held-out splits without touching gradients.
+
+### Experiment Class
+- The **`Experiment`** binds FeatureSets, ModelGraph, and all phases. It owns execution order, logging, callbacks, and results objects so every run is reproducible. Execution strategies (e.g., cross validation) simply wrap an Experiment to replay the same plan across folds.
+
+### Serialization
+- A core focus of ModularML is reproducibility. To that end, all major classes (FeatureSets, ModelGraph, phases, experiments, losses, samplers, optimizers, callbacks) implement configuration/state serialization
+- All model definitions, training/sampling logic, evaluation, etc is structured under a single Experiment object, allowing for exporting and sharing via a single `.mml` file.
+
+### Callbacks & Checkpointing
+- Built-in **callbacks** (EarlyStopping, Evaluation + metrics, custom progress hooks) plug directly into Train/Fit/Eval phases, allowing for fully flexibile workflows while retaining a structured experiment API.  
+- **Checkpointing** can be attached at any major experiment or training execution step to persist model weights, optimizer states, FeatureSet transforms, and sampler cursors, making restarts seamless.
 
 
 
