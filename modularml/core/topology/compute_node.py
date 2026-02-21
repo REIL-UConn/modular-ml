@@ -1,3 +1,5 @@
+"""Abstract compute node definitions used in ModularML graphs."""
+
 from __future__ import annotations
 
 from abc import abstractmethod
@@ -18,10 +20,14 @@ TForward = TypeVar("TForward", Batch, RoleData, SampleData)
 
 class ComputeNode(GraphNode):
     """
-    Abstract base class for computational nodes in a ModelGraph.
+    Abstract computational node within a :class:`ModelGraph`.
 
-    Implements:
-        - Forwardable[TForward]
+    Attributes:
+        input_shapes (dict[str, tuple[int, ...]]): Registered input shape
+            metadata keyed by reference label.
+        output_shapes (dict[str, tuple[int, ...]]): Registered output
+            shape metadata keyed by reference label.
+
     """
 
     def __init__(
@@ -38,19 +44,19 @@ class ComputeNode(GraphNode):
         register: bool = True,
     ):
         """
-        Initialize a ComputeNode.
+        Initialize the compute node with upstream/downstream refs.
 
         Args:
             label (str):
-                Unique identifier for this node.
+                Unique identifier for the node.
             upstream_refs (ExperimentNodeReference | list[ExperimentNodeReference] | None):
-                References of upstream connections.
+                Upstream references feeding the node.
             downstream_refs (ExperimentNodeReference | list[ExperimentNodeReference] | None):
-                References of downstream connections.
-            node_id (str, optional):
-                Used only for de-serialization.
-            register (bool, optional):
-                Used only for de-serialization.
+                Downstream references that this node feeds.
+            node_id (str | None):
+                Optional ID used during deserialization.
+            register (bool):
+                Whether to register the node when created.
 
         """
         super().__init__(
@@ -65,6 +71,13 @@ class ComputeNode(GraphNode):
     # Representation
     # ================================================
     def _summary_rows(self) -> list[tuple]:
+        """
+        Return summary rows including shape metadata.
+
+        Returns:
+            list[tuple]: Summary name/value pairs for display helpers.
+
+        """
         return [
             ("label", self.label),
             ("upstream_refs", [f"{r!r}" for r in self._upstream_refs]),
@@ -74,6 +87,13 @@ class ComputeNode(GraphNode):
         ]
 
     def __repr__(self):
+        """
+        Return developer-friendly representation for debugging.
+
+        Returns:
+            str: String describing critical connection metadata.
+
+        """
         return (
             f"ComputeNode(label='{self.label}', "
             f"upstream_refs={self._upstream_refs}, "
@@ -81,6 +101,13 @@ class ComputeNode(GraphNode):
         )
 
     def __str__(self):
+        """
+        Return the node label for readable output.
+
+        Returns:
+            str: Readable label for :class:`ComputeNode`.
+
+        """
         return f"ComputeNode('{self.label}')"
 
     # ================================================
@@ -89,10 +116,10 @@ class ComputeNode(GraphNode):
     @property
     def allows_upstream_connections(self) -> bool:
         """
-        Whether this node allows incoming (upstream) connections.
+        Return True because compute nodes accept upstream data.
 
         Returns:
-            bool: True if input connections are allowed.
+            bool: True because compute nodes always have inputs.
 
         """
         return True
@@ -100,10 +127,10 @@ class ComputeNode(GraphNode):
     @property
     def allows_downstream_connections(self) -> bool:
         """
-        Whether this node allows outgoing (downstream) connections.
+        Return True because compute nodes emit downstream data.
 
         Returns:
-            bool: True if output connections are allowed.
+            bool: True because compute nodes always emit outputs.
 
         """
         return True
@@ -119,11 +146,25 @@ class ComputeNode(GraphNode):
         fmt: DataFormat = DataFormat.NUMPY,
     ) -> dict[ExperimentNodeReference, TForward]:
         """
-        Retrieves data for this ModelNode at the current execution step.
+        Resolve upstream data for the current execution step.
+
+        Args:
+            inputs (dict[tuple[str, FeatureSetReference], TForward]):
+                Mapping of :class:`FeatureSetReference` instances produced
+                by samplers.
+            outputs (dict[str, TForward]): Cached outputs from upstream
+                compute nodes.
+            fmt (DataFormat): Output format requested when materializing
+                :class:`BatchView` instances.
 
         Returns:
-            dict[ExperimentNodeReference, TForward]:
-                Forwardable data keyed by each upstream_ref of this node.
+            dict[ExperimentNodeReference, TForward]: Data keyed by
+                upstream references.
+
+        Raises:
+            TypeError: If :class:`FeatureSetReference` values are invalid.
+            RuntimeError: If upstream data cannot be located for a
+                reference.
 
         """
         input_data = {}
@@ -176,17 +217,15 @@ class ComputeNode(GraphNode):
         **kwargs,
     ) -> TForward:
         """
-        Perform forward computation through the node.
+        Perform the forward computation for this node.
 
         Args:
             inputs (dict[ExperimentNodeReference, TForward]):
-                Input data to perform a forward pass on.
-            **kwargs: Additional key-word arguments specific to each subclass.
+                Input data keyed by upstream reference.
+            **kwargs: Additional subclass-specific keyword arguments.
 
         Returns:
-            TForward:
-                The output data matches the type of the input values.
-                E.g, dict[ref, SampleData] returns SampleData
+            TForward: Output of the computation.
 
         """
         return self._forward_impl(inputs=inputs, **kwargs)
@@ -197,7 +236,20 @@ class ComputeNode(GraphNode):
         *,
         inputs: dict[ExperimentNodeReference, TForward],
         **kwargs,
-    ) -> TForward: ...
+    ) -> TForward:
+        """
+        Implement the backend-specific forward logic.
+
+        Args:
+            inputs (dict[ExperimentNodeReference, TForward]):
+                Inputs resolved through :meth:`get_input_data`.
+            **kwargs: Backend-specific options required by subclasses.
+
+        Returns:
+            TForward: Forward result produced by the node implementation.
+
+        """
+        ...
 
     def build(
         self,
@@ -205,7 +257,17 @@ class ComputeNode(GraphNode):
         output_shape: tuple[int, ...] | None = None,
         **kwargs,
     ):
-        """Build entry point used by ModelGraph."""
+        """
+        Build entry point used by :class:`ModelGraph`.
+
+        Args:
+            input_shapes (dict[ExperimentNodeReference, tuple[int, ...]] | None):
+                Shapes of upstream tensors.
+            output_shape (tuple[int, ...] | None):
+                Expected downstream tensor shape.
+            **kwargs: Implementation-specific keyword arguments.
+
+        """
         self._build_impl(
             input_shapes=input_shapes,
             output_shape=output_shape,
@@ -220,21 +282,19 @@ class ComputeNode(GraphNode):
         **kwargs,
     ):
         """
-        Construct the internal logic of this node using the provided input and output shapes.
+        Construct node internals using provided shapes.
 
         Args:
             input_shapes (dict[ExperimentNodeReference, tuple[int, ...]] | None):
-                Shapes of data feeding into this node.
-                Used to initialize models or internal transformation logic.
+                Shapes of inputs feeding this node.
             output_shape (tuple[int, ...] | None):
-                Shape of data expected to exit this node.
-                May be used to constrain or validate internal shape inference.
-            **kwargs: Additional key-word arguments specific to each subclass.
+                Expected shape of data produced by this node.
+            **kwargs: Additional keyword arguments specific to each
+                subclass.
 
-        Notes:
-            - Nodes with only a single input can simplify this logic.
-            - This method should initialize any backend-specific model components.
-            - If model or shape construction fails, this method should raise an error.
+        Raises:
+            RuntimeError: Implementations should raise errors when model
+                or shape construction fails.
 
         """
 
@@ -242,22 +302,35 @@ class ComputeNode(GraphNode):
     @abstractmethod
     def is_built(self) -> bool:
         """
-        Whether this node has been fully built (e.g., model instantiated).
+        Whether this node has been fully built.
 
         Returns:
-            bool: True if the node is fully built and ready for use.
+            bool: True if the internal backend model is ready to use.
 
         """
 
     @property
     @abstractmethod
     def output_shape(self) -> tuple[int, ...]:
-        """Shape of data produced by this node."""
+        """
+        Shape of data produced by this node.
+
+        Returns:
+            tuple[int, ...]: Output tensor shape.
+
+        """
 
     # ================================================
     # Configurable
     # ================================================
     def get_config(self) -> dict[str, Any]:
+        """
+        Return the serialized configuration for this node.
+
+        Returns:
+            dict[str, Any]: Configuration suitable for :meth:`from_config`.
+
+        """
         cfg = super().get_config()
         cfg["graph_node_type"] = "ComputeNode"
         return cfg
@@ -269,6 +342,22 @@ class ComputeNode(GraphNode):
         *,
         register: bool = True,
     ) -> ComputeNode:
+        """
+        Recreate a :class:`ComputeNode` from serialized config.
+
+        Args:
+            config (dict[str, Any]):
+                Serialized node data produced by :meth:`get_config`.
+            register (bool):
+                Whether to register inside the active :class:`ExperimentContext`.
+
+        Returns:
+            ComputeNode: Reconstructed node instance.
+
+        Raises:
+            ValueError: If the config lacks the proper node type marker.
+
+        """
         if (
             "graph_node_type" not in config
             or config["graph_node_type"] != "ComputeNode"

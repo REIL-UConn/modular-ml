@@ -1,3 +1,5 @@
+"""Protocol interfaces implemented by topology nodes."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
@@ -39,7 +41,8 @@ class Forwardable(Protocol[T]):
         Args:
             inputs (dict[ExperimentNodeReference, T]):
                 Input data to perform a forward pass on.
-            **kwargs: Additional key-word arguments specific to each subclass.
+            **kwargs: Additional keyword arguments specific to each
+                implementation.
 
         Returns:
             T:
@@ -56,11 +59,19 @@ class Forwardable(Protocol[T]):
         fmt: DataFormat = DataFormat.NUMPY,
     ) -> dict[ExperimentNodeReference, T]:
         """
-        Retrieves input data for this node at the current execution step.
+        Retrieve input data for this node at the current execution step.
+
+        Args:
+            inputs (dict[tuple[str, FeatureSetReference], T]): Materialized
+                data sourced from :class:`FeatureSetReference` instances.
+            outputs (dict[str, T]): Cached results from upstream nodes
+                keyed by :attr:`GraphNode.node_id`.
+            fmt (DataFormat): Output format requested when resolving
+                :class:`BatchView` objects.
 
         Returns:
-            dict[ExperimentNodeReference, T]:
-                Data keyed by each upstream_ref of this node.
+            dict[ExperimentNodeReference, T]: Data keyed by each upstream
+                reference of this node.
 
         """
         ...
@@ -77,7 +88,19 @@ class Evaluable(Forwardable[T], Protocol):
         self,
         ctx: ExecutionContext,
         losses: list[AppliedLoss] | None = None,
-    ) -> None: ...
+    ) -> None:
+        """
+        Run evaluation logic for the node.
+
+        Args:
+            ctx (ExecutionContext):
+                Execution context containing batch data and intermediate caches.
+            losses (list[AppliedLoss] | None):
+                Loss functions evaluated during the step. When omitted, only
+                forward outputs are materialized.
+
+        """
+        ...
 
 
 # ================================================
@@ -99,18 +122,43 @@ class Trainable(Evaluable[T], Protocol):
         ...
 
     def freeze(self, *args, **kwargs):
-        """Freezes the trainable state (prevents training updates)."""
+        """
+        Freeze the trainable state to disable gradient updates.
+
+        Args:
+            *args: Positional arguments forwarded to implementations.
+            **kwargs: Keyword arguments forwarded to implementations.
+
+        """
         ...
 
     def unfreeze(self, *args, **kwargs):
-        """Unfreezes the trainable state (allows training updates)."""
+        """
+        Unfreeze the trainable state to enable gradient updates.
+
+        Args:
+            *args: Positional arguments forwarded to implementations.
+            **kwargs: Keyword arguments forwarded to implementations.
+
+        """
         ...
 
     def train_step(
         self,
         ctx: ExecutionContext,
         losses: list[AppliedLoss],
-    ) -> None: ...
+    ) -> None:
+        """
+        Execute a full training step including loss/optimizer updates.
+
+        Args:
+            ctx (ExecutionContext):
+                Execution context that supplies batches, samplers, and caches.
+            losses (list[AppliedLoss]):
+                Loss objects to evaluate and aggregate during the step.
+
+        """
+        ...
 
 
 # ================================================
@@ -132,15 +180,40 @@ class Fittable(Forwardable[T], Protocol):
         ...
 
     def freeze(self, *args, **kwargs):
-        """Freezes the fittable state (prevents fitting updates)."""
+        """
+        Freeze the fittable state to prevent fit updates.
+
+        Args:
+            *args: Positional arguments forwarded to implementations.
+            **kwargs: Keyword arguments forwarded to implementations.
+
+        """
         ...
 
     def unfreeze(self, *args, **kwargs):
-        """Unfreezes the fittable state (allows fitting updates)."""
+        """
+        Unfreeze the fittable state to allow fit updates.
+
+        Args:
+            *args: Positional arguments forwarded to implementations.
+            **kwargs: Keyword arguments forwarded to implementations.
+
+        """
         ...
 
     def fit_step(
         self,
         ctx: ExecutionContext,
         losses: list[AppliedLoss] | None = None,
-    ) -> None: ...
+    ) -> None:
+        """
+        Execute a fitting iteration for batch-oriented estimators.
+
+        Args:
+            ctx (ExecutionContext):
+                Execution context with current batch.
+            losses (list[AppliedLoss] | None):
+                Optional loss functions to compute once fitting completes.
+
+        """
+        ...

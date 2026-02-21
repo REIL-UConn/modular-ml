@@ -1,3 +1,5 @@
+"""Base implementation for merge nodes inside ModularML model graphs."""
+
 from __future__ import annotations
 
 from abc import abstractmethod
@@ -32,22 +34,20 @@ logger = get_logger("MergeNode")
 
 class MergeNode(ComputeNode):
     """
-    Base class for merging multiple upstream nodes in a model graph.
+    Base class for nodes that merge multiple upstream outputs.
 
     Description:
-        A MergeNode represents a node in the model graph that takes multiple upstream
-        nodes and merges their outputs into a single output. This class serves as an
-        abstract base for concrete merging strategies such as concatenation, averaging,
-        or summation.
+        Subclasses implement :meth:`apply_merge` to define how the input
+        tensors are combined (for example, concatenation, averaging, or
+        summation).
 
-        Subclasses must implement the `apply_merge()` method, which defines how multiple
-        input tensors are combined into a single output tensor.
-
-    Example:
-    ```python
-        class MyConcatStage(MergeNode):
-            def apply_merge(self, values): ...
-    ```
+    Attributes:
+        _output_shape (tuple[int, ...] | None): Cached merged output shape
+            without the batch dimension.
+        _input_shapes (dict[ExperimentNodeReference, tuple[int, ...]] | None):
+            Shapes of each upstream input without the batch dimension.
+        _built (bool): Flag indicating whether shape inference completed.
+        _backend (Backend | None): Backend expected by merge operations.
 
     """
 
@@ -61,22 +61,21 @@ class MergeNode(ComputeNode):
         register: bool = True,
     ):
         """
-        Initialize a MergeNode.
+        Initialize the merge node and normalize upstream references.
 
         Args:
-            label (str):
-                Unique identifier for this node.
+            label (str): Unique identifier for this node.
             upstream_refs (list[ExperimentNode | ExperimentNodeReference]):
-                List of upstream node references from which inputs will be received.
-                Accepts ExperimentNode instances (auto-converted to references) or
-                ExperimentNodeReference objects directly.
-            backend (Backend, optional):
-                The backend to use for internally data merged.
-                Defaults to None.
-            node_id (str, optional):
-                Used only for de-serialization.
-            register (bool, optional):
-                Used only for de-serialization.
+                List of upstream nodes or references whose outputs will be
+                merged. :class:`FeatureSet` instances are automatically
+                converted to references.
+            backend (Backend | None): Backend used for merge operations.
+            node_id (str | None): Identifier used during deserialization.
+            register (bool): Whether to register the node with the active
+                :class:`ExperimentContext`.
+
+        Raises:
+            TypeError: If any upstream reference has an unsupported type.
 
         """
         # Clean up reference types
@@ -123,14 +122,15 @@ class MergeNode(ComputeNode):
     @property
     def input_shapes(self) -> dict[ExperimentNodeReference, tuple[int, ...]]:
         """
-        Shape of data from each input expected by this MergeNode.
+        Return per-input shapes without the batch dimension.
 
         Returns:
-            dict[ExperimentNodeReference, tuple[int, ...]]:
-                Input shapes keyed by upstream reference.
+            dict[ExperimentNodeReference, tuple[int, ...]]: Input shapes
+                keyed by upstream reference.
 
         Raises:
-            RuntimeError: If node has not been built yet.
+            RuntimeError: If the node has not been built or shapes are
+                missing.
 
         """
         if not self.is_built:
@@ -147,13 +147,7 @@ class MergeNode(ComputeNode):
 
     @property
     def backend(self) -> Backend | None:
-        """
-        Backend associated with this MergeNode.
-
-        Returns:
-            Backend | None: The backend, or None if not set.
-
-        """
+        """Return the backend declared for this merge operation."""
         return self._backend
 
     @abstractmethod
@@ -166,24 +160,19 @@ class MergeNode(ComputeNode):
         domain: str = DOMAIN_FEATURES,
     ) -> Any:
         """
-        Merge logic to be implemented by subclasses.
+        Merge tensors according to the subclass strategy.
 
         Args:
-            values (list[Any]):
-                A list of backend-specific tensors to be merged.
-            includes_batch_dim (bool):
-                Whether the input values have a batch dimension.
-                Defaults to True.
-            fmt (DataFormat | None):
-                The data format expected for the returned tensor. If None,
-                the data format will be inferred from the `backend` property.
-                Defaults to None.
-            domain (str, optional):
-                The domain in which the data belongs. This allows for domain-specific
-                merge logic (e.g., different concat axes for each domain).
+            values (list[Any]): Backend-specific tensors to merge.
+            includes_batch_dim (bool): Whether each tensor includes the
+                batch dimension.
+            fmt (DataFormat | None): Target data format. If None, inferred
+                from :attr:`backend`.
+            domain (str): Domain identifier (for example,
+                :data:`DOMAIN_FEATURES`) enabling domain-specific logic.
 
         Returns:
-            Any: Merged tensor.
+            Any: Merged tensor produced by the subclass.
 
         """
 
@@ -193,13 +182,14 @@ class MergeNode(ComputeNode):
     @property
     def output_shape(self) -> tuple[int, ...]:
         """
-        Shape of data produced by this MergeNode.
+        Return the merged output shape without the batch dimension.
 
         Returns:
-            tuple[int, ...]: Output shape after merging.
+            tuple[int, ...]: Output shape inferred during build.
 
         Raises:
-            RuntimeError: If node has not been built yet.
+            RuntimeError: If the node has not been built or the shape is
+                missing.
 
         """
         if not self.is_built:
@@ -216,13 +206,7 @@ class MergeNode(ComputeNode):
 
     @property
     def is_built(self) -> bool:
-        """
-        Whether the MergeNode has been built (i.e., shape inference completed).
-
-        Returns:
-            bool: True if built, False otherwise.
-
-        """
+        """Return True once shape inference has completed."""
         return self._built
 
     def _infer_output_shape(
@@ -232,19 +216,20 @@ class MergeNode(ComputeNode):
         includes_batch_dim: bool,
     ) -> tuple[int, ...]:
         """
-        Infer the output shape based on input shapes from upstream nodes.
+        Infer output shape by running :meth:`apply_merge` on dummy data.
 
         Args:
             input_shapes (dict[ExperimentNodeReference, tuple[int, ...]]):
-                Input shapes from upstream connections.
-            includes_batch_dim (bool):
-                Whether the shape values provided in `input_shapes` include the batch
-                dimension or not.
+                Shapes from upstream connections.
+            includes_batch_dim (bool): Whether the provided shapes include
+                the batch dimension.
 
         Returns:
-            tuple[int, ...]:
-                The inferred output shape. The returned tuple **does not** include
-                the batch dimension.
+            tuple[int, ...]: Output shape without the batch dimension.
+
+        Raises:
+            TypeError: If :meth:`apply_merge` returns a non-tensor-like
+                object without a ``shape`` attribute.
 
         """
         # Get input tuples sorted by ref for reproducibility
@@ -295,22 +280,18 @@ class MergeNode(ComputeNode):
         **kwargs,  # noqa: ARG002
     ):
         """
-        Construct the internal logic of this node using the provided input and output shapes.
+        Build merge metadata based on upstream shapes.
 
         Args:
             input_shapes (dict[ExperimentNodeReference, tuple[int, ...]]):
-                Shapes of data feeding into this node.
-                Used to initialize internal merge logic.
-            includes_batch_dim (bool):
-                Whether the shape values provided in `input_shapes` include the batch
-                dimension or not.
-            output_shape (tuple[int, ...] | None):
-                Shape of data expected to exit this node.
-                May be used to constrain or validate internal shape inference.
-            backend (Backend | None):
-                The backend expected to be used by this MergeNode. If None,
-                any backend can be used.
-            **kwargs: Additional key-word arguments specific to each subclass.
+                Input shapes keyed by upstream references.
+            includes_batch_dim (bool): Whether provided shapes include the
+                batch dimension.
+            output_shape (tuple[int, ...] | None): Expected output shape
+                without batch dimension; used for validation.
+            backend (Backend | None): Backend hint applied to
+                :attr:`_backend` if provided.
+            **kwargs: Additional subclass-specific parameters.
 
         """
         # Set backend, if provided
@@ -349,17 +330,15 @@ class MergeNode(ComputeNode):
         fmt: DataFormat,
     ) -> SampleData:
         """
-        Merge a list of SampleData objects across all domains.
+        Merge :class:`SampleData` instances across all domains.
 
         Args:
-            data (list[SampleData]):
-                Input SampleData objects to merge.
-            fmt (DataFormat):
-                Data format for features and targets. Tags and sample_uuids
-                always use NUMPY.
+            data (list[SampleData]): Objects to merge.
+            fmt (DataFormat): Format used for features and targets; tags
+                and identifiers always use :data:`DataFormat.NUMPY`.
 
         Returns:
-            SampleData: Merged output.
+            SampleData: Newly merged sample data.
 
         """
         merged_attrs: dict[str, Any] = {}
@@ -404,16 +383,17 @@ class MergeNode(ComputeNode):
         fmt: DataFormat,
     ) -> RoleData:
         """
-        Merge a list of RoleData objects.
+        Merge :class:`RoleData` instances role-by-role.
 
         Args:
-            rds (list[RoleData]):
-                Input RoleData objects to merge.
-            fmt (DataFormat):
-                Data format for features and targets.
+            rds (list[RoleData]): Role data objects to merge.
+            fmt (DataFormat): Requested feature/target format.
 
         Returns:
-            RoleData: Merged output.
+            RoleData: Merged role data.
+
+        Raises:
+            ValueError: If role sets differ across inputs.
 
         """
         ref = rds[0]
@@ -450,18 +430,16 @@ class MergeNode(ComputeNode):
         **kwargs,  # noqa: ARG002
     ) -> TForward:
         """
-        Performs a forward pass by merging all upstream inputs.
+        Merge inputs after ensuring the node has been built.
 
         Args:
-            x (list[TForward]):
-                Input data from upstream nodes. All inputs must have the same
-                value data type.
-            **kwargs:
-                Additional keyword arguments passed to `apply_merge`.
+            x (list[TForward]): Inputs from upstream nodes; all items must
+                share the same type.
+            **kwargs: Additional keyword arguments passed to
+                :meth:`apply_merge`.
 
         Returns:
-            TForward:
-                Merged output matching the input type (SampleData, RoleData, or Batch).
+            TForward: Merged result matching the input type.
 
         """
         # Ensure built
@@ -572,18 +550,16 @@ class MergeNode(ComputeNode):
         **kwargs,  # noqa: ARG002
     ) -> TForward:
         """
-        Perform forward pass by merging all upstream inputs.
+        Merge data keyed by upstream references during execution.
 
         Args:
-            inputs (dict[ExperimentNodeReference, TForward]):
-                Input data from upstream nodes, keyed by reference.
-                All inputs must have the same value data type.
-            **kwargs:
-                Additional keyword arguments passed to `apply_merge`.
+            inputs (dict[ExperimentNodeReference, TForward]): Input data
+                keyed by upstream reference.
+            **kwargs: Additional keyword arguments propagated to
+                :meth:`apply_merge`.
 
         Returns:
-            TForward:
-                Merged output matching the input type (SampleData, RoleData, or Batch).
+            TForward: Merged output matching the input type.
 
         """
         # Ensure built

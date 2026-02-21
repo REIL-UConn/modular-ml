@@ -1,3 +1,5 @@
+"""Model node implementations within ModularML model graphs."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, overload
@@ -35,14 +37,14 @@ torch = check_torch()
 
 class ModelNode(ComputeNode):
     """
-    A ModelNode represents a single learnable or non-learnable transformation block in a ModelGraph.
+    Single learnable or static stage inside a :class:`ModelGraph`.
 
-    It wraps a backend-specific model (e.g., PyTorch, TensorFlow, or Scikit-learn) and optionally includes an Optimizer.
-    A ModelNode receives data from a single input source (FeatureSet or another ModelNode), and produces an output
-    which can be consumed by downstream stages or used directly for loss computation.
+    Attributes:
+        _model (BaseModel): Wrapped backend model implementation.
+        _optimizer (Optimizer | None): Optional optimizer coordinating
+            gradient steps.
+        _freeze (bool): Flag indicating whether training is disabled.
 
-    If an optimizer is attached, `train_step()` and `eval_step()` can be called directly for this stage. Otherwise,
-    training and evaluation should be managed by a parent ModelGraph that handles multiple stages.
     """
 
     def __init__(
@@ -114,10 +116,24 @@ class ModelNode(ComputeNode):
 
     @property
     def model(self) -> BaseModel:
+        """
+        Return the wrapped backend model instance.
+
+        Returns:
+            BaseModel: Backend-specific implementation.
+
+        """
         return self._model
 
     @property
     def input_shape(self) -> tuple[int, ...]:
+        """
+        Return the model's input tensor shape.
+
+        Returns:
+            tuple[int, ...]: Expected feature tensor shape.
+
+        """
         return self.model.input_shape
 
     # ================================================
@@ -125,10 +141,24 @@ class ModelNode(ComputeNode):
     # ================================================
     @property
     def output_shape(self) -> tuple[int, ...]:
+        """
+        Return the model's output tensor shape.
+
+        Returns:
+            tuple[int, ...]: Output tensor shape.
+
+        """
         return self.model.output_shape
 
     @property
     def max_upstream_refs(self) -> int:
+        """
+        Return the maximum number of allowed upstream references.
+
+        Returns:
+            int: Always 1 because :class:`ModelNode` has a single input.
+
+        """
         return 1
 
     @property
@@ -150,6 +180,23 @@ class ModelNode(ComputeNode):
         force: bool = False,
         **kwargs,  # noqa: ARG002
     ):
+        """
+        Construct the wrapped model using upstream/downstream shapes.
+
+        Args:
+            input_shapes (dict[ExperimentNodeReference, tuple[int, ...]] | None):
+                Shapes of upstream tensors; must contain a single entry.
+            output_shape (tuple[int, ...] | None):
+                Expected output shape used to validate decoder layers.
+            force (bool):
+                Whether to rebuild even if already built.
+            **kwargs:
+                Additional subclass parameters (unused).
+
+        Raises:
+            ValueError: If multiple inputs are provided.
+
+        """
         if input_shapes is None:
             input_shape = None
         else:
@@ -168,6 +215,17 @@ class ModelNode(ComputeNode):
         )
 
     def _build_optimizer(self, *, force: bool = False):
+        """
+        Construct the optimizer once the model weights exist.
+
+        Args:
+            force (bool): Whether to rebuild even if already built.
+
+        Raises:
+            ValueError: If optimizer or model state is unavailable.
+            BackendNotSupportedError: If the backend is unknown.
+
+        """
         if self._optimizer is None:
             raise ValueError("Optimizer is None. Cannot build.")
         if not self.is_built:
@@ -201,7 +259,7 @@ class ModelNode(ComputeNode):
         force: bool = False,
     ):
         """
-        Build the ModelNode by initializing the underlying BaseModel and its optimizer.
+        Build the ModelNode by initializing the internal BaseModel and optimizer.
 
         Args:
             input_shape (tuple[int, ...] | None, optional):
@@ -209,9 +267,9 @@ class ModelNode(ComputeNode):
                 Defaults to None.
 
             output_shape (tuple[int, ...] | None, optional):
-                Output shape to construct this model with. If not provided, the BaseModel
-                must be capable of inferring it internally or during construction.
-                Defaults to None.
+                Output shape to construct this model with. If not provided, the
+                BaseModel must be capable of inferring it internally or during
+                construction. Defaults to None.
 
             force (bool, optional):
                 If model is already instantiated it will not be re-instantiated unless
@@ -238,10 +296,13 @@ class ModelNode(ComputeNode):
 
     @overload
     def forward_single(self, batch: Batch, **kwargs) -> Batch: ...
+
     @overload
     def forward_single(self, roles: RoleData, **kwargs) -> RoleData: ...
+
     @overload
     def forward_single(self, data: SampleData, **kwargs) -> SampleData: ...
+
     def forward_single(
         self,
         x: SampleData | RoleData | Batch,
@@ -295,6 +356,16 @@ class ModelNode(ComputeNode):
                 raise RuntimeError(msg) from e
 
         def _forward_sample_data(d: SampleData) -> SampleData:
+            """
+            Run backend-forward pass for a single :class:`SampleData`.
+
+            Args:
+                d (SampleData): Input sample bundle.
+
+            Returns:
+                SampleData: Output bundle preserving metadata.
+
+            """
             # Ensure SampleData is in expected backend (modified inplace)
             d.as_backend(self.backend)
 
@@ -339,6 +410,22 @@ class ModelNode(ComputeNode):
         inputs: dict[ExperimentNodeReference, TForward],
         **kwargs,
     ) -> TForward:
+        """
+        Delegate to :meth:`forward_single` after validating inputs.
+
+        Args:
+            inputs (dict[ExperimentNodeReference, TForward]): =
+                Single upstream tensor keyed by its reference.
+            **kwargs:
+                Extra arguments forwarded to :meth:`forward_single`.
+
+        Returns:
+            TForward: Batch or sample data emitted by the model.
+
+        Raises:
+            ValueError: If more than one input is supplied.
+
+        """
         if len(inputs) != 1:
             msg = (
                 f"{self.__class__.__name__} expects exactly one input. "
@@ -355,6 +442,13 @@ class ModelNode(ComputeNode):
     # Representation
     # ================================================
     def _summary_rows(self) -> list[tuple]:
+        """
+        Return tabular summary rows for logging output.
+
+        Returns:
+            list[tuple]: Key/value metadata about the node.
+
+        """
         return [
             ("label", self.label),
             ("upstream_ref", safe_cast_to_summary_rows(self.upstream_ref)),
@@ -377,6 +471,13 @@ class ModelNode(ComputeNode):
         ]
 
     def __repr__(self):
+        """
+        Return developer-friendly representation for debugging.
+
+        Returns:
+            str: String showing labels, model, optimizer, and backend.
+
+        """
         return (
             f"ModelNode(label='{self.label}', "
             f"upstream_refs={self._upstream_refs}, "
@@ -387,6 +488,13 @@ class ModelNode(ComputeNode):
         )
 
     def __str__(self):
+        """
+        Return human-readable identifier for logging.
+
+        Returns:
+            str: Node label formatted for readability.
+
+        """
         return f"ModelNode('{self.label}')"
 
     # ================================================
@@ -1007,6 +1115,13 @@ class ModelNode(ComputeNode):
     # Stateful
     # ================================================
     def get_state(self) -> dict[str, Any]:
+        """
+        Return serialized state for the node, model, and optimizer.
+
+        Returns:
+            dict[str, Any]: Snapshot captured for :meth:`set_state`.
+
+        """
         state = {
             "super": super().get_state(),
             "model": self._model.get_state(),
@@ -1018,6 +1133,13 @@ class ModelNode(ComputeNode):
         return state
 
     def set_state(self, state: dict[str, Any]) -> None:
+        """
+        Restore runtime state from :meth:`get_state` output.
+
+        Args:
+            state (dict[str, Any]): Serialized node data.
+
+        """
         # Set parent state first
         super().set_state(state["super"])
 

@@ -1,3 +1,5 @@
+"""Base graph node abstractions for ModularML model graphs."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -25,14 +27,20 @@ if TYPE_CHECKING:
 
 class GraphNode(ABC, ExperimentNode):
     """
-    Abstract base class for all nodes within a ModelGraph.
+    Abstract base class for nodes inside a :class:`ModelGraph`.
 
-    Each node is identified by a unique `label` and may have one or more upstream (input)
-    and downstream (output) connections. GraphNode defines the base interface for managing
-    these connections and enforcing structural constraints like maximum allowed connections.
+    Description:
+        Each node exposes upstream (input) and downstream (output)
+        references resolved through :class:`GraphNodeReference`. Subclasses
+        define shape contracts, supported edge counts, and execution
+        semantics.
 
-    Subclasses must define the `input_shape` and `output_shape` properties, as well as
-    whether the node supports incoming and outgoing edges.
+    Attributes:
+        _upstream_refs (list[GraphNodeReference]):
+            References to nodes that feed this node.
+        _downstream_refs (list[GraphNodeReference]):
+            References to nodes fed by this node.
+
     """
 
     def __init__(
@@ -45,22 +53,24 @@ class GraphNode(ABC, ExperimentNode):
         register: bool = True,
     ):
         """
-        Initialize a GraphNode with optional upstream and downstream connections.
+        Initialize a graph node and register upstream/downstream refs.
 
         Args:
             label (str):
                 Unique identifier for this node.
             upstream_refs (GraphNodeReference | list[GraphNodeReference] | None):
-                References of upstream connections.
+                Reference or list of references feeding this node.
             downstream_refs (GraphNodeReference | list[GraphNodeReference] | None):
-                References of downstream connections.
-            node_id (str, optional):
-                Used only for de-serialization.
-            register (bool, optional):
-                Used only for de-serialization.
+                Reference or list of references fed by this node.
+            node_id (str | None):
+                Identifier used during deserialization.
+            register (bool):
+                Whether to register the node with the active :class:`ExperimentContext`.
+                Set to False for deserialization.
 
         Raises:
-            TypeError: If `upstream_refs` or `downstream_refs` are not valid types.
+            TypeError: If `upstream_refs` or `downstream_refs` are not
+                :class:`GraphNodeReference` instances.
 
         """
         super().__init__(label=label, node_id=node_id, register=register)
@@ -73,6 +83,14 @@ class GraphNode(ABC, ExperimentNode):
         self._validate_connections()
 
     def _validate_connections(self):
+        """
+        Enforce connection limits and ensure references resolve.
+
+        Raises:
+            ValueError: If upstream or downstream references cannot be
+                resolved in the active :class:`ExperimentContext`.
+
+        """
         # Enforce max_upstream_refs
         if (
             self.max_upstream_refs is not None
@@ -110,6 +128,19 @@ class GraphNode(ABC, ExperimentNode):
             refs: list[GraphNodeReference],
             direction: Literal["upstream", "downstream"],
         ):
+            """
+            Ensure references resolve inside the active experiment context.
+
+            Args:
+                refs (list[GraphNodeReference]):
+                    References to validate.
+                direction (Literal['upstream', 'downstream']):
+                    Direction label used to format error messages.
+
+            Raises:
+                ValueError: If any reference fails to resolve.
+
+            """
             exp_ctx = ExperimentContext.get_active()
             failed: list[GraphNodeReference] = []
             for r in refs:
@@ -133,10 +164,10 @@ class GraphNode(ABC, ExperimentNode):
     @property
     def max_upstream_refs(self) -> int | None:
         """
-        Maximum number of upstream (input) nodes allowed.
+        Return the maximum number of upstream nodes allowed.
 
         Returns:
-            int | None: If None, unlimited upstream nodes are allowed.
+            int | None: Limit enforced for upstream references.
 
         """
         return None
@@ -144,10 +175,10 @@ class GraphNode(ABC, ExperimentNode):
     @property
     def max_downstream_refs(self) -> int | None:
         """
-        Maximum number of downstream (output) nodes allowed.
+        Return the maximum number of downstream nodes allowed.
 
         Returns:
-            int | None: If None, unlimited downstream nodes are allowed.
+            int | None: Limit enforced for downstream references.
 
         """
         return None
@@ -155,10 +186,15 @@ class GraphNode(ABC, ExperimentNode):
     @property
     def upstream_ref(self) -> GraphNodeReference | ExperimentNodeReference | None:
         """
-        Return the single upstream reference, if only one is allowed.
+        Return the upstream reference when only one connection exists.
+
+        Returns:
+            GraphNodeReference | ExperimentNodeReference | None:
+                Single upstream reference, if defined.
 
         Raises:
-            RuntimeError: If multiple upstream references are allowed.
+            RuntimeError: If multiple upstream connections are allowed
+                and :meth:`get_upstream_refs` should be used instead.
 
         """
         if self.max_upstream_refs == 1:
@@ -170,10 +206,14 @@ class GraphNode(ABC, ExperimentNode):
     @property
     def downstream_ref(self) -> GraphNodeReference | None:
         """
-        Return the single downstream reference, if only one is allowed.
+        Return the downstream reference when only one connection exists.
+
+        Returns:
+            GraphNodeReference | None: Single downstream reference.
 
         Raises:
-            RuntimeError: If multiple downstream references are allowed.
+            RuntimeError: If multiple downstream connections are allowed
+                and :meth:`get_downstream_refs` should be used instead.
 
         """
         if self.max_downstream_refs == 1:
@@ -186,6 +226,13 @@ class GraphNode(ABC, ExperimentNode):
     # Representation
     # ================================================
     def _summary_rows(self) -> list[tuple]:
+        """
+        Return key/value pairs used in textual summaries.
+
+        Returns:
+            list[tuple]: Metadata pairs showing labels and references.
+
+        """
         return [
             ("label", self.label),
             ("upstream_refs", [f"{r!r}" for r in self._upstream_refs]),
@@ -194,15 +241,42 @@ class GraphNode(ABC, ExperimentNode):
         ]
 
     def __repr__(self):
-        return f"GraphNode(label='{self.label}', upstream_refs={self._upstream_refs}, downstream_refs={self._downstream_refs})"
+        """
+        Return developer-friendly representation for debugging.
+
+        Returns:
+            str: String capturing label and referenced nodes.
+
+        """
+        return (
+            "GraphNode("
+            f"label='{self.label}', "
+            f"upstream_refs={self._upstream_refs}, "
+            f"downstream_refs={self._downstream_refs}"
+            ")"
+        )
 
     def __str__(self):
+        """
+        Return stringified label for logging.
+
+        Returns:
+            str: Node label formatted for readability.
+
+        """
         return f"GraphNode('{self.label}')"
 
     # ================================================
     # Referencing
     # ================================================
     def reference(self) -> GraphNodeReference:
+        """
+        Return a :class:`GraphNodeReference` targeting this node.
+
+        Returns:
+            GraphNodeReference: Reference pointing at this node.
+
+        """
         return GraphNodeReference(
             node_id=self.node_id,
             node_label=self.label,
@@ -216,13 +290,20 @@ class GraphNode(ABC, ExperimentNode):
         error_mode: ErrorMode = ErrorMode.RAISE,
     ) -> list[GraphNodeReference | ExperimentNodeReference]:
         """
-        Retrieve all upstream (input) references.
+        Return all upstream (input) references.
 
         Args:
-            error_mode (ErrorMode): Error handling strategy if input is invalid.
+            error_mode (ErrorMode):
+                Error handling policy when upstream connections are disallowed
+                or invalid.
 
         Returns:
-            list[GraphNodeReference | ExperimentNodeReference]: List of upstream connection references.
+            list[GraphNodeReference | ExperimentNodeReference]:
+                Upstream connection references.
+
+        Raises:
+            GraphNodeInputError: When upstream connections are disallowed
+                and `error_mode` requests an exception.
 
         """
         if not self.allows_upstream_connections:
@@ -239,13 +320,19 @@ class GraphNode(ABC, ExperimentNode):
         error_mode: ErrorMode = ErrorMode.RAISE,
     ) -> list[GraphNodeReference]:
         """
-        Retrieve all downstream (output) references.
+        Return all downstream (output) references.
 
         Args:
-            error_mode (ErrorMode): Error handling strategy if input is invalid.
+            error_mode (ErrorMode):
+                Error handling policy when downstream connections are disallowed
+                or invalid.
 
         Returns:
-            list[GraphNodeReference]: List of downstream connection references.
+            list[GraphNodeReference]: Downstream connection references.
+
+        Raises:
+            GraphNodeOutputError: When downstream connections are
+                disallowed and `error_mode` requests an exception.
 
         """
         if not self.allows_downstream_connections:
@@ -263,11 +350,13 @@ class GraphNode(ABC, ExperimentNode):
         error_mode: ErrorMode = ErrorMode.RAISE,
     ):
         """
-        Add a new upstream connection.
+        Add an upstream connection reference.
 
         Args:
-            ref (GraphNodeReference | ExperimentNodeReference): Reference of upstream connection.
-            error_mode (ErrorMode): Error handling mode for duplicates or limits.
+            ref (GraphNodeReference | ExperimentNodeReference):
+                Reference pointing to an upstream node.
+            error_mode (ErrorMode):
+                Error handling policy for duplicates or limit violations.
 
         """
         if (
@@ -312,11 +401,13 @@ class GraphNode(ABC, ExperimentNode):
         error_mode: ErrorMode = ErrorMode.RAISE,
     ):
         """
-        Remove an upstream reference.
+        Remove an upstream connection reference.
 
         Args:
-            ref (GraphNodeReference | ExperimentNodeReference): Upstream reference to remove.
-            error_mode (ErrorMode): Error handling mode if ref not found.
+            ref (GraphNodeReference | ExperimentNodeReference):
+                Reference to remove.
+            error_mode (ErrorMode):
+                Error handling policy if the reference does not exist.
 
         """
         if (
@@ -345,10 +436,11 @@ class GraphNode(ABC, ExperimentNode):
 
     def clear_upstream_refs(self, error_mode: ErrorMode = ErrorMode.RAISE):
         """
-        Remove all upstream connections.
+        Remove all upstream references after validating permissions.
 
         Args:
-            error_mode (ErrorMode): Error handling mode if disallowed.
+            error_mode (ErrorMode): Error handling policy when upstream
+                connections are disallowed.
 
         """
         if (
@@ -369,11 +461,13 @@ class GraphNode(ABC, ExperimentNode):
         error_mode: ErrorMode = ErrorMode.RAISE,
     ):
         """
-        Replace all upstream connections with a new list of references.
+        Replace upstream connections with a supplied list.
 
         Args:
-            upstream_refs (list[GraphNodeReference | ExperimentNodeReference]): List of new upstream references.
-            error_mode (ErrorMode): Error handling mode for violations.
+            upstream_refs (list[GraphNodeReference | ExperimentNodeReference]):
+                References applied in order.
+            error_mode (ErrorMode):
+                Error handling policy for violations.
 
         """
         self.clear_upstream_refs(error_mode=error_mode)
@@ -386,11 +480,13 @@ class GraphNode(ABC, ExperimentNode):
         error_mode: ErrorMode = ErrorMode.RAISE,
     ):
         """
-        Add a new downstream connection.
+        Add a downstream connection reference.
 
         Args:
-            ref (GraphNodeReference): Reference of downstream connection.
-            error_mode (ErrorMode): Error handling mode for duplicates or limits.
+            ref (GraphNodeReference):
+                Reference pointing to the downstream node.
+            error_mode (ErrorMode):
+                Error handling policy for duplicates or maximum limits.
 
         """
         if (
@@ -435,11 +531,13 @@ class GraphNode(ABC, ExperimentNode):
         error_mode: ErrorMode = ErrorMode.RAISE,
     ):
         """
-        Remove a downstream reference.
+        Remove a downstream connection reference.
 
         Args:
-            ref (GraphNodeReference): Downstream reference to remove.
-            error_mode (ErrorMode): Error handling mode if ref not found.
+            ref (GraphNodeReference):
+                Reference to remove.
+            error_mode (ErrorMode):
+                Error handling policy if the reference does not exist.
 
         """
         if (
@@ -468,10 +566,11 @@ class GraphNode(ABC, ExperimentNode):
 
     def clear_downstream_refs(self, error_mode: ErrorMode = ErrorMode.RAISE):
         """
-        Remove all downstream connections.
+        Remove all downstream references after validating permissions.
 
         Args:
-            error_mode (ErrorMode): Error handling mode if disallowed.
+            error_mode (ErrorMode):
+                Error handling policy when downstream connections are disallowed.
 
         """
         if (
@@ -492,11 +591,11 @@ class GraphNode(ABC, ExperimentNode):
         error_mode: ErrorMode = ErrorMode.RAISE,
     ):
         """
-        Replace all downstream connections with a new list of references.
+        Replace downstream connections with supplied references.
 
         Args:
-            downstream_refs (list[GraphNodeReference]): List of new downstream references.
-            error_mode (ErrorMode): Error handling mode for violations.
+            downstream_refs (list[str]): New downstream reference values.
+            error_mode (ErrorMode): Error handling policy for violations.
 
         """
         self.clear_downstream_refs(error_mode=error_mode)
@@ -509,30 +608,30 @@ class GraphNode(ABC, ExperimentNode):
     @property
     @abstractmethod
     def allows_upstream_connections(self) -> bool:
-        """
-        Whether this node allows incoming (upstream) connections.
-
-        Returns:
-            bool: True if input connections are allowed.
-
-        """
+        """Return True if this node supports upstream connections."""
 
     @property
     @abstractmethod
     def allows_downstream_connections(self) -> bool:
-        """
-        Whether this node allows outgoing (downstream) connections.
-
-        Returns:
-            bool: True if output connections are allowed.
-
-        """
+        """Return True if this node supports downstream connections."""
 
     # ================================================
     # Internal Helpers
     # ================================================
     def _handle_fatal_error(self, exc_class, message: str, error_mode: ErrorMode):
-        """Raise or suppress a fatal error based on the provided error mode."""
+        """
+        Raise or suppress fatal errors according to :class:`ErrorMode`.
+
+        Args:
+            exc_class (type[Exception]): Exception class to raise.
+            message (str): Error description.
+            error_mode (ErrorMode): Error handling policy.
+
+        Returns:
+            bool | None: False when the error should be ignored; otherwise
+                this method raises the exception.
+
+        """
         if error_mode == ErrorMode.IGNORE:
             return False
         if error_mode in (ErrorMode.WARN, ErrorMode.COERCE, ErrorMode.RAISE):
@@ -541,7 +640,22 @@ class GraphNode(ABC, ExperimentNode):
         raise NotImplementedError(msg)
 
     def _handle_benign_error(self, exc_class, message: str, error_mode: ErrorMode):
-        """Raise, warn, or ignore a non-fatal error based on the error mode."""
+        """
+        Handle recoverable errors according to :class:`ErrorMode`.
+
+        Args:
+            exc_class (type[Exception]):
+                Exception class to raise when escalation is required.
+            message (str):
+                Error description.
+            error_mode (ErrorMode):
+                Error handling policy.
+
+        Returns:
+            bool | None: False when the error was ignored or coerced;
+                otherwise the exception is raised.
+
+        """
         if error_mode == ErrorMode.RAISE:
             raise exc_class(message)
         if error_mode == ErrorMode.WARN:
@@ -564,39 +678,25 @@ class GraphNode(ABC, ExperimentNode):
         stream: str = STREAM_DEFAULT,
     ) -> InputBinding:
         """
-        Create an InputBinding for an input connection to this node.
+        Create an :class:`InputBinding` targeting this node.
 
         Args:
-            sampler (BaseSampler):
-                A sampler to use to generate batches from the upstream FeatureSet
-                (e.g., random batches, contrastive roles, paired samples).
-                Required if this binding is for a TrainPhase.
-
+            sampler (BaseSampler | None):
+                Sampler used for training bindings. Required for training phases
+                and omitted for evaluation bindings.
             upstream (FeatureSet | FeatureSetView | str | None):
-                Identifies which upstream FeatureSet connection of this node this
-                binding applies to. Only required when a node has multiple
-                upstream FeatureSets (needed to disambiguate which input is being
-                bound).
-                Accepted values:
-                - FeatureSet instance
-                - FeatureSetView instance
-                - FeatureSet node ID or label (str)
-                - None, only if this node has exactly one upstream FeatureSet
-
-            split (str, optional):
-                Optional split name of the upstream FeatureSet (e.g. "train", "val").
-                If provided, only rows from this split are sampled.
-                If None, the entire FeatureSet is used.
-
-            stream (str, optional):
-                Output stream name from the sampler to feed into this node.
-                Required only if the sampler produces multiple streams.
-                Defaults to STREAM_DEFAULT.
+                Upstream FeatureSet identifier. Required when multiple upstream
+                FeatureSets exist; a label, :class:`FeatureSet`, or
+                :class:`FeatureSetView` may be supplied.
+            split (str | None):
+                Optional split name (for example, `train`). When omitted, the full
+                FeatureSet is used.
+            stream (str):
+                Sampler stream name to consume when the sampler outputs multiple
+                streams.
 
         Returns:
-            InputBinding:
-                A fully specified training InputBinding that can be passed directly
-                to an ExperimentPhase.
+            InputBinding: Binding configured for training or evaluation.
 
         """
         if sampler is None:
@@ -617,6 +717,13 @@ class GraphNode(ABC, ExperimentNode):
     # Configurable
     # ================================================
     def get_config(self) -> dict[str, Any]:
+        """
+        Return configuration for reconstructing the graph node.
+
+        Returns:
+            dict[str, Any]: Serialized representation of the node.
+
+        """
         cfg = super().get_config()
         cfg.update(
             {
@@ -628,6 +735,22 @@ class GraphNode(ABC, ExperimentNode):
 
     @classmethod
     def from_config(cls, config: dict[str, Any], *, register: bool = True) -> GraphNode:
+        """
+        Instantiate a graph node or subclass from serialized config.
+
+        Args:
+            config (dict[str, Any]):
+                Serialized configuration previously produced by :meth:`get_config`.
+            register (bool):
+                Whether to register the node with the active :class:`ExperimentContext`.
+
+        Returns:
+            GraphNode: Reconstructed node (or subclass instance).
+
+        Raises:
+            ValueError: If an unknown graph node subclass is requested.
+
+        """
         # Create GraphNode instance if subclass not specified
         if "graph_node_type" not in config:
             return cls(register=register, **config)
@@ -651,6 +774,13 @@ class GraphNode(ABC, ExperimentNode):
     # Stateful
     # ================================================
     def get_state(self) -> dict[str, Any]:
+        """
+        Return state snapshot capturing super state and references.
+
+        Returns:
+            dict[str, Any]: State data used by :meth:`set_state`.
+
+        """
         state = {
             "super": super().get_state(),
             "upstream_refs": self._upstream_refs,
@@ -659,6 +789,14 @@ class GraphNode(ABC, ExperimentNode):
         return state
 
     def set_state(self, state: dict[str, Any]):
+        """
+        Restore node state from :meth:`get_state` output.
+
+        Args:
+            state (dict[str, Any]):
+                Serialized state previously produced by :meth:`get_state`.
+
+        """
         super().set_state(state["super"])
         self._upstream_refs = state["upstream_refs"]
         self._downstream_refs = state["downstream_refs"]
