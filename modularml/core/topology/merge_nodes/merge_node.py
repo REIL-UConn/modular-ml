@@ -641,3 +641,51 @@ class MergeNode(ComputeNode):
 
     def __str__(self):
         return f"MergeNode('{self.label}')"
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return configuration details required to reconstruct this callback.
+
+        Returns:
+            dict[str, Any]:
+                Configuration used to reconstruct the callback.
+                Keys must be strings.
+
+        """
+        cfg = super().get_config()
+        cfg.update(
+            {
+                "output_shape": self._output_shape,
+                "input_shapes": self._input_shapes,
+                "is_built": self._built,
+                "backend": self._backend,
+            },
+        )
+        return cfg
+
+    @classmethod
+    def from_config(cls, config: dict) -> MergeNode:
+        """
+        Construct a callback from a configuration dictionary.
+
+        Args:
+            config (dict[str, Any]):
+                Configuration details. Keys must be strings.
+
+        Returns:
+            Callback: Reconstructed callback.
+
+        """
+        cb_cls_name = config.get("merge_node_type")
+        if cb_cls_name == "ConcatNode":
+            from modularml.core.topology.merge_nodes.concat_node import ConcatNode
+
+            return ConcatNode.from_config(config=config)
+
+        msg = (
+            f"Unsupported MergeNode class for parent class construction: {cb_cls_name}."
+        )
+        raise ValueError(msg)

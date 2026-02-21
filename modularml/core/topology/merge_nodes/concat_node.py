@@ -10,6 +10,7 @@ from modularml.core.data.schema_constants import (
     DOMAIN_TAGS,
     DOMAIN_TARGETS,
 )
+from modularml.core.topology.merge_nodes.merge_node import MergeNode
 from modularml.core.topology.merge_nodes.merge_strategy import MergeStrategy
 from modularml.utils.data.conversion import convert_to_format
 from modularml.utils.data.data_format import (
@@ -22,8 +23,6 @@ from modularml.utils.data.data_format import (
 from modularml.utils.environment.optional_imports import ensure_tensorflow, ensure_torch
 from modularml.utils.logging.warnings import warn
 from modularml.utils.nn.padding import PadMode, map_pad_mode_to_backend
-
-from .merge_node import MergeNode
 
 if TYPE_CHECKING:
     from modularml.core.data.sample_data import SampleData
@@ -666,3 +665,100 @@ class ConcatNode(MergeNode):
                     merged_attrs[attr] = selected
 
         return SampleData(data=merged_attrs, kind="output")
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return configuration details required to reconstruct this callback.
+
+        Returns:
+            dict[str, Any]:
+                Configuration used to reconstruct the callback.
+                Keys must be strings.
+
+        """
+        from modularml.core.references.experiment_reference import (
+            ExperimentNodeReference,
+        )
+
+        def _get_strategy_cfg(arg) -> dict[str, Any]:
+            strat_cfg = {
+                "type": None,
+                "value": None,
+            }
+            if isinstance(arg, MergeStrategy):
+                strat_cfg["type"] = "MergeStrategy"
+                strat_cfg["value"] = arg.value
+            elif isinstance(arg, ExperimentNodeReference):
+                strat_cfg["type"] = "ExperimentNodeReference"
+                strat_cfg["value"] = arg.get_config()
+            else:
+                strat_cfg["type"] = "none"
+                strat_cfg["value"] = arg
+            return strat_cfg
+
+        cfg = super().get_config()
+        cfg.update(
+            {
+                "merge_node_type": self.__class__.__qualname__,
+                "concat_axis": self.concat_axis,
+                "target_strategy": _get_strategy_cfg(self.target_strategy),
+                "tags_strategy": _get_strategy_cfg(self.tags_strategy),
+                "pad_inputs": self.pad_inputs,
+                "pad_mode": self.pad_mode.value,
+                "pad_value": self.pad_value,
+            },
+        )
+        return cfg
+
+    @classmethod
+    def from_config(cls, config: dict) -> MergeNode:
+        """
+        Construct a callback from a configuration dictionary.
+
+        Args:
+            config (dict[str, Any]):
+                Configuration details. Keys must be strings.
+
+        Returns:
+            Callback: Reconstructed callback.
+
+        """
+        from modularml.core.references.experiment_reference import (
+            ExperimentNodeReference,
+        )
+
+        def _decode_strategy_cfg(
+            strat_cfg,
+        ) -> int | str | ExperimentNodeReference | MergeStrategy:
+            strat_type = strat_cfg.get("type")
+            strat_value = strat_cfg.get("value")
+            if strat_type == "none":
+                return strat_value
+            if strat_type == "MergeStrategy":
+                return MergeStrategy(value=strat_value)
+            if strat_type == "ExperimentNodeReference":
+                return ExperimentNodeReference.from_config(strat_value)
+
+            msg = "Invalid merge strategy config."
+            raise ValueError(msg)
+
+        cb_cls_name = config.get("merge_node_type")
+        if cb_cls_name != cls.__qualname__:
+            msg = f"Invalid config for {cls.__qualname__}."
+            raise ValueError(msg)
+
+        return cls(
+            label=config["label"],
+            upstream_refs=config["upstream_refs"],
+            concat_axis=config["concat_axis"],
+            concat_axis_targets=_decode_strategy_cfg(config["target_strategy"]),
+            concat_axis_tags=_decode_strategy_cfg(config["tags_strategy"]),
+            pad_inputs=config["pad_inputs"],
+            pad_mode=config["pad_mode"],
+            pad_value=config["pad_value"],
+            node_id=config.get("node_id"),
+            register=config.get("register", True),
+        )
