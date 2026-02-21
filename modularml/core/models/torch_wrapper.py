@@ -1,3 +1,5 @@
+"""Wrappers for integrating PyTorch modules with ModularML."""
+
 from __future__ import annotations
 
 import inspect
@@ -19,11 +21,20 @@ if TYPE_CHECKING:
 
 class TorchModelWrapper(BaseModel, torch.nn.Module):
     """
-    Wraps an arbitrary PyTorch model (instance or class) into a ModularML BaseModel.
+    Wrap an arbitrary :class:`torch.nn.Module` into :class:`BaseModel`.
 
-    Supports:
-    - Eager wrapping of an instantiated torch.nn.Module
-    - Lazy construction from (model_class, model_kwargs)
+    Attributes:
+        model (torch.nn.Module | None):
+            Wrapped module when eagerly provided.
+        model_class (Callable | None):
+            Constructor used for lazy builds.
+        model_kwargs (dict[str, Any] | None):
+            Stored kwargs for lazy instantiation.
+        inject_input_shape_as (str):
+            Keyword name used when injecting the inferred input shape.
+        inject_output_shape_as (str):
+            Keyword name used when injecting the inferred output shape.
+
     """
 
     def __init__(
@@ -37,27 +48,27 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
         **kwargs,
     ):
         """
-        Initialize the TorchModelWrapper.
+        Initialize the wrapper for an eager or lazy PyTorch model.
 
         Args:
-            model (torch.nn.Module, optional):
-                An already-instantiated PyTorch model.
-            model_class (Callable, optional):
-                A PyTorch model class (e.g., `MyModelClass`).
-            model_kwargs (dict, optional):
-                Keyword arguments needed to instantiate the model.
-                May omit `input_shape` and/or `output_shape` for lazy inference.
+            model (torch.nn.Module | None):
+                Already-instantiated module to wrap.
+            model_class (Callable | None):
+                Module class to instantiate lazily when `model` is not provided.
+            model_kwargs (dict[str, Any] | None):
+                Keyword arguments cached for lazy instantiation.
             inject_input_shape_as (str):
-                If provided, `input_shape` will be injected into `model_class`
-                under this keyword, unless it already exists in `model_kwargs`.
+                Keyword used to inject the inferred input shape into `model_kwargs`
+                when missing.
             inject_output_shape_as (str):
-                If provided, `output_shape` will be injected into `model_class`
-                under this keyword, unless it already exists in `model_kwargs`.
-            kwargs:
-                Additional kwargs to pass to parent.
+                Keyword used to inject the inferred output shape into `model_kwargs`
+                when missing.
+            **kwargs:
+                Additional keyword arguments passed to :class:`BaseModel`.
 
         Raises:
-            ValueError: If neither `model` nor `model_class` is provided, or if input types are invalid.
+            ValueError: If neither `model` nor `model_class` is supplied.
+            TypeError: If provided arguments are not callable or modules.
 
         """
         torch.nn.Module.__init__(self)
@@ -79,14 +90,16 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
                     model_kwargs = self._infer_init_args(model)
                 except RuntimeError:
                     msg = (
-                        "Failed to infer `model_kwargs` from the wrapped model instance. "
-                        f"This model (`{self.model.__class__.__qualname__}`) cannot be serialized because its "
-                        "constructor arguments could not be fully reconstructed from the current object state."
+                        "Failed to infer `model_kwargs` from the wrapped model "
+                        f"instance. This model (`{self.model.__class__.__qualname__}`) "
+                        "cannot be serialized because its constructor arguments could "
+                        "not be fully reconstructed from the current object state."
                     )
                     hint = (
-                        "Explicitly provide `model_kwargs` when constructing this wrapper, or "
-                        "modify the model so all required `__init__` parameters are stored as "
-                        "instance attributes with the same names."
+                        "Explicitly provide `model_kwargs` when constructing this "
+                        "wrapper, or modify the model so all required `__init__` "
+                        "parameters are stored as instance attributes with the same "
+                        "names."
                     )
                     warn(msg, category=RuntimeWarning, stacklevel=2, hints=hint)
 
@@ -236,19 +249,23 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
         output_shape: tuple[int, ...] | None = None,
     ):
         """
-        Validates that the wrapped PyTorch model matches expected input and output shapes.
+        Validate that the wrapped module is compatible with expected shapes.
 
-        This method performs a dummy forward pass using a random tensor of shape `(1, *input_shape)`.
-        If the model fails to run or the output shape does not match `output_shape` (if provided),
-        a RuntimeError is raised.
+        Description:
+            Runs a dummy forward pass using a random tensor of shape
+            `(4, *input_shape)`. If execution fails or the resulting
+            shape does not match `output_shape` (when provided), a
+            :class:`RuntimeError` is raised.
 
         Args:
-            input_shape (tuple[int, ...] | None): Expected input shape, excluding batch dimension.
-            output_shape (tuple[int, ...] | None): Optional expected output shape to verify.
+            input_shape (tuple[int, ...] | None): Expected per-sample
+                input shape without the batch dimension.
+            output_shape (tuple[int, ...] | None): Optional per-sample
+                output shape for verification.
 
         Raises:
-            RuntimeError: If the model fails to accept the input shape or if the output
-                shape does not match the expected shape.
+            RuntimeError: If the module rejects the input or produces an
+                unexpected output shape.
 
         """
         dummy_in = torch.randn(4, *input_shape)
@@ -257,14 +274,17 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
             with torch.no_grad():
                 dummy_out = self.model(dummy_in)
         except Exception as e:
-            msg = f"Pre-instantiated PyTorch model failed to accept the expected input_shape: {input_shape}"
+            msg = (
+                "Pre-instantiated PyTorch model failed to accept the expected "
+                f"input_shape: {input_shape}"
+            )
             raise RuntimeError(msg) from e
 
         # Check that pre-instantiated model returns expected output_shape
         if output_shape is not None and dummy_out.shape[1:] != output_shape:
             msg = (
-                "Output shape of pre-instantiated PyTorch model does not match expected output_shape: "
-                f" {dummy_out.shape[1:]} != {output_shape}"
+                "Output shape of pre-instantiated PyTorch model does not match "
+                f"expected output_shape: {dummy_out.shape[1:]} != {output_shape}"
             )
             raise RuntimeError(msg)
         self._output_shape = tuple(dummy_out.shape[1:])
@@ -274,6 +294,20 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
         input_shape: tuple[int, ...] | None,
         output_shape: tuple[int, ...] | None,
     ) -> dict[str, Any]:
+        """
+        Inject inferred shapes into keyword arguments for lazy builds.
+
+        Args:
+            input_shape (tuple[int, ...] | None):
+                Input shape to inject via :attr:`inject_input_shape_as`.
+            output_shape (tuple[int, ...] | None):
+                Output shape to inject via :attr:`inject_output_shape_as`.
+
+        Returns:
+            dict[str, Any]:
+                Keyword arguments used to instantiate :attr:`model_class`.
+
+        """
         kwargs = dict(self.model_kwargs)
 
         # Inspect model_class constructor
@@ -309,7 +343,7 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
         return kwargs
 
     def _infer_init_args(self, model: Any) -> dict[str, Any]:
-        """Attempts to infer the init args from a model instance."""
+        """Infer constructor arguments from an instantiated module."""
         if hasattr(self, "model_kwargs") and self.model_kwargs is not None:
             raise ValueError("`model_kwargs` are already defined")
 
@@ -327,16 +361,7 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
     # Forward Pass
     # ================================================
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass through the model.
-
-        Args:
-            x (torch.Tensor): Input tensor.
-
-        Returns:
-            torch.Tensor: Output from the wrapped model.
-
-        """
+        """Run a forward pass through the wrapped module."""
         if not self.is_built:
             self.build(input_shape=tuple(x.shape[1:]))
         return self.model(x)
@@ -345,13 +370,13 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
     # Weight Handling
     # ================================================
     def get_weights(self) -> dict[str, np.ndarray]:
-        """PyTorch weights are returned via the internal state_dict."""
+        """Return :class:`torch.nn.Module` weights as numpy arrays."""
         if not self.is_built:
             return {}
         return {k: v.detach().cpu().numpy() for k, v in self.model.state_dict().items()}
 
     def set_weights(self, weights: dict[str, np.ndarray]) -> None:
-        """Restore weights retrieved from `get_weights`."""
+        """Restore numpy-based weights produced by :meth:`get_weights`."""
         if not weights:
             return
         if self.model is None:

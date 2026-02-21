@@ -1,3 +1,5 @@
+"""Base classes for native TensorFlow models in ModularML."""
+
 from __future__ import annotations
 
 from abc import ABC
@@ -13,24 +15,17 @@ if TYPE_CHECKING:
 
 class TensorflowBaseModel(BaseModel, ABC):
     """
-    Base class for all ModularML-native TensorFlow/Keras models.
+    Base class for ModularML-native TensorFlow/Keras models.
 
-    This class is intended for framework-owned models
-    (e.g., SequentialMLP, SequentialCNN built on Keras).
-
-    User-defined tf.keras.Model objects can subclass this,
-    but it is easier to use the TensorflowModelWrapper.
-
-    Note:
-        Unlike TorchBaseModel which uses multiple inheritance with
-        torch.nn.Module, this class does NOT inherit from tf.keras.Model
-        directly to avoid MRO conflicts with BaseModel's metaclass.
-        Subclasses should create their Keras layers/model in `build()`
-        and store them as instance attributes.
+    Description:
+        Designed for framework-owned Keras implementations. User-defined
+        :class:`tf.keras.Model` objects can subclass this base, though
+        :class:`TensorflowModelWrapper` is typically simpler.
 
     """
 
     def __init__(self, **init_args: Any):
+        """Initialize TensorFlow dependencies and call :class:`BaseModel`."""
         _ = ensure_tensorflow()
 
         # BaseModel handles backend + built flag
@@ -41,7 +36,7 @@ class TensorflowBaseModel(BaseModel, ABC):
     # Model Weights (Stateful)
     # ================================================
     def get_weights(self) -> dict[str, np.ndarray]:
-        """Weights are returned as a mapping of variable names to np arrays."""
+        """Return model weights as numpy arrays keyed by variable name."""
         if not self.is_built:
             return {}
         # Subclasses must expose a `model` attribute holding the Keras model
@@ -49,7 +44,7 @@ class TensorflowBaseModel(BaseModel, ABC):
         return {var.name: var.numpy() for var in model.variables}
 
     def set_weights(self, weights: dict[str, np.ndarray]) -> None:
-        """Restore weights retrieved from `get_weights`."""
+        """Restore numpy-based weights produced by :meth:`get_weights`."""
         if not weights:
             return
         model = self._get_keras_model()
@@ -67,14 +62,12 @@ class TensorflowBaseModel(BaseModel, ABC):
         """
         Return the underlying Keras model for weight access.
 
-        Subclasses should override this if the Keras model is not stored
-        as `self.model`. By default, looks for `self.model`.
-
         Returns:
-            tf.keras.Model: The underlying Keras model.
+            tf.keras.Model: The underlying model referenced for weights.
 
         Raises:
-            AttributeError: If no model attribute is found.
+            AttributeError: If the subclass did not expose a model and did
+                not override this helper.
 
         """
         if hasattr(self, "model") and self.model is not None:

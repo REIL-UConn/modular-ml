@@ -1,3 +1,5 @@
+"""Abstract base class definitions for ModularML model backends."""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -11,15 +13,35 @@ from modularml.utils.nn.backend import Backend, normalize_backend
 
 
 class BaseModel(Configurable, Stateful, ABC):
+    """
+    Abstract base class for backend-agnostic ModularML models.
+
+    Attributes:
+        _backend (Backend): Normalized backend enum powering the model.
+        _built (bool): Flag indicating whether :meth:`build` completed.
+        _init_args (dict[str, Any]): Keyword arguments stored for config
+            round-trips via :meth:`get_config`.
+
+    """
+
     def __init__(self, backend: str | Backend, **init_args: Any):
+        """
+        Initialize the model with a backend and keyword arguments.
+
+        Args:
+            backend (str | Backend): Backend identifier or enum value used
+                to normalize :attr:`_backend`.
+            **init_args (Any): Keyword arguments cached for config
+                serialization so subclasses can reconstruct themselves.
+
+        """
         super().__init__()
         self._backend = normalize_backend(backend)
         self._built = False
-
-        # Store init args for config round-trip
         self._init_args = dict(init_args)
 
     def __eq__(self, other):
+        """Return True when configs and states match another model."""
         if not isinstance(other, BaseModel):
             msg = f"Cannot compare equality between BaseModel and {type(other)}"
             raise TypeError(msg)
@@ -42,9 +64,11 @@ class BaseModel(Configurable, Stateful, ABC):
         return deep_equal(self.get_state(), other.get_state())
 
     def __hash__(self) -> int:
+        """Return identity-based hash so models remain hashable."""
         return id(self)
 
     def __repr__(self) -> str:
+        """Return string representation including backend value."""
         return f"<{self.backend.value} model>"
 
     # ================================================
@@ -54,10 +78,11 @@ class BaseModel(Configurable, Stateful, ABC):
     @abstractmethod
     def input_shape(self) -> tuple[int, ...] | None:
         """
-        Shape of the expected input to this mode.
+        Return the expected per-sample input shape for the model.
 
         Returns:
-            tuple[int, ...] | None: Input shape tuple (e.g., (32, 64)) or None if unknown.
+            tuple[int, ...] | None: Shape tuple without the batch dimension,
+                or None when the shape is not yet known.
 
         """
 
@@ -65,19 +90,22 @@ class BaseModel(Configurable, Stateful, ABC):
     @abstractmethod
     def output_shape(self) -> tuple[int, ...] | None:
         """
-        Shape of the output produced by the model.
+        Return the per-sample output shape produced by the model.
 
         Returns:
-            tuple[int, ...] | None: Output shape tuple (e.g., (32, 10)) or None if unknown.
+            tuple[int, ...] | None: Shape tuple without the batch dimension,
+                or None when not yet known.
 
         """
 
     @property
     def backend(self) -> Backend:
+        """Return the :class:`Backend` powering this model."""
         return self._backend
 
     @property
     def is_built(self) -> bool:
+        """Return True when the model has been built and shapes resolved."""
         return (
             self._built
             and (self.input_shape is not None)
@@ -95,14 +123,25 @@ class BaseModel(Configurable, Stateful, ABC):
         *,
         force: bool = False,
     ):
-        """Build the internal model layers given an input shape."""
+        """
+        Build backend layers for the model implementation.
+
+        Args:
+            input_shape (tuple[int, ...] | None): Per-sample input shape,
+                excluding batch dimension, if known.
+            output_shape (tuple[int, ...] | None): Per-sample output shape,
+                excluding batch dimension, if known.
+            force (bool): Whether to rebuild even if the model is already
+                constructed.
+
+        """
 
     @abstractmethod
     def forward(self, *args, **kwargs):
-        """Forward pass."""
+        """Run a forward pass for the underlying backend."""
 
     def __call__(self, *args, **kwargs):
-        """Run a forward pass."""
+        """Execute :meth:`forward` to make the instance callable."""
         return self.forward(*args, **kwargs)
 
     # ================================================
@@ -110,22 +149,30 @@ class BaseModel(Configurable, Stateful, ABC):
     # ================================================
     @abstractmethod
     def get_weights(self) -> dict[str, Any]:
-        """
-        Return all backend weights in a pure-python dict form.
-
-        Must return pure-Python or numpy types only.
-        """
+        """Return backend weights as pure-Python or numpy data."""
 
     @abstractmethod
     def set_weights(self, weights: dict[str, Any]) -> None:
-        """Restore weights from `get_weights()` dict."""
+        """
+        Restore the weights previously produced by :meth:`get_weights`.
+
+        Args:
+            weights (dict[str, Any]): Dictionary returned by
+                :meth:`get_weights`.
+
+        """
 
     def get_init_args(self) -> dict[str, Any]:
         """
         Return keyword arguments needed to reconstruct this model.
 
-        Subclasses may override this if they want stricter control,
-        but storing init_args automatically works well for most models.
+        Description:
+            Subclasses may override this to control config serialization,
+            but caching `init_args` automatically works for most models.
+
+        Returns:
+            dict[str, Any]: Copy of initialization keyword arguments.
+
         """
         return dict(self._init_args)
 
@@ -137,7 +184,8 @@ class BaseModel(Configurable, Stateful, ABC):
         Return configuration required to re-instantiate this model.
 
         Returns:
-            dict[str, Any]: Model configuration.
+            dict[str, Any]: Serializable configuration capturing the model
+                class, backend, and build metadata.
 
         """
         return {
@@ -152,17 +200,18 @@ class BaseModel(Configurable, Stateful, ABC):
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> BaseModel:
         """
-        Construct a model from configuration data.
+        Construct a :class:`BaseModel` from serialized configuration.
 
         Description:
-            This method instantiates a new model with the given config
-            data. It *does not* restore the model state/learned weights.
+            Instantiates a new model with the provided config. Learned
+            weights are not restored; call :meth:`set_state` afterwards.
 
         Args:
-            config (dict[str, Any]): Model configuration.
+            config (dict[str, Any]): Configuration emitted by
+                :meth:`get_config`.
 
         Returns:
-            BaseModel: New BaseModel instance.
+            BaseModel: Newly constructed model instance.
 
         """
         model_cls = config["model_class"]
@@ -180,13 +229,7 @@ class BaseModel(Configurable, Stateful, ABC):
     # Stateful
     # ================================================
     def get_state(self) -> dict[str, Any]:
-        """
-        Return learned state/weights of the model.
-
-        Returns:
-            dict[str, Any]: Learned state.
-
-        """
+        """Return the learned state for serialization."""
         state: dict[str, Any] = {
             "weights": self.get_weights(),
         }
@@ -194,11 +237,10 @@ class BaseModel(Configurable, Stateful, ABC):
 
     def set_state(self, state: dict[str, Any]) -> None:
         """
-        Restore learned state of the scaler.
+        Restore learned state produced by :meth:`get_state`.
 
         Args:
-            state (dict[str, Any]):
-                State produced by get_state().
+            state (dict[str, Any]): State dictionary containing weights.
 
         """
         self.set_weights(state["weights"])
@@ -208,18 +250,15 @@ class BaseModel(Configurable, Stateful, ABC):
     # ================================================
     def save(self, filepath: Path, *, overwrite: bool = False) -> Path:
         """
-        Serializes this model to the specified filepath.
+        Serialize this model to disk using the serializer.
 
         Args:
-            filepath (Path):
-                File location to save to. Note that the suffix may be overwritten
-                to enforce the ModularML file extension schema.
-            overwrite (bool, optional):
-                Whether to overwrite any existing file at the save location.
-                Defaults to False.
+            filepath (Path): Destination path. The suffix may be adjusted to
+                follow ModularML naming conventions.
+            overwrite (bool): Whether to overwrite an existing artifact.
 
         Returns:
-            Path: The actual filepath where the model artifact is saved.
+            Path: Actual file path written by the serializer.
 
         """
         from modularml.core.io.serialization_policy import SerializationPolicy
@@ -244,16 +283,15 @@ class BaseModel(Configurable, Stateful, ABC):
     @classmethod
     def load(cls, filepath: Path, *, allow_packaged_code: bool = False) -> BaseModel:
         """
-        Load a BaseModel from file.
+        Load a serialized :class:`BaseModel` from disk.
 
         Args:
-            filepath (Path):
-                File location of a previously saved BaseModel.
-            allow_packaged_code : bool
-                Whether bundled code execution is allowed.
+            filepath (Path): Path pointing to a saved model.
+            allow_packaged_code (bool): Whether packaged code execution is
+                permitted for user-defined artifacts.
 
         Returns:
-            BaseModel: The reloaded model.
+            BaseModel: Reloaded model instance.
 
         """
         from modularml.core.io.serializer import _enforce_file_suffix, serializer

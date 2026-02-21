@@ -1,3 +1,5 @@
+"""Wrappers for integrating TensorFlow/Keras models with ModularML."""
+
 from __future__ import annotations
 
 import inspect
@@ -18,11 +20,20 @@ if TYPE_CHECKING:
 
 class TensorflowModelWrapper(BaseModel):
     """
-    Wraps an arbitrary TensorFlow/Keras model (instance or class) into a ModularML BaseModel.
+    Wrap a :class:`tf.keras.Model` into :class:`BaseModel`.
 
-    Supports:
-    - Eager wrapping of an instantiated tf.keras.Model
-    - Lazy construction from (model_class, model_kwargs)
+    Attributes:
+        model (tf.keras.Model | None):
+            Wrapped Keras model when provided eagerly.
+        model_class (Callable | None):
+            Constructor for lazy builds.
+        model_kwargs (dict[str, Any] | None):
+            Keyword arguments stored for lazy instantiation.
+        inject_input_shape_as (str):
+            Keyword used to inject the inferred input shape.
+        inject_output_shape_as (str):
+            Keyword used to inject the inferred output shape.
+
     """
 
     def __init__(
@@ -36,29 +47,26 @@ class TensorflowModelWrapper(BaseModel):
         **kwargs,
     ):
         """
-        Initialize the TensorflowModelWrapper.
+        Initialize the wrapper for eager or lazy Keras models.
 
         Args:
-            model (tf.keras.Model, optional):
-                An already-instantiated Keras model.
-            model_class (Callable, optional):
-                A Keras model class (e.g., `MyKerasModel`).
-            model_kwargs (dict, optional):
-                Keyword arguments needed to instantiate the model.
-                May omit `input_shape` and/or `output_shape` for lazy inference.
+            model (tf.keras.Model | None):
+                Already-instantiated model to wrap.
+            model_class (Callable | None):
+                Keras model class for lazy instantiation.
+            model_kwargs (dict[str, Any] | None):
+                Keyword arguments cached for lazy construction.
             inject_input_shape_as (str):
-                If provided, `input_shape` will be injected into `model_class`
-                under this keyword, unless it already exists in `model_kwargs`.
+                Keyword used to inject inferred input shapes into `model_kwargs`.
             inject_output_shape_as (str):
-                If provided, `output_shape` will be injected into `model_class`
-                under this keyword, unless it already exists in `model_kwargs`.
-            kwargs:
-                Additional kwargs to pass to parent.
+                Keyword used to inject inferred output shapes into `model_kwargs`.
+            **kwargs:
+                Additional keyword arguments forwarded to :class:`BaseModel`.
 
         Raises:
-            ValueError:
-                If neither `model` nor `model_class` is provided, or if input
-                types are invalid.
+            ValueError: If neither `model` nor `model_class` is provided.
+            TypeError: If supplied objects are not callable or
+                :class:`tf.keras.Model`.
 
         """
         tf = ensure_tensorflow()
@@ -285,6 +293,19 @@ class TensorflowModelWrapper(BaseModel):
         input_shape: tuple[int, ...] | None,
         output_shape: tuple[int, ...] | None,
     ) -> dict[str, Any]:
+        """
+        Inject inferred shapes into kwargs for lazy instantiation.
+
+        Args:
+            input_shape (tuple[int, ...] | None):
+                Input shape to inject via :attr:`inject_input_shape_as`.
+            output_shape (tuple[int, ...] | None):
+                Output shape to inject via :attr:`inject_output_shape_as`.
+
+        Returns:
+            dict[str, Any]: Updated kwargs passed to :attr:`model_class`.
+
+        """
         kwargs = dict(self.model_kwargs)
 
         # Inspect model_class constructor
@@ -323,7 +344,7 @@ class TensorflowModelWrapper(BaseModel):
         return kwargs
 
     def _infer_init_args(self, model: Any) -> dict[str, Any]:
-        """Attempts to infer the init args from a model instance."""
+        """Infer constructor arguments from an instantiated model."""
         if hasattr(self, "model_kwargs") and self.model_kwargs is not None:
             raise ValueError("`model_kwargs` are already defined")
 
@@ -341,16 +362,7 @@ class TensorflowModelWrapper(BaseModel):
     # Forward Pass
     # ================================================
     def forward(self, x):
-        """
-        Forward pass through the model.
-
-        Args:
-            x (tf.Tensor): Input tensor.
-
-        Returns:
-            tf.Tensor: Output from the wrapped model.
-
-        """
+        """Run a forward pass through the wrapped Keras model."""
         if not self.is_built:
             self.build(input_shape=tuple(x.shape[1:]))
         return self.model(x, training=False)
@@ -359,13 +371,13 @@ class TensorflowModelWrapper(BaseModel):
     # Weight Handling
     # ================================================
     def get_weights(self) -> dict[str, np.ndarray]:
-        """Weights are returned as mapping of variable names to np arrays."""
+        """Return Keras variables as numpy arrays keyed by name."""
         if not self.is_built:
             return {}
         return {var.name: var.numpy() for var in self.model.variables}
 
     def set_weights(self, weights: dict[str, np.ndarray]) -> None:
-        """Restore weights retrieved from `get_weights`."""
+        """Restore numpy-based weights produced by :meth:`get_weights`."""
         if not weights:
             return
         if self.model is None:

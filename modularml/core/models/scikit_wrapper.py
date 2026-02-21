@@ -1,3 +1,5 @@
+"""Wrappers for integrating scikit-learn estimators with ModularML."""
+
 from __future__ import annotations
 
 import pickle
@@ -26,25 +28,17 @@ class ScikitTrainingMode(Enum):
 
 class ScikitModelWrapper(BaseModel):
     """
-    Wraps a scikit-learn estimator into the ModularML BaseModel interface.
+    Wrap a scikit-learn estimator into the :class:`BaseModel` API.
 
-    Supports both batch-fit models (e.g., RandomForest, SVM) and incremental
-    models (e.g., SGDRegressor, MLPRegressor) via the `training_mode` parameter.
-
-    Args:
-        model (Any):
-            A scikit-learn `BaseEstimator` instance.
-        training_mode (ScikitTrainingMode | str, optional):
-            How the model should be trained. `"auto"` detects from
-            `hasattr(model, 'partial_fit')`. Can be overridden to
-            `"partial_fit"` or `"batch_fit"`.
-        output_method (str, optional):
-            Which method to call for predictions. `"auto"` picks
-            `predict` for estimators. Can be set to `"predict_proba"`
-            or `"decision_function"` for classifiers.
-        partial_fit_kwargs (dict[str, Any] | None, optional):
-            Extra keyword arguments passed to `partial_fit()` on every call
-            (e.g., `{"classes": np.array([0, 1])}` for classifiers).
+    Attributes:
+        model (Any): Wrapped estimator implementing the scikit-learn
+            interface.
+        _training_mode_raw (ScikitTrainingMode): Declarative setting for
+            batch or incremental training.
+        _output_method (str): Prediction method selected (`predict`,
+            `predict_proba` or similar).
+        _partial_fit_kwargs (dict[str, Any]): Extra parameters passed to
+            :meth:`partial_fit`.
 
     """
 
@@ -57,6 +51,23 @@ class ScikitModelWrapper(BaseModel):
         partial_fit_kwargs: dict[str, Any] | None = None,
         **kwargs,
     ):
+        """
+        Initialize wrapper metadata around a scikit-learn estimator.
+
+        Args:
+            model (Any): :class:`sklearn.base.BaseEstimator` instance to be
+                wrapped.
+            training_mode (ScikitTrainingMode | str): Training strategy to
+                use. `"auto"` inspects :meth:`partial_fit`.
+            output_method (str): Method invoked during forward passes.
+                `"auto"` defaults to `predict`.
+            partial_fit_kwargs (dict[str, Any] | None): Extra keyword
+                arguments to pass to :meth:`partial_fit`, often used for
+                classifier class labels.
+            **kwargs: Additional keyword arguments forwarded to
+                :class:`BaseModel`.
+
+        """
         super().__init__(
             backend=kwargs.pop("backend", None) or Backend.SCIKIT,
             model_class=type(model),
@@ -88,20 +99,22 @@ class ScikitModelWrapper(BaseModel):
     # ================================================
     @property
     def input_shape(self) -> tuple[int, ...] | None:
+        """Return stored per-sample feature shape, if known."""
         return self._input_shape
 
     @property
     def output_shape(self) -> tuple[int, ...] | None:
+        """Return stored per-sample target shape, if known."""
         return self._output_shape
 
     @property
     def supports_partial_fit(self) -> bool:
-        """Whether the underlying model supports ``partial_fit()``."""
+        """Return True if the estimator exposes :meth:`partial_fit`."""
         return hasattr(self.model, "partial_fit") and callable(self.model.partial_fit)
 
     @property
     def resolved_training_mode(self) -> ScikitTrainingMode:
-        """Resolved training mode (auto-detected if `AUTO`)."""
+        """Return the resolved :class:`ScikitTrainingMode`."""
         if self._training_mode_raw == ScikitTrainingMode.AUTO:
             if self.supports_partial_fit:
                 return ScikitTrainingMode.PARTIAL_FIT
@@ -110,7 +123,7 @@ class ScikitModelWrapper(BaseModel):
 
     @property
     def is_fitted(self) -> bool:
-        """Whether the sklearn model has been fitted."""
+        """Return True once :meth:`fit` or :meth:`partial_fit` has run."""
         return self._is_fitted
 
     # ================================================
@@ -166,10 +179,11 @@ class ScikitModelWrapper(BaseModel):
         Forward pass through the scikit-learn model.
 
         Calls the resolved output method (`predict`, `predict_proba`, etc.)
-        and ensures the output is always a 2D numpy array of shape `(n_samples, n_outputs)`.
+        and ensures the output is always a 2D numpy array with shape
+        `(n_samples, n_outputs)`.
 
         Args:
-            x: Input features as a numpy array of shape `(n_samples, n_features)`.
+            x (np.ndarray): Feature array of shape `(n_samples, n_features)`.
 
         Returns:
             np.ndarray: Predictions of shape `(n_samples, n_outputs)`.
@@ -264,10 +278,11 @@ class ScikitModelWrapper(BaseModel):
     # ================================================
     def get_weights(self) -> dict[str, Any]:
         """
-        Serialize the fitted sklearn model state via pickle.
+        Serialize the wrapped estimator via pickle.
 
         Returns:
-            dict: Contains the pickled model bytes.
+            dict[str, Any]: Dictionary containing pickled bytes and
+                metadata for :meth:`set_weights`.
 
         """
         return {
@@ -277,10 +292,10 @@ class ScikitModelWrapper(BaseModel):
 
     def set_weights(self, weights: dict[str, Any]) -> None:
         """
-        Restore the sklearn model from pickled state.
+        Restore estimator state from :meth:`get_weights`.
 
         Args:
-            weights: Dict produced by `get_weights()`.
+            weights (dict[str, Any]): State dictionary with pickled bytes.
 
         """
         if "model_pickle" in weights:
@@ -291,6 +306,7 @@ class ScikitModelWrapper(BaseModel):
     # Configurable
     # ================================================
     def get_config(self) -> dict[str, Any]:
+        """Return serialized configuration including estimator params."""
         cfg = super().get_config()
         cfg.update(
             {
@@ -304,7 +320,7 @@ class ScikitModelWrapper(BaseModel):
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> ScikitModelWrapper:
-        """Reconstruct a ScikitModelWrapper from configuration."""
+        """Reconstruct a :class:`ScikitModelWrapper` from configuration."""
         model_cls = config["model_class"]
         if isinstance(model_cls, str):
             from modularml.core.io.symbol_registry import symbol_registry

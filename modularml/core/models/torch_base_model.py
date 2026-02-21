@@ -1,3 +1,5 @@
+"""Base classes for native PyTorch models in ModularML."""
+
 from abc import ABC
 from typing import Any
 
@@ -10,16 +12,17 @@ from modularml.utils.nn.backend import Backend
 
 class TorchBaseModel(BaseModel, torch.nn.Module, ABC):
     """
-    Base class for all ModularML-native PyTorch models.
+    Base class for ModularML-native PyTorch models.
 
-    This class is intended for framework-owned models
-    (e.g., SequentialMLP, SequentialCNN).
-
-    User-defined torch.nn.Module objects should can subclass this,
-    but it is easier to use the TorchModelWrapper.
+    Description:
+        Intended for framework-owned PyTorch architectures such as
+        :class:`modularml.models.torch.SequentialMLP`. User-defined modules
+        can subclass this base, although :class:`TorchModelWrapper` is
+        usually simpler for existing :class:`torch.nn.Module` graphs.
     """
 
     def __init__(self, **init_args: Any):
+        """Initialize the PyTorch + :class:`BaseModel` inheritance chain."""
         # torch.nn.Module must be initialized first
         torch.nn.Module.__init__(self)
 
@@ -31,13 +34,13 @@ class TorchBaseModel(BaseModel, torch.nn.Module, ABC):
     # Model Weights (Stateful)
     # ================================================
     def get_weights(self) -> dict[str, np.ndarray]:
-        """PyTorch weights are returned via the internal state_dict."""
+        """Return PyTorch tensors as numpy arrays via :meth:`state_dict`."""
         if not self.is_built:
             return {}
         return {k: v.detach().cpu().numpy() for k, v in self.state_dict().items()}
 
     def set_weights(self, weights: dict[str, np.ndarray]) -> None:
-        """Restore weights retrieved from `get_weights`."""
+        """Restore numpy-based weights produced by :meth:`get_weights`."""
         if not weights:
             return
         torch_state = {k: torch.as_tensor(v) for k, v in weights.items()}
