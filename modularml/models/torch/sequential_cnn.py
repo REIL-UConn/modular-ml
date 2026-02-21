@@ -1,3 +1,5 @@
+"""Torch SequentialCNN reference implementation with lazy building."""
+
 import numpy as np
 import torch
 
@@ -9,11 +11,22 @@ from modularml.utils.nn.activations import resolve_activation
 
 class SequentialCNN(TorchBaseModel):
     """
-    Configurable 1D convolutional neural network (CNN) with lazy shape inference.
+    Configurable 1D CNN supporting lazy input/output shape inference.
 
-    This model supports stacked Conv1D layers followed optionally by dropout, pooling,
-    and a final flattening linear projection to a user-defined output shape.
-    It supports lazy building when input/output shapes are unknown.
+    Attributes:
+        n_layers (int): Number of convolutional blocks.
+        hidden_dim (int): Output channel width for intermediate blocks.
+        kernel_size (int): Convolution kernel size.
+        padding (int): Padding applied to convolutions.
+        stride (int): Stride per convolution.
+        activation (str): Name of activation resolved via
+            :func:`resolve_activation`.
+        dropout (float): Dropout probability injected after activations.
+        pooling (int): Max-pooling kernel size when >1.
+        flatten_output (bool): Whether to append a linear projection.
+        conv_layers (torch.nn.Sequential | None): Stacked conv blocks.
+        fc (torch.nn.Linear | None): Optional flattening projection.
+
     """
 
     def __init__(
@@ -33,33 +46,26 @@ class SequentialCNN(TorchBaseModel):
         **kwargs,
     ):
         """
-        Initialize a sequential 1D CNN model with lazy layer building.
+        Initialize the sequential CNN with optional lazy building.
 
         Args:
-            input_shape (tuple[int, ...], optional):
-                Shape of the input excluding batch dim.
-            output_shape (tuple[int, ...], optional):
-                Shape of the output excluding batch dim.
-            n_layers (int):
-                Number of fully connected layers.
-            hidden_dim (int):
-                Number of hidden units per layer.
-            kernel_size (int):
-                Kernel size for convolution.
-            padding (int):
-                Padding for convolution.
-            stride (int):
-                Stride for convolution.
-            activation (str):
-                Activation function name (e.g., 'relu', 'tanh').
-            dropout (float):
-                Dropout probability (0.0 = no dropout).
-            pooling (int):
-                Pooling kernel size (1 = no pooling).
-            flatten_output (bool):
-                If True, appends a flattening linear projection to match output shape.
-            kwargs:
-                Additional key-word arguments to pass through to parent.
+            input_shape (tuple[int, ...] | None): Shape excluding the
+                batch dimension.
+            output_shape (tuple[int, ...] | None): Desired output shape
+                excluding the batch dimension.
+            n_layers (int): Number of convolutional blocks.
+            hidden_dim (int): Number of output channels in hidden blocks.
+            kernel_size (int): Kernel size for convolutions.
+            padding (int): Padding applied to convolutions.
+            stride (int): Stride per convolution.
+            activation (str): Activation name resolved via
+                :func:`resolve_activation`.
+            dropout (float): Dropout probability applied after blocks.
+            pooling (int): Kernel size for optional :class:`MaxPool1d`.
+            flatten_output (bool): Append a linear projection to match the
+                target shape when True.
+            **kwargs (Any): Extra keyword arguments forwarded to
+                :class:`TorchBaseModel`.
 
         """
         # Pass all init args directly to parent class
@@ -114,12 +120,24 @@ class SequentialCNN(TorchBaseModel):
 
     @property
     def input_shape(self) -> tuple[int] | None:
-        """The expected input shape excluding batch dimension."""
+        """
+        Return the expected input shape excluding the batch dimension.
+
+        Returns:
+            tuple[int, ...] | None: Input shape when known.
+
+        """
         return self._input_shape
 
     @property
     def output_shape(self) -> tuple[int] | None:
-        """The output shape of the model excluding batch dimension."""
+        """
+        Return the output shape excluding the batch dimension.
+
+        Returns:
+            tuple[int, ...] | None: Output shape when known.
+
+        """
         return self._output_shape
 
     def build(
@@ -130,20 +148,21 @@ class SequentialCNN(TorchBaseModel):
         force: bool = False,
     ):
         """
-        Build the CNN layers and optional final linear projection.
+        Build convolutional blocks and optional linear projection.
 
         Args:
-            input_shape (tuple[int], optional):
-                Input shape excluding batch dim.
-            output_shape (tuple[int], optional):
-                Output shape excluding batch dim.
+            input_shape (tuple[int, ...] | None):
+                Shape excluding batch dimension.
+            output_shape (tuple[int, ...] | None):
+                Target shape excluding batch dimension.
             force (bool):
-                If model is already instantiated, `force` determines whether
-                to reinstantiate with the new shapes. Defaults to False.
+                Whether to rebuild existing layers.
 
         Raises:
-            ValueError: If inconsistent shape is passed compared to earlier ones, or if input shape is not specified.
-            UserWarning: If output shape is not provided, a default fallback is used.
+            ValueError: If shapes conflict with previously supplied ones
+                without forcing, or when ``input_shape`` is missing.
+            UserWarning: If ``output_shape`` is missing and defaults are
+                inferred.
 
         """
         # Set input shape (check for mismatch)
@@ -239,16 +258,14 @@ class SequentialCNN(TorchBaseModel):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Run forward pass of the model.
+        Run the forward pass through the sequential CNN.
 
         Args:
             x (torch.Tensor):
-                Input tensor of shape (batch_size, *input_shape) where
-                input_shape = (num_channel, channel_length).
+                Input tensor of shape `(batch, num_channels, length)`.
 
         Returns:
-            torch.Tensor:
-                Output tensor of shape (batch_size, *output_shape)
+            torch.Tensor: Output tensor shaped `(batch, *output_shape)`.
 
         """
         # ensure input is 3D

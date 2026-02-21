@@ -1,3 +1,5 @@
+"""Torch SequentialMLP reference implementation with lazy building."""
+
 import numpy as np
 import torch
 
@@ -9,10 +11,16 @@ from modularml.utils.nn.activations import resolve_activation
 
 class SequentialMLP(TorchBaseModel):
     """
-    Configurable multi-layer perceptron (MLP) with lazy shape inference.
+    Configurable multi-layer perceptron with lazy shape inference.
 
-    This model wraps a PyTorch sequential MLP, with optional layer count, activation,
-    and dropout. It supports lazy building when input/output shapes are unknown.
+    Attributes:
+        n_layers (int): Number of fully connected layers.
+        hidden_dim (int): Width of each hidden layer.
+        activation (str): Name of the activation passed to
+            :func:`resolve_activation`.
+        dropout (float): Dropout probability applied after hidden layers.
+        fc (torch.nn.Sequential | None): Underlying sequential module.
+
     """
 
     def __init__(
@@ -27,26 +35,23 @@ class SequentialMLP(TorchBaseModel):
         **kwargs,
     ):
         """
-        Configurable multi-layer perceptron (MLP) with lazy shape inference.
-
-        This model wraps a PyTorch sequential MLP, with optional layer count, activation,
-        and dropout. It supports lazy building when input/output shapes are unknown.
+        Initialize the sequential MLP with optional lazy dimensions.
 
         Args:
-            input_shape (tuple[int, ...], optional):
-                Shape of the input excluding batch dim.
-            output_shape (tuple[int, ...], optional):
-                Shape of the output excluding batch dim.
+            input_shape (tuple[int, ...] | None):
+                Shape excluding the batch dimension.
+            output_shape (tuple[int, ...] | None):
+                Target shape excluding the batch dimension.
             n_layers (int):
                 Number of fully connected layers.
             hidden_dim (int):
-                Number of hidden units per layer.
+                Hidden feature size per layer.
             activation (str):
-                Activation function name (e.g., 'relu', 'gelu').
+                Activation name resolved via :func:`resolve_activation`.
             dropout (float):
-                Dropout rate (0.0 = no dropout).
-            kwargs:
-                Additional key-word arguments to pass through to parent.
+                Dropout probability applied after layers.
+            **kwargs (Any):
+                Extra keyword arguments forwarded to :class:`TorchBaseModel`.
 
         """
         # Pass all init args directly to parent class
@@ -90,12 +95,24 @@ class SequentialMLP(TorchBaseModel):
 
     @property
     def input_shape(self) -> tuple[int, ...] | None:
-        """The expected input shape excluding batch dimension."""
+        """
+        Return the expected input shape excluding the batch dimension.
+
+        Returns:
+            tuple[int, ...] | None: Cached input shape if already known.
+
+        """
         return self._input_shape
 
     @property
     def output_shape(self) -> tuple[int, ...] | None:
-        """The output shape of the model excluding batch dimension."""
+        """
+        Return the output shape excluding the batch dimension.
+
+        Returns:
+            tuple[int, ...] | None: Cached output shape if available.
+
+        """
         return self._output_shape
 
     def build(
@@ -106,20 +123,19 @@ class SequentialMLP(TorchBaseModel):
         force: bool = False,
     ):
         """
-        Builds the internal torch.nn.Sequential model.
+        Build the internal :class:`torch.nn.Sequential` layers.
 
         Args:
-            input_shape (tuple[int], optional):
-                Input shape excluding batch dim.
-            output_shape (tuple[int], optional):
-                Output shape excluding batch dim.
+            input_shape (tuple[int, ...] | None):
+                Shape excluding the batch dimension.
+            output_shape (tuple[int, ...] | None):
+                Desired output shape excluding the batch dimension.
             force (bool):
-                If model is already instantiated, `force` determines whether
-                to reinstantiate with the new shapes. Defaults to False.
+                Whether to rebuild even if layers already exist.
 
         Raises:
-            ValueError: If shape mismatch is detected.
-            UserWarning: If output shape is not provided, a default fallback is used.
+            ValueError: If mismatched shapes are supplied without forcing.
+            UserWarning: If ``output_shape`` is missing and defaults are inferred.
 
         """
         # Set input shape (check for mismatch)
@@ -136,8 +152,9 @@ class SequentialMLP(TorchBaseModel):
                 and (not force)
             ):
                 msg = (
-                    f"Build called with `input_shape={input_shape}` but input shape is already defined "
-                    f"with value `{self._input_shape}`. To override the existing shape, set `force=True`."
+                    f"Build called with `input_shape={input_shape}` but input shape "
+                    f"is already defined with value `{self._input_shape}`. To override "
+                    "the existing shape, set `force=True`."
                 )
                 raise ValueError(msg)
             self._input_shape = input_shape
@@ -156,8 +173,9 @@ class SequentialMLP(TorchBaseModel):
                 and (not force)
             ):
                 msg = (
-                    f"Build called with `output_shape={output_shape}` but input shape is already defined "
-                    f"with value `{self._output_shape}`. To override the existing shape, set `force=True`."
+                    f"Build called with `output_shape={output_shape}` but input shape "
+                    f"is already defined with value `{self._output_shape}`. To override "
+                    "the existing shape, set `force=True`."
                 )
                 raise ValueError(msg)
             self._output_shape = output_shape
@@ -192,15 +210,13 @@ class SequentialMLP(TorchBaseModel):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass of the model.
+        Run the forward pass through the sequential MLP.
 
         Args:
-            x (torch.Tensor):
-                Input tensor of shape (batch_size, *input_shape)
+            x (torch.Tensor): Input tensor shaped ``(batch, *input_shape)``.
 
         Returns:
-            torch.Tensor:
-                Output tensor of shape (batch_size, *output_shape)
+            torch.Tensor: Output tensor shaped ``(batch, *output_shape)``.
 
         """
         # ensure input is 3D
