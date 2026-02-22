@@ -219,11 +219,12 @@ def align_ranks(arr1: Any, arr2: Any, backend: Backend | None = None) -> tuple:
             for idx in singleton_idxs:
                 arr = tf.expand_dims(arr, axis=idx)
             return arr
-        if arr_backend in (Backend.SCIKIT, Backend.NONE):
+        if arr_backend in (Backend.SCIKIT, Backend.NUMPY, Backend.NONE):
             arr = convert_to_format(arr, fmt=DataFormat.NUMPY)
             for idx in singleton_idxs:
                 arr = np.expand_dims(arr, axis=idx)
             return arr
+
         msg = f"Unsupported backend: {arr_backend}"
         raise TypeError(msg)
 
@@ -550,15 +551,6 @@ def convert_dict_to_format(
             If `fmt` is unsupported or arrays cannot be merged under the given mode.
         TypeError:
             If any input cannot be coerced into the target type when `errors="raise"`.
-
-    Examples:
-        >>> data = {"a": np.ones((10, 2)), "b": np.zeros((10, 3))}
-        >>> convert_dict_to_format(data, fmt="numpy", mode="concat").shape
-        (10, 5)
-
-        >>> data = {"a": np.ones((10, 3)), "b": np.zeros((10, 3))}
-        >>> convert_dict_to_format(data, fmt="torch", mode="stack", axis=1).shape
-        (10, 2, 3)
 
     """
     torch = check_torch()
