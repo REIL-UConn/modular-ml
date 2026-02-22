@@ -43,11 +43,13 @@ class ProgressStyle:
 
     name: str
     columns: list[ProgressColumn]
+    indent_group: int = 0
     default_fields: dict[str, object] = None
 
 
 style_sampling = ProgressStyle(
     name="sampling",
+    indent_group=1,
     columns=(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
@@ -61,6 +63,7 @@ style_sampling = ProgressStyle(
 
 style_training = ProgressStyle(
     name="training",
+    indent_group=1,
     columns=(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
@@ -74,6 +77,7 @@ style_training = ProgressStyle(
 
 style_training_loss = ProgressStyle(
     name="training_loss",
+    indent_group=2,
     columns=(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
@@ -99,6 +103,7 @@ style_training_loss = ProgressStyle(
 
 style_evaluation = ProgressStyle(
     name="evaluation",
+    indent_group=1,
     columns=(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),

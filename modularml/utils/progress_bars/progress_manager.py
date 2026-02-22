@@ -63,7 +63,7 @@ class ProgressManager:
         self._task_counter: int = 0
 
         # Indentation: style-based nesting
-        self._style_indent: dict[str, int] = {}
+        self._style_indent: dict[int, int] = {}
         self._progress_indent: dict[int, int] = {}
         self._next_indent_level: int = 0
 
@@ -181,11 +181,12 @@ class ProgressManager:
         key = self._task_counter
         self._task_counter += 1
 
-        # Assign indent level based on first-seen style order
-        if task.style_name not in self._style_indent:
-            self._style_indent[task.style_name] = self._next_indent_level
+        # Assign indent level based on first-seen indent group
+        group = style.indent_group
+        if group not in self._style_indent:
+            self._style_indent[group] = self._next_indent_level
             self._next_indent_level += 1
-        self._progress_indent[key] = self._style_indent[task.style_name]
+        self._progress_indent[key] = self._style_indent[group]
 
         self._progress[key] = Progress(
             *style.columns,
