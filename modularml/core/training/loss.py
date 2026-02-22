@@ -153,7 +153,7 @@ class Loss:
         elif callable(loss):
             self.fn = loss
             self.name = loss.__name__
-            self._backend = _safe_infer_backend(loss)
+            self._backend = backend or _safe_infer_backend(loss)
 
             self.kwargs = loss_kwargs or {}
             self._factory = None

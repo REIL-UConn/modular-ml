@@ -328,6 +328,7 @@ class AppliedLoss(Summarizable):
             ResolutionError: If zero or multiple upstream FeatureSets feed the node.
 
         """
+        exp_ctx = ExperimentContext.get_active()
         # All head node IDs in this ExecutionContext
         head_node_ids = [x[0] for x in ctx.inputs]
 
@@ -351,7 +352,7 @@ class AppliedLoss(Summarizable):
 
             # Otherwise, recurse on upstream node
             for ref in n._upstream_refs:
-                up_n = ref.resolve(ctx=ctx)
+                up_n = ref.resolve(ctx=exp_ctx)
                 _get_input_view(n=up_n)
 
         _get_input_view(n=node)
