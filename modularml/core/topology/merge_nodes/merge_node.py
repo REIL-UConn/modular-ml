@@ -623,11 +623,11 @@ class MergeNode(ComputeNode):
     # ================================================
     def get_config(self) -> dict[str, Any]:
         """
-        Return configuration details required to reconstruct this callback.
+        Return configuration details required to reconstruct this MergeNode.
 
         Returns:
             dict[str, Any]:
-                Configuration used to reconstruct the callback.
+                Configuration used to reconstruct the MergeNode.
                 Keys must be strings.
 
         """
@@ -638,28 +638,39 @@ class MergeNode(ComputeNode):
                 "input_shapes": self._input_shapes,
                 "is_built": self._built,
                 "backend": self._backend,
+                "graph_node_type": "MergeNode",
             },
         )
         return cfg
 
     @classmethod
-    def from_config(cls, config: dict) -> MergeNode:
+    def from_config(
+        cls,
+        config: dict,
+        *,
+        register: bool = True,
+    ) -> MergeNode:
         """
-        Construct a callback from a configuration dictionary.
+        Construct a MergeNode from a configuration dictionary.
 
         Args:
             config (dict[str, Any]):
                 Configuration details. Keys must be strings.
+            register (bool):
+                Whether to register the reconstructed node.
 
         Returns:
-            Callback: Reconstructed callback.
+            Callback: Reconstructed MergeNode.
 
         """
+        if "graph_node_type" not in config or config["graph_node_type"] != "MergeNode":
+            raise ValueError("Invalid config data for MergeNode.")
+
         cb_cls_name = config.get("merge_node_type")
         if cb_cls_name == "ConcatNode":
             from modularml.core.topology.merge_nodes.concat_node import ConcatNode
 
-            return ConcatNode.from_config(config=config)
+            return ConcatNode.from_config(config=config, register=register)
 
         msg = (
             f"Unsupported MergeNode class for parent class construction: {cb_cls_name}."

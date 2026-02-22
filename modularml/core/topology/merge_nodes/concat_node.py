@@ -671,11 +671,11 @@ class ConcatNode(MergeNode):
     # ================================================
     def get_config(self) -> dict[str, Any]:
         """
-        Return configuration details required to reconstruct this callback.
+        Return configuration details required to reconstruct this node.
 
         Returns:
             dict[str, Any]:
-                Configuration used to reconstruct the callback.
+                Configuration used to reconstruct the node.
                 Keys must be strings.
 
         """
@@ -714,16 +714,23 @@ class ConcatNode(MergeNode):
         return cfg
 
     @classmethod
-    def from_config(cls, config: dict) -> MergeNode:
+    def from_config(
+        cls,
+        config: dict,
+        *,
+        register: bool = True,
+    ) -> MergeNode:
         """
-        Construct a callback from a configuration dictionary.
+        Construct a ConcatNode from a configuration dictionary.
 
         Args:
             config (dict[str, Any]):
                 Configuration details. Keys must be strings.
+            register (bool):
+                Whether to register the reconstructed node.
 
         Returns:
-            Callback: Reconstructed callback.
+            Callback: Reconstructed ConcatNode.
 
         """
         from modularml.core.references.experiment_reference import (
@@ -760,5 +767,5 @@ class ConcatNode(MergeNode):
             pad_mode=config["pad_mode"],
             pad_value=config["pad_value"],
             node_id=config.get("node_id"),
-            register=config.get("register", True),
+            register=register,
         )
