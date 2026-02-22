@@ -25,7 +25,7 @@ from modularml.core.experiment.phases.eval_phase import EvalPhase
 from modularml.core.experiment.phases.fit_phase import FitPhase
 from modularml.core.experiment.phases.phase import ExperimentPhase
 from modularml.core.experiment.phases.phase_group import PhaseGroup
-from modularml.core.experiment.phases.train_phase import TrainPhase
+from modularml.core.experiment.phases.train_phase import ResultRecording, TrainPhase
 from modularml.core.experiment.results.eval_results import EvalResults
 from modularml.core.experiment.results.execution_meta import (
     PhaseExecutionMeta,
@@ -45,6 +45,15 @@ if TYPE_CHECKING:
     from modularml.core.topology.model_graph import ModelGraph
 
 logger = get_logger(name="Experiment")
+
+
+def _phase_mutates_state(phase_or_group: ExperimentPhase | PhaseGroup) -> bool:
+    """Return True if executing the phase/group could modify model state."""
+    if isinstance(phase_or_group, EvalPhase):
+        return False
+    if isinstance(phase_or_group, PhaseGroup):
+        return any(_phase_mutates_state(el) for el in phase_or_group.all)
+    return True  # TrainPhase, FitPhase, or unknown
 
 
 class Experiment:
@@ -97,7 +106,8 @@ class Experiment:
             ExperimentContext._set_active(ctx)
         else:
             ctx.set_experiment(self)
-            ctx.set_registration_policy(registration_policy)
+            if registration_policy is not None:
+                ctx.set_registration_policy(registration_policy)
         self._ctx = ctx
 
         # Initialize phase registry
@@ -463,7 +473,10 @@ class Experiment:
 
         # Auto-detect checkpoint type and restore
         if "experiment" in ckpt.entries:
-            self.set_state(ckpt.entries["experiment"].entry_state)
+            exp_state = ckpt.entries["experiment"].entry_state
+            self._history = exp_state["history"]
+            self.model_graph.set_state(exp_state["mg_state"])
+
         elif "modelgraph" in ckpt.entries:
             self.model_graph.restore_checkpoint(filepath)
         else:
@@ -555,6 +568,21 @@ class Experiment:
 
         # Run training and track results
         res = TrainResults(label=phase.label)
+        recording = phase.result_recording
+
+        # For LAST mode, find any EarlyStopping callback with restore_best
+        early_stop = None
+        if recording == ResultRecording.LAST:
+            from modularml.callbacks.early_stopping import EarlyStopping
+
+            for cb in phase.callbacks:
+                if isinstance(cb, EarlyStopping) and cb.restore_best:
+                    early_stop = cb
+                    break
+
+        best_ctxs: list = []
+        prev_epoch = -1
+
         for ctx in phase.iter_execution(
             results=res,
             show_sampler_progress=show_sampler_progress,
@@ -568,7 +596,30 @@ class Experiment:
                 losses=phase.losses,
                 active_nodes=phase.active_nodes,
             )
-            res.add_execution_context(ctx=ctx)
+
+            if recording == ResultRecording.ALL:
+                res.add_execution_context(ctx=ctx)
+            elif recording == ResultRecording.LAST:
+                # On epoch boundary, snapshot best and clear
+                if ctx.epoch_idx != prev_epoch and prev_epoch >= 0:
+                    if early_stop and early_stop.best_epoch == prev_epoch:
+                        best_ctxs = list(res._execution)
+                    res._execution.clear()
+                    res._series_cache.clear()
+                res.add_execution_context(ctx=ctx)
+                prev_epoch = ctx.epoch_idx
+            # NONE: skip recording execution contexts entirely
+
+        # LAST mode: resolve final vs best epoch
+        if recording == ResultRecording.LAST and early_stop is not None:
+            # Check if the final completed epoch was also the best
+            if early_stop.best_epoch == prev_epoch:
+                best_ctxs = list(res._execution)
+
+            # If best epoch differs from the final epoch, restore snapshot
+            if best_ctxs and early_stop.best_epoch != prev_epoch:
+                res._execution = best_ctxs
+                res._series_cache.clear()
 
         return res
 
@@ -1135,8 +1186,9 @@ class Experiment:
             PhaseResults: Results produced by the previewed phase.
 
         """
-        # Get initial state
-        state = self.get_state()
+        # Snapshot state only for phases that mutate model weights
+        needs_restore = _phase_mutates_state(phase)
+        state = self.get_state() if needs_restore else None
 
         # Execute phase with checkpointing disabled
         with self.disable_checkpointing():
@@ -1146,7 +1198,8 @@ class Experiment:
             )
 
         # Restore experiment state
-        self.set_state(state=state)
+        if needs_restore:
+            self.set_state(state=state)
 
         return res
 
@@ -1174,8 +1227,9 @@ class Experiment:
             PhaseGroupResults: Phase group results.
 
         """
-        # Get initial state
-        state = self.get_state()
+        # Snapshot state only for groups containing mutating phases
+        needs_restore = _phase_mutates_state(group)
+        state = self.get_state() if needs_restore else None
 
         # Execute group with checkpointing disabled
         with self.disable_checkpointing():
@@ -1185,7 +1239,8 @@ class Experiment:
             )
 
         # Restore experiment state
-        self.set_state(state=state)
+        if needs_restore:
+            self.set_state(state=state)
 
         return res
 
@@ -1240,7 +1295,7 @@ class Experiment:
         return {
             "ctx": self.ctx.get_state(),
             "history": deepcopy(self._history),
-            "checkpoints": deepcopy(self._checkpoints),
+            "checkpoints": self._checkpoints.copy(),
         }
 
     def set_state(self, state: dict[str, Any]) -> None:

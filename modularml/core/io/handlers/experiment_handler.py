@@ -126,6 +126,7 @@ class ExperimentHandler(BaseHandler["Experiment"]):
         # ------------------------------------------------
         exp_state = {
             "history": obj._history,
+            "mg_state": mg.get_state(),
         }
         state_path = save_dir / self.state_rel_path
         with Path.open(state_path, "wb") as f:
@@ -172,12 +173,16 @@ class ExperimentHandler(BaseHandler["Experiment"]):
         # Validate that the context is clean
         # ------------------------------------------------
         if exp_ctx.get_experiment() is not None:
-            msg = (
-                "Cannot load Experiment into the active ExperimentContext: "
-                "an Experiment is already associated with it. Create a new "
-                "ExperimentContext before loading."
-            )
-            raise RuntimeError(msg)
+            if not ctx.overwrite_collision:
+                msg = (
+                    "Cannot load Experiment into the active ExperimentContext: "
+                    "an Experiment is already associated with it. Create a new "
+                    "ExperimentContext before loading."
+                )
+                raise RuntimeError(msg)
+
+            # Creates a new, empty context
+            exp_ctx = ExperimentContext()
 
         if exp_ctx.model_graph is not None:
             msg = (
