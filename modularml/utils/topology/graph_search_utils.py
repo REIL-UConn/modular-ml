@@ -6,11 +6,10 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Literal
 
 from modularml.core.experiment.experiment_context import ExperimentContext
-from modularml.core.references.featureset_reference import FeatureSetReference
-from modularml.core.topology.graph_node import GraphNode
 from modularml.utils.errors.error_handling import ErrorMode
 
 if TYPE_CHECKING:
+    from modularml.core.references.featureset_reference import FeatureSetReference
     from modularml.core.topology.graph_node import GraphNode
     from modularml.core.topology.model_graph import ModelGraph
 
@@ -44,6 +43,8 @@ def is_head_node(node: GraphNode):
         bool: True if the node allows upstream FeatureSet connections.
 
     """
+    from modularml.core.references.featureset_reference import FeatureSetReference
+
     if not node.allows_upstream_connections:
         return False
     ups = node.get_upstream_refs()
@@ -71,6 +72,7 @@ def find_upstream_featuresets(
         TypeError: If `node` is neither a string nor a :class:`GraphNode`.
 
     """
+    from modularml.core.references.featureset_reference import FeatureSetReference
     from modularml.core.topology.graph_node import GraphNode
 
     graph_node = None
@@ -157,6 +159,7 @@ def get_subgraph_nodes(
         - For execution ordering, use `ModelGraph._sorted_node_ids`.
 
     """
+    from modularml.core.references.featureset_reference import FeatureSetReference
     from modularml.core.topology.graph_node import GraphNode
 
     if direction not in {"upstream", "downstream", "both"}:

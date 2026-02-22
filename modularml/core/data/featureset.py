@@ -42,6 +42,8 @@ from modularml.utils.data.pyarrow_data import (
 from modularml.utils.errors.exceptions import SplitOverlapWarning
 from modularml.utils.io.cloning import clone_via_serialization
 from modularml.utils.logging.warnings import warn
+from modularml.visualization.visualizer.styling import FeatureSetDisplayOptions
+from modularml.visualization.visualizer.visualizer import Visualizer
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -1637,3 +1639,37 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
             allow_packaged_code=allow_packaged_code,
             overwrite=overwrite,
         )
+
+    # ================================================
+    # Visualizer
+    # ================================================
+    def visualize(
+        self,
+        *,
+        show_features: bool = True,
+        show_targets: bool = True,
+        show_tags: bool | str = "root",
+        show_overlaps: bool = True,
+    ):
+        """
+        Displays a mermaid diagram for this FeatureSet.
+
+        Args:
+            show_features (bool, optional):
+                Show feature columns and shapes on nodes. Defaults to True.
+            show_targets (bool, optional):
+                Show target columns and shapes on nodes. Defaults to True.
+            show_tags (bool | str, optional):
+                Show tag columns and shapes. `"root"` shows only on the
+                FeatureSet root node, `True` shows on all splits, `False` hides everywhere. Defaults to "root".
+            show_overlaps (bool, optional):
+                Show overlap counts between splits. Defaults to True.
+
+        """
+        display_opts = FeatureSetDisplayOptions(
+            show_features=show_features,
+            show_targets=show_targets,
+            show_tags=show_tags,
+            show_overlaps=show_overlaps,
+        )
+        return Visualizer(self, display_options=display_opts).display_mermaid()
