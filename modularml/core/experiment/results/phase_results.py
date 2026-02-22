@@ -122,8 +122,8 @@ class LossDataSeries(AxisSeries[LossRecord]):
     Attributes:
         axes (tuple[str, ...]): Axis labels describing the series dimensions.
         _data (dict[tuple, LossRecord]): Mapping of axis keys to loss records.
-        supported_reduction_methods (ClassVar[set[str]]):
-            Allowed reducers for :meth:`AxisSeries.collapse`.
+        supported_reduction_methods (ClassVar[set[str]]): Allowed reducers for
+            :meth:`AxisSeries.collapse`.
 
     """
 
@@ -159,9 +159,10 @@ class LossDataSeries(AxisSeries[LossRecord]):
         Retrieves the total trainable loss value of all records in this collection.
 
         To get the trainable loss for a specific epoch/batch/label, use:
+
         ```python
-            >>> series = LossDataSeries(...)
-            >>> series.where(epoch=1, ...).trainable
+        series = LossDataSeries(...)
+        series.where(epoch=1, ...).trainable
         ```
 
         Returns:
@@ -177,9 +178,10 @@ class LossDataSeries(AxisSeries[LossRecord]):
         Retrieves the total auxiliary loss value of all records in this collection.
 
         To get the auxiliary loss for a specific epoch/batch/label, use:
+
         ```python
-            >>> series = LossDataSeries(...)
-            >>> series.where(epoch=1, ...).auxiliary
+        series = LossDataSeries(...)
+        series.where(epoch=1, ...).auxiliary
         ```
 
         Returns:

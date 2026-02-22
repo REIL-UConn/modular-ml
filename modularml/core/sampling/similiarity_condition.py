@@ -25,7 +25,7 @@ class SimilarityCondition(Configurable):
 
         tolerance (float, default=0.0):
             Numeric threshold for values to be considered "similar". \
-            Example: tolerance=0.05 means |a - b| <= 0.05 is a valid match.
+            Example: `tolerance=0.05` means `|a - b| <= 0.05` is a valid match.
 
         metric (Callable[[float, float], float] | None, default=None):
             Optional custom distance function. If not provided:
@@ -55,17 +55,6 @@ class SimilarityCondition(Configurable):
         - Non-matches receive weight < 1.0 if `allow_fallback=True`, else 0.0.
         - `fallback=False` is equivalent to \
             `weightmode='binary', min_weight=0.0, max_weight=1.0`
-
-    Examples:
-        >>> cond = SimilarityCondition(mode="similar", tolerance=0.5, weight_mode="linear")
-        >>> cond.score(0.80, 0.82)  # doctest: +FLOAT_CMP
-        25.0
-
-        >>> cond.score(0.80, 0.90)  # doctest: +FLOAT_CMP
-        5.0
-
-        >>> cond.score(0.80, 1.5)  # doctest: +FLOAT_CMP
-        0.0
 
     """
 

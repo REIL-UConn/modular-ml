@@ -756,11 +756,18 @@ class GraphNode(ABC, ExperimentNode):
             return cls(register=register, **config)
 
         # Create subclasses directly
+        if "register" in config:
+            _ = config.pop("register")
         g_type = config["graph_node_type"]
         if g_type == "ModelNode":
             from modularml.core.topology.model_node import ModelNode
 
             return ModelNode.from_config(config=config, register=register)
+
+        if g_type == "MergeNode":
+            from modularml.core.topology.merge_nodes.merge_node import MergeNode
+
+            return MergeNode.from_config(config=config, register=register)
 
         if g_type == "ComputeNode":
             from modularml.core.topology.compute_node import ComputeNode

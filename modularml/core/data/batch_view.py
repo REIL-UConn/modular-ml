@@ -246,9 +246,9 @@ class BatchView(Summarizable):
 
         Example:
             ```python
-            >>> batch = batch_view.materialize_batch(fmt=DataFormat.TORCH)
-            >>> batch.outputs["MyFeatureSet"]["anchor"].features.shape
-            torch.Size([1, 101])
+            batch = batch_view.materialize_batch(fmt=DataFormat.TORCH)
+            batch.outputs["MyFeatureSet"]["anchor"].features.shape
+            # torch.Size([1, 101])
             ```
 
         Raises:

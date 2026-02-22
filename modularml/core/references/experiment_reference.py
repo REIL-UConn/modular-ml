@@ -20,20 +20,15 @@ class ResolutionError(RuntimeError):
 
 @dataclass(frozen=True)
 class ExperimentReference(ReferenceLike, Configurable):
-    """
-    Base class for references resolvable at the experiment scope.
-
-    Attributes:
-        None: This base dataclass does not declare fields.
-
-    """
+    """Base class for references resolvable at the experiment scope."""
 
     def resolve(self, ctx: ExperimentContext | None = None):
         """
         Resolve the reference within an experiment context.
 
         Args:
-            ctx (ExperimentContext | None): Context to resolve against. Defaults to active context.
+            ctx (ExperimentContext | None): Context to resolve against.
+                Defaults to active context.
 
         Returns:
             Any: Resolved object/value.
@@ -77,9 +72,9 @@ class ExperimentReference(ReferenceLike, Configurable):
 
         Example:
         ```python
-            >>> ref = DataReference(node="PulseFeatures", domain="features", key="voltage")
-            >>> ref.to_string()
-            "PulseFeatures.features.voltage"
+        ref = DataReference(node="PulseFeatures", domain="features", key="voltage")
+        ref.to_string()
+        "PulseFeatures.features.voltage"
         ```
 
         """
