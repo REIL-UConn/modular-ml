@@ -43,6 +43,61 @@ if TYPE_CHECKING:
 logger = get_logger(name="TrainPhase")
 
 
+class ResultRecording(Enum):
+    """
+    Controls which execution contexts are retained in TrainResults.
+
+    ALL:
+        Record every batch of every epoch (default). Provides full
+        access to all outputs, losses, and tensors across the entire
+        training run but uses more memory.
+
+    LAST:
+        Keep only the final epoch's execution contexts. When an
+        :class:`~modularml.callbacks.early_stopping.EarlyStopping`
+        callback with ``restore_best=True`` is active, "last" is
+        interpreted as the **best** epoch.
+
+    NONE:
+        Do not record execution contexts at all. Scalar metrics
+        (e.g. ``train_loss``, ``val_loss``) are still logged to the
+        :class:`MetricStore` and remain accessible.
+
+    """
+
+    ALL = "all"
+    LAST = "last"
+    NONE = "none"
+
+    @classmethod
+    def from_value(cls, value: str | ResultRecording) -> ResultRecording:
+        """
+        Normalize strings or enums to a :class:`ResultRecording`.
+
+        Args:
+            value (str | ResultRecording): Input value to normalize.
+
+        Returns:
+            ResultRecording: Canonical enum member.
+
+        Raises:
+            ValueError: If ``value`` cannot be mapped to a valid member.
+
+        """
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, str):
+            try:
+                return cls(value.lower())
+            except ValueError:
+                pass
+        msg = (
+            f"Invalid ResultRecording: {value}. "
+            f"Expected one of {[r.value for r in cls]}"
+        )
+        raise ValueError(msg)
+
+
 class BatchSchedulingPolicy(Enum):
     """
     Defines how batches from multiple samplers are scheduled during training.
@@ -185,6 +240,7 @@ class TrainPhase(ExperimentPhase):
         batch_schedule: BatchSchedulingPolicy | str = BatchSchedulingPolicy.ZIP_STRICT,
         callbacks: list[Callback] | None = None,
         checkpointing: Checkpointing | None = None,
+        result_recording: ResultRecording | str = ResultRecording.ALL,
     ):
         """
         Initiallizes a new training phase for the experiment.
@@ -235,6 +291,11 @@ class TrainPhase(ExperimentPhase):
                 this is configured as a phase-level argument rather than added manually
                 via ``add_callback()``. Defaults to None.
 
+            result_recording (ResultRecording | str, optional):
+                Controls which execution contexts are retained in the returned
+                :class:`TrainResults`. See :class:`ResultRecording` for details.
+                Defaults to ``ResultRecording.ALL``.
+
         """
         if losses is None:
             raise ValueError("Training requires at least once defined loss.")
@@ -250,6 +311,7 @@ class TrainPhase(ExperimentPhase):
         if n_epochs < 1:
             raise ValueError("n_epochs must be >= 1")
         self.n_epochs = n_epochs
+        self.result_recording = ResultRecording.from_value(result_recording)
 
         # Checkpointing
         self._checkpointing: Checkpointing | None = None
@@ -283,6 +345,7 @@ class TrainPhase(ExperimentPhase):
         batch_schedule: BatchSchedulingPolicy | str = BatchSchedulingPolicy.ZIP_STRICT,
         callbacks: list[Callback] | None = None,
         checkpointing: Checkpointing | None = None,
+        result_recording: ResultRecording | str = ResultRecording.ALL,
     ) -> TrainPhase:
         """
         Initiallizes a new training phase for a given FeatureSet split.
@@ -337,6 +400,11 @@ class TrainPhase(ExperimentPhase):
                 An optional Checkpointing callback that automatically saves model
                 state at configurable lifecycle hook points. Defaults to None.
 
+            result_recording (ResultRecording | str, optional):
+                Controls which execution contexts are retained in the returned
+                :class:`TrainResults`. See :class:`ResultRecording` for details.
+                Defaults to `ResultRecording.ALL`.
+
         """
         input_sources = cls._build_input_sources_from_split(
             split=split,
@@ -352,6 +420,7 @@ class TrainPhase(ExperimentPhase):
             batch_schedule=batch_schedule,
             callbacks=callbacks,
             checkpointing=checkpointing,
+            result_recording=result_recording,
         )
         return phase
 
@@ -1025,9 +1094,7 @@ class TrainPhase(ExperimentPhase):
                         )
                         # Take only the most recent
                         val_entries.sort(
-                            key=lambda x: (
-                                x.batch_idx if x.batch_idx is not None else 0
-                            ),
+                            key=lambda x: x.batch_idx if x.batch_idx is not None else 0,
                         )
                         if len(val_entries) > 0:
                             tick_fields["val_loss"] = val_entries[-1].value
@@ -1112,6 +1179,7 @@ class TrainPhase(ExperimentPhase):
                     if self._checkpointing is not None
                     else None
                 ),
+                "result_recording": self.result_recording.value,
             },
         )
         return cfg
@@ -1161,5 +1229,6 @@ class TrainPhase(ExperimentPhase):
             batch_schedule=config["batch_schedule"],
             callbacks=[Callback.from_config(cfg) for cfg in config["callbacks"]],
             checkpointing=checkpointing,
+            result_recording=config.get("result_recording", "all"),
         )
         return obj
