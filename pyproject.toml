@@ -61,6 +61,7 @@ tensorflow = [
     "tensorflow; platform_system == 'Darwin' and platform_machine != 'arm64'",
 ]
 optimize = ["optuna"]
+
 docs = [
     "sphinx>=6",
     "sphinx_rtd_theme>=0.5",
@@ -77,6 +78,7 @@ docs = [
     "ipywidgets",
     "sphinx-gallery",
     "sphinx-docsearch",
+    "sphinxcontrib.mermaid",
 ]
 examples = [
     "jupyter",
