@@ -172,7 +172,7 @@ class RandomSplitter(BaseSplitter):
             # Build mapping: stratum_id to list of relative indices
             stratum_to_rel_idxs: dict[int, list[int]] = {}
             for rel_idx, s_id in enumerate(inv):
-                stratum_to_rel_idxs.setdefault(s_id, []).append(rel_idx)
+                stratum_to_rel_idxs.setdefault(to_hashable(s_id), []).append(rel_idx)
 
             # For each stratum, shuffle and split according to ratios
             # Then combine into final split_indices
