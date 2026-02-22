@@ -2,6 +2,7 @@
 # Experiment & Phases
 # ================================================
 from modularml.core.experiment.experiment import Experiment
+from modularml.core.experiment.phases.phase_group import PhaseGroup
 from modularml.core.experiment.phases.eval_phase import EvalPhase
 from modularml.core.experiment.results.eval_results import EvalResults
 from modularml.core.experiment.phases.train_phase import TrainPhase
@@ -116,6 +117,7 @@ __all__ = [
     "ModelGraph",
     "ModelNode",
     "Optimizer",
+    "PhaseGroup",
     "Scaler",
     "SimilarityCondition",
     "TensorflowBaseModel",

@@ -19,6 +19,8 @@ from modularml.api import (
     ModelGraph,
     ModelNode,
     Optimizer,
+    PhaseGroup,
+    ResultRecording,
     Scaler,
     SimilarityCondition,
     TensorflowBaseModel,
