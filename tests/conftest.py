@@ -1,99 +1,109 @@
+"""Shared fixtures and utilities for unit tests."""
+
+from collections.abc import Sequence
+from typing import Any
+
+import numpy as np
 import pytest
 
-from modularml.core.graph.featureset import FeatureSet
-from tests.shared.data_utils import generate_dummy_data, generate_dummy_featureset
+from modularml.core.data.featureset import FeatureSet
+from modularml.core.experiment.experiment_context import ExperimentContext
+
+rng = np.random.default_rng(seed=42)
 
 
-# ==========================================================
-# FeatureSet-level
-# ==========================================================
-@pytest.fixture
-def dummy_featureset_numeric() -> FeatureSet:
-    """A FeatureSet with only numeric targets."""
-    return generate_dummy_featureset(n_samples=1000, target_type="numeric", label="NumericFS")
+@pytest.fixture(autouse=True)
+def _fresh_experiment_context():
+    """Provide a fresh ExperimentContext for every test to avoid label collisions."""
+    ctx = ExperimentContext()
+    with ctx.activate():
+        yield
 
 
-@pytest.fixture
-def dummy_featureset_categorical() -> FeatureSet:
-    """A FeatureSet with only categorical targets."""
-    return generate_dummy_featureset(n_samples=1000, target_type="categorical", label="CategoricalFS")
+def generate_dummy_data(
+    shape: tuple[int, ...] = (),
+    dtype: str = "float",
+    *,
+    min_val: Any = None,
+    max_val: Any = None,
+    choices: Sequence[Any] | None = None,
+) -> float | int | str | np.ndarray:
+    """Generate dummy scalar or array data of specified type."""
+    size = int(np.prod(shape)) if shape else 1
+
+    if dtype == "str":
+        if not choices:
+            raise ValueError("For dtype='str', please provide `choices` list.")
+        values = rng.choice(choices, size=size)
+    elif choices is not None:
+        values = rng.choice(choices, size=size)
+    elif dtype == "float":
+        lo = min_val if min_val is not None else 0.0
+        hi = max_val if max_val is not None else 1.0
+        values = rng.uniform(lo, hi, size)
+    elif dtype == "int":
+        lo = min_val if min_val is not None else 0
+        hi = max_val if max_val is not None else 10
+        values = rng.integers(lo, hi + 1, size)
+    else:
+        msg = f"Unsupported dtype: {dtype}"
+        raise ValueError(msg)
+
+    if not shape or shape == (1,):
+        return values[0]
+    return np.array(values).reshape(shape)
 
 
-# @pytest.fixture
-# def battery_soh_featureset() -> FeatureSet:
-#     """
-#     Returns NMC 18650 aging dataset for SOH estimation.
+def generate_dummy_featureset(
+    feature_shape_map: dict[str, tuple[int, ...]] | None = None,
+    target_shape_map: dict[str, tuple[int, ...]] | None = None,
+    tag_type_map: dict[str, str] | None = None,
+    target_type: str = "numeric",
+    n_samples: int = 1000,
+    label: str = "TestFeatureSet",
+) -> FeatureSet:
+    """Generate a synthetic FeatureSet for testing."""
+    feature_shape_map = feature_shape_map or {"X1": (1, 100), "X2": (1, 100)}
+    target_shape_map = target_shape_map or {"Y1": (1, 1), "Y2": (1, 10)}
+    tag_type_map = tag_type_map or {"T_FLOAT": "float", "T_STR": "str"}
 
-#     Features = Pulses (101-element arrays)
-#     Targets = SOH (scalar)
-#     """
-#     import pickle
-#     import urllib.request
-#     import warnings
-#     from pathlib import Path
+    for k in feature_shape_map:
+        feature_shape_map[k] = (n_samples, *feature_shape_map[k])
+    for k in target_shape_map:
+        target_shape_map[k] = (n_samples, *target_shape_map[k])
 
-#     from modularml.core import FeatureTransform
-#     from modularml.preprocessing import MinMaxScaler, PerSampleZeroStart
+    features = {
+        k: generate_dummy_data(shape=v, dtype="float")
+        for k, v in feature_shape_map.items()
+    }
 
-#     DATA_DIR = Path("tests/shared/data/battery_soh_featurset")
-#     FS_PATH = DATA_DIR / "FeatureSet_NMC_charge_pulses"
+    if target_type == "numeric":
+        targets = {
+            k: generate_dummy_data(shape=v, dtype="float")
+            for k, v in target_shape_map.items()
+        }
+    elif target_type == "categorical":
+        targets = {
+            k: generate_dummy_data(shape=v, dtype="str", choices=["A", "B", "C"])
+            for k, v in target_shape_map.items()
+        }
+    else:
+        msg = f"Unsupported target_type: {target_type}"
+        raise ValueError(msg)
 
-#     if not FS_PATH.exists():
-#         DATA_URL = "https://raw.githubusercontent.com/REIL-UConn/fine-tuning-for-rapid-soh-estimation/main/processed_data/UConn-ILCC-NMC/data_slowpulse_1.pkl"
-#         DATA_PATH = DATA_DIR / "NMC_raw_data.pkl"
-#         DATA_DIR.mkdir(exist_ok=True, parents=True)
+    tags = {
+        k: generate_dummy_data(
+            shape=(n_samples,),
+            dtype=v,
+            choices=["red", "blue", "green"] if v == "str" else None,
+        )
+        for k, v in tag_type_map.items()
+    }
 
-#         if not DATA_PATH.exists():
-#             urllib.request.urlretrieve(url=DATA_URL, filename=DATA_PATH)  # noqa: S310
-
-#         with warnings.catch_warnings():
-#             warnings.simplefilter("ignore", category=DeprecationWarning)
-#             data = pickle.load(Path.open(DATA_PATH, "rb"))
-
-#         fs = FeatureSet.from_dict(
-#             label="PulseFeatures",
-#             data={
-#                 "voltage": data["voltage"],
-#                 "soh": data["soh"],
-#                 "cell_id": data["cell_id"],
-#                 "group_id": data["group_id"],
-#                 "pulse_type": data["pulse_type"],
-#                 "pulse_soc": data["soc"],
-#             },
-#             feature_keys="voltage",
-#             target_keys="soh",
-#             tag_keys=["cell_id", "group_id", "pulse_type", "pulse_soc"],
-#         )
-#         fs_charge_only = fs.filter(pulse_type="chg")
-#         fs_charge_only.label = "ChargePulses"
-
-#         # Simple split
-#         fs_charge_only.split_random(
-#             ratios={"train": 0.5, "val": 0.3, "test": 0.2},
-#             group_by="cell_id",
-#         )
-
-#         # Apply basic preprocessing (shift start of pulse to 0 and add MinMax)
-#         fs_charge_only.fit_transform(
-#             fit="train.features",
-#             apply="features",
-#             transform=FeatureTransform(PerSampleZeroStart()),
-#         )
-#         fs_charge_only.fit_transform(
-#             fit="train.features",
-#             apply="features",
-#             transform=FeatureTransform(MinMaxScaler()),
-#         )
-
-#         # Normalize targets
-#         fs_charge_only.fit_transform(
-#             fit="train.targets",
-#             apply="targets",
-#             transform=FeatureTransform(MinMaxScaler()),
-#         )
-#         fs_charge_only.save(FS_PATH, overwrite_existing=True)
-
-#     else:
-#         fs_charge_only = FeatureSet.load(FS_PATH)
-
-#     return fs_charge_only
+    return FeatureSet.from_dict(
+        label=label,
+        data=features | targets | tags,
+        feature_keys=list(feature_shape_map.keys()),
+        target_keys=list(target_shape_map.keys()),
+        tag_keys=list(tag_type_map.keys()),
+    )
