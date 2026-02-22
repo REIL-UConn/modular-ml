@@ -43,16 +43,16 @@ def resolve_activation(
             If `activation` is a string but `backend` is not provided.
 
     Examples:
-    ```python
-        >>> resolve_activation("relu", backend="torch")
-        ReLU()
+        ```python
+        resolve_activation("relu", backend="torch")
+        # ReLU()
 
-        >>> resolve_activation(torch.nn.Tanh())
-        Tanh()
+        resolve_activation(torch.nn.Tanh())
+        # Tanh()
 
-        >>> resolve_activation(tf.keras.layers.ReLU)
-        <class 'keras.layers.activation.relu.ReLU'>
-    ```
+        resolve_activation(tf.keras.layers.ReLU)
+        # <class 'keras.layers.activation.relu.ReLU'>
+        ```
 
     Notes:
         - Passing instantiated objects (`torch.nn.ReLU()`, `tf.keras.layers.ReLU()`)
@@ -112,13 +112,13 @@ def resolve_activation_by_name(name: str, backend: Backend | str):
             selected backend.
 
     Examples:
-    ```python
-        >>> resolve_activation_by_name("relu", "torch")
-        ReLU()
+        ```python
+        resolve_activation_by_name("relu", "torch")
+        # ReLU()
 
-        >>> resolve_activation_by_name("tanh", "tensorflow")
-        <keras.src.layers.activation.tanh.Tanh object at ...>
-    ```
+        resolve_activation_by_name("tanh", "tensorflow")
+        # <keras.src.layers.activation.tanh.Tanh object at ...>
+        ```
 
     Notes:
         - Each call returns a **new layer instance**, not a shared singleton.

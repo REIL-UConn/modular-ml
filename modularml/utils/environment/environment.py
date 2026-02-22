@@ -35,10 +35,9 @@ def import_from_path(path: str) -> Any:
     Dynamically import a class, function, or variable from a full module path.
 
     Example:
-    ```
-        >>> cls = import_from_path("torch.nn.Linear")
-        >>> Linear = cls
-    ```
+        ```python
+        cls = import_from_path("torch.nn.Linear")
+        ```
 
     Args:
         path (str):

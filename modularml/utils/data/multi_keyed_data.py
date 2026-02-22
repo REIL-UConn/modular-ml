@@ -110,7 +110,9 @@ class AxisSeries(Generic[T]):
         Values for all axes must be specified.
 
         Examples:
-            >>> series.at(epoch=0, batch=3)
+            ```python
+            series.at(epoch=0, batch=3)
+            ```
 
         Args:
             **coords: Axis name to value mappings for every axis.
@@ -311,7 +313,7 @@ class AxisSeries(Generic[T]):
         """
         if len(self.values()) < 1:
             msg = "Cannot take last element of an empty series."
-            return ValueError(msg)
+            raise ValueError(msg)
 
         # Sort values by `sort_by` keys, then return last
         if sort_by is not None:
@@ -320,7 +322,7 @@ class AxisSeries(Generic[T]):
             sort_by_idxs = [self.axes.index(x) for x in sort_by]
             sorted_keys = sorted(
                 self.keys(),
-                key=lambda x: (x[i] for i in sort_by_idxs),
+                key=lambda x: tuple(x[i] for i in sort_by_idxs),
             )
             sorted_vals = [self._data[k] for k in sorted_keys]
             return sorted_vals[-1]
@@ -473,12 +475,12 @@ class AxisSeries(Generic[T]):
             AxisSeries[T]: Series with singleton axes removed when possible.
 
         Examples:
-        ```python
-            >>> my_series.shape
-            ('epoch': 1, 'batch': 32)
-            >>> my_series.squeeze().shape
-            ('batch': 32)
-        ```
+            ```python
+            my_series.shape
+            # ('epoch': 1, 'batch': 32)
+            my_series.squeeze().shape
+            # ('batch': 32)
+            ```
 
         """
         # Get axis labels with cardinality of 1

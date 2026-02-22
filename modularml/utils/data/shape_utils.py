@@ -91,8 +91,6 @@ def get_shape(x) -> ShapeLike:
         ()
         >>> get_shape(np.zeros((3, 4)))
         (3, 4)
-        >>> get_shape(torch.zeros(2, 5))
-        (2, 5)
         >>> get_shape([[1, 2], [3, 4]])
         (2, 2)
         >>> get_shape(pd.Series([[1, 2], [3, 4], [5, 6]]))
