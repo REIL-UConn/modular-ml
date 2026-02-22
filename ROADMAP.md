@@ -1,6 +1,6 @@
 # ModularML Roadmap
 
-## v1.0.0 — Core ModularML Pipeline  
+## v1.0.0 — Core ModularML Pipeline
 ![Progress](https://img.shields.io/badge/progress-67%25-yellow)
 
 **Target Release:** Q1 2026
@@ -14,7 +14,6 @@
 - [x] Make all components fully **serializable** (FeatureSets, ModelGraphs, Stages, Samplers, Losses, Phases)
 - [x] Support exporting Experiments as:
   - [x] Full state (post-training, weights included)
-  - [ ] Config-only (reproducible structure, no weights)
 
 ---
 
@@ -78,7 +77,7 @@
 
 ---
 
-## v1.1.0 — Multi-Experiment Container & Comparison  
+## v1.1.0 — Multi-Experiment Container & Comparison
 ![Progress](https://img.shields.io/badge/progress-0%25-red)
 
 **Target Release:** Q3 2026
