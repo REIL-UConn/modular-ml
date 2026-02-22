@@ -1,7 +1,7 @@
 
 <div align="center">
 
-[![ModularML Banner](modularml/docs/_static/logos/modularml_logo_banner.png)](https://github.com/REIL-UConn/modular-ml)
+[![ModularML Banner](docs/_static/logos/modularml_logo_banner.png)](https://github.com/REIL-UConn/modular-ml)
 
 **Modular, fast, and reproducible ML experimentation built for R\&D.**
 
@@ -21,7 +21,7 @@ It enables rapid experimentation with complex model architectures, supports doma
 
 
 <p align="center">
-  <img src="modularml/docs/_static/figures/modularml_overview_diagram.png" alt="ModularML Overview Diagram" width="600"/>
+  <img src="docs/_static/figures/modularml_overview_diagram.png" alt="ModularML Overview Diagram" width="600"/>
 </p>
 <p align="center"><em>Figure 1. Overview of the ModularML framework, highlighting the three core abstractions: feature set preprocessing and splitting, modular model graph construction, and staged training orchestration.</em></p>
 
@@ -61,7 +61,7 @@ It enables rapid experimentation with complex model architectures, supports doma
 - All model definitions, training/sampling logic, evaluation, etc is structured under a single Experiment object, allowing for exporting and sharing via a single `.mml` file.
 
 ### Callbacks & Checkpointing
-- Built-in **callbacks** (EarlyStopping, Evaluation + metrics, custom progress hooks) plug directly into Train/Fit/Eval phases, allowing for fully flexibile workflows while retaining a structured experiment API.  
+- Built-in **callbacks** (EarlyStopping, Evaluation + metrics, custom progress hooks) plug directly into Train/Fit/Eval phases, allowing for fully flexibile workflows while retaining a structured experiment API.
 - **Checkpointing** can be attached at any major experiment or training execution step to persist model weights, optimizer states, FeatureSet transforms, and sampler cursors, making restarts seamless.
 
 
@@ -83,8 +83,10 @@ pip install git+https://github.com/REIL-UConn/modular-ml.git
 
 
 ## Explore More
-- **[Examples](examples/)** – Explore complete examples of how to set up FeatureSets, apply feature preprocessing, construct model graphs, and run training configurations.
-- **[Documentation](https://modular-ml.readthedocs.io/en/latest/)** – API reference, component explanations, configuration guides, and tutorials.
+- **[Explanation](docs/explanation/)** – Conceptual material that explains why ModularML is structured the way it is.
+- **[How-To](docs/how_to/)** – Deep dive on core components of the ModularML framework.
+- **[Tutorial](docs/tutorials/)** – Explore complete walkthroughs of solving common machine learning tasks with ModularML.
+- **[Full API Reference](https://modular-ml.readthedocs.io/en/latest/)** – API reference, component explanations, configuration guides, and tutorials.
 - **[Discussions](https://github.com/REIL-UConn/modular-ml/discussions)** – Join the community, ask questions, suggest features, or share use cases.
 
 ---
@@ -96,7 +98,7 @@ If you use ModularML in your research, please cite the following:
 
 ```bibtex
 @misc{nowacki2025modularml,
-  author       = {Ben Nowacki and contributors},
+  author       = {The ModularML Team},
   title        = {ModularML: Modular, fast, and reproducible ML experimentation built for R&D.
   },
   year         = {2025},
@@ -105,7 +107,6 @@ If you use ModularML in your research, please cite the following:
 <!--
 ## The Team
 ModularML was initiated in 2025 by Ben Nowacki as part of graduate research at the University of Connecticut.
-It is actively developed in collaboration with researchers and contributors across academia and industry, including partners from the Honda Research Institute, MathWorks, and the University of South Carolina.
 
 The project is community-driven and welcomes contributors interested in building modular, reproducible ML workflows for science and engineering. -->
 
