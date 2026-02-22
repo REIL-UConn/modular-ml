@@ -119,7 +119,12 @@ INACTIVE_NODE = NodeSpec(
 # Display options
 # ================================================
 @dataclass
-class FeatureSetDisplayOptions:
+class DisplayOptions:
+    """Base display options for Visualizer."""
+
+
+@dataclass
+class FeatureSetDisplayOptions(DisplayOptions):
     """
     Controls what information is shown when visualizing a FeatureSet.
 
@@ -140,6 +145,25 @@ class FeatureSetDisplayOptions:
     show_shapes: bool = True
     show_overlaps: bool = True
     show_n_samples: bool = True
+
+
+@dataclass
+class ModelGraphDisplayOptions(DisplayOptions):
+    """
+    Controls what information is shown when visualizing a ModelGraph.
+
+    Attributes:
+        show_features: Show feature columns on head nodes.
+        show_targets: Show target columns on head nodes.
+        show_tags: Show tag columns on head nodes.
+        show_frozen: Show frozen state (label text and dimmed styling) on ModelNodes.
+
+    """
+
+    show_features: bool = True
+    show_targets: bool = True
+    show_tags: bool = False
+    show_frozen: bool = True
 
 
 # ================================================

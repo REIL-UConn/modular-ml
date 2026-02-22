@@ -12,6 +12,7 @@ from modularml.core.references.featureset_reference import FeatureSetReference
 from modularml.core.sampling.base_sampler import BaseSampler
 from modularml.utils.data.formatting import ensure_list, find_duplicates
 from modularml.utils.errors.error_handling import ErrorMode
+from modularml.visualization.visualizer.visualizer import Visualizer
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -801,3 +802,10 @@ class ExperimentPhase(ABC):
 
         msg = f"Unknown ExperimentPhase subclass: {phase_type}."
         raise ValueError(msg)
+
+    # ================================================
+    # Visualizer
+    # ================================================
+    def visualize(self):
+        """Displays a mermaid diagram for this phase."""
+        return Visualizer(self).display_mermaid()

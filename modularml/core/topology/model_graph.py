@@ -40,6 +40,8 @@ from modularml.utils.topology.graph_search_utils import (
     is_head_node,
     is_tail_node,
 )
+from modularml.visualization.visualizer.styling import ModelGraphDisplayOptions
+from modularml.visualization.visualizer.visualizer import Visualizer
 
 if TYPE_CHECKING:
     from modularml.core.data.batch import Batch
@@ -710,6 +712,10 @@ class ModelGraph(Configurable, Stateful):
 
         # Update all nodes upstream of old_node
         for ref in ups_refs:
+            # FeatureSet refs are not graph nodes; skip them
+            if isinstance(ref, FeatureSetReference):
+                continue
+
             # Get all downstream refs of the upstream node, removing the old_node ref
             u_dwn_refs = [
                 r
@@ -2173,7 +2179,7 @@ class ModelGraph(Configurable, Stateful):
             filepath = _enforce_file_suffix(path=filepath, cls=Checkpoint)
 
         # Load checkpoint
-        ckpt: Checkpoint = serializer.load(filepath)
+        ckpt: Checkpoint = serializer.load(filepath, allow_packaged_code=True)
 
         # Set node states
         n_states = {
@@ -2194,3 +2200,37 @@ class ModelGraph(Configurable, Stateful):
         self._built = mg_state["is_built"]
 
         return self
+
+    # ================================================
+    # Visualizer
+    # ================================================
+    def visualize(
+        self,
+        *,
+        show_features: bool = False,
+        show_targets: bool = False,
+        show_tags: bool = False,
+        show_frozen: bool = True,
+    ):
+        """
+        Displays a mermaid diagram for this FeatureSet.
+
+        Args:
+            show_features (bool, optional):
+                Show feature columns on head nodes. Defaults to False.
+            show_targets (bool, optional):
+                Show target columns on head nodes. Defaults to False.
+            show_tags (bool | str, optional):
+                Show tags columns on head nodes. Defaults to False.
+            show_frozen (bool, optional):
+                Show frozen state (label text and dimmed styling) on ModelNodes
+                Defaults to True.
+
+        """
+        display_opts = ModelGraphDisplayOptions(
+            show_features=show_features,
+            show_targets=show_targets,
+            show_tags=show_tags,
+            show_frozen=show_frozen,
+        )
+        return Visualizer(self, display_options=display_opts).display_mermaid()

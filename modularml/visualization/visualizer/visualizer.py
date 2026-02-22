@@ -10,7 +10,7 @@ from IPython.display import Markdown, display
 from modularml.visualization.visualizer.internal_representation import GraphIR
 
 if TYPE_CHECKING:
-    from modularml.visualization.visualizer.styling import FeatureSetDisplayOptions
+    from modularml.visualization.visualizer.styling import DisplayOptions
 
 
 # ================================================
@@ -53,7 +53,7 @@ class Visualizer:
     def __init__(
         self,
         obj: Any,
-        display_options: FeatureSetDisplayOptions | None = None,
+        display_options: DisplayOptions | None = None,
     ):
         """
         Initializes the visualizer with the target object.
@@ -61,8 +61,9 @@ class Visualizer:
         Args:
             obj (Any): Object to visualize (FeatureSet, ModelGraph, TrainPhase,
                 EvalPhase, or FitPhase).
-            display_options (FeatureSetDisplayOptions | None): Display options
-                for FeatureSet visualization. Ignored for other object types.
+            display_options (DisplayOptions | None): Display options controlling
+                what is shown. Pass :class:`FeatureSetDisplayOptions` for FeatureSet
+                or :class:`ModelGraphDisplayOptions` for ModelGraph visualization.
 
         """
         self.obj = obj
@@ -83,7 +84,7 @@ class Visualizer:
         if isinstance(self.obj, FeatureSet):
             self._graph = GraphIR.from_featureset(self.obj, opts=self.display_options)
         elif isinstance(self.obj, ModelGraph):
-            self._graph = GraphIR.from_model_graph(self.obj)
+            self._graph = GraphIR.from_model_graph(self.obj, opts=self.display_options)
         elif isinstance(self.obj, TrainPhase):
             self._graph = GraphIR.from_train_phase(self.obj)
         elif isinstance(self.obj, EvalPhase):

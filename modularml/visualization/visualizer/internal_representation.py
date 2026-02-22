@@ -22,6 +22,7 @@ from modularml.visualization.visualizer.styling import (
     EdgeAnimationSpec,
     EdgeConnectionSpec,
     FeatureSetDisplayOptions,
+    ModelGraphDisplayOptions,
     NodeSpec,
 )
 
@@ -59,6 +60,7 @@ def _format_model_node_label(
     is_frozen: bool = False,
     upstream_features: tuple[str, ...] | None = None,
     upstream_targets: tuple[str, ...] | None = None,
+    upstream_tags: tuple[str, ...] | None = None,
 ) -> str:
     """
     Build rich HTML label for a ModelNode.
@@ -67,13 +69,15 @@ def _format_model_node_label(
         node_label:
             Display name of the node.
         backend:
-            Backend value string (e.g. `"torch"`). Shown as `<torch>`.
+            Backend value string (e.g. ``"torch"``). Shown as ``<torch>``.
         is_frozen:
             Whether the node is frozen.
         upstream_features:
             Feature column selectors from FeatureSetReference (only for head nodes).
         upstream_targets:
             Target column selectors from FeatureSetReference (only for head nodes).
+        upstream_tags:
+            Tag column selectors from FeatureSetReference (only for head nodes).
 
     """
     header = "<b>ModelNode</b>"
@@ -86,7 +90,7 @@ def _format_model_node_label(
     lines = [header, f"'{node_label}'{meta_line}"]
 
     # Head-node column listing
-    if upstream_features or upstream_targets:
+    if upstream_features or upstream_targets or upstream_tags:
         lines.append("──────────")
         if upstream_features:
             lines.append("<b>features</b>")
@@ -95,6 +99,10 @@ def _format_model_node_label(
         if upstream_targets:
             lines.append("<b>targets</b>")
             for col in upstream_targets:
+                lines.append(f"  {col}")
+        if upstream_tags:
+            lines.append("<b>tags</b>")
+            for col in upstream_tags:
                 lines.append(f"  {col}")
 
     return "<br>".join(lines)
@@ -265,9 +273,10 @@ def _insert_samplers(
     bindings: list[InputBinding],
     node_map: dict[str, NodeIR],
     fs_map: dict[str, NodeIR],
+    mg: ModelGraph,
     n_ctr: int,
     e_ctr: int,
-) -> tuple[int, int]:
+) -> tuple[int, int, list[EdgeIR]]:
     """Insert Sampler nodes between FeatureSets and head GraphNodes."""
     for binding in bindings:
         if binding.sampler is None:
@@ -282,7 +291,7 @@ def _insert_samplers(
             continue
 
         # Remove the direct FS -> head edge
-        edges[:] = [
+        edges = [
             e for e in edges if not (e.src.id == fs_nir.id and e.dst.id == head_nir.id)
         ]
 
@@ -316,19 +325,29 @@ def _insert_samplers(
         )
         e_ctr += 1
 
-        # Sampler -> HeadNode edge
+        # Sampler -> HeadNode edge (show head node's input shape)
+        head_node = mg.nodes.get(head_id) if mg is not None else None
+        shape_label = None
+        if head_node is not None:
+            try:
+                if hasattr(head_node, "input_shape"):
+                    shape_label = str(head_node.input_shape)
+                elif hasattr(head_node, "input_shapes"):
+                    shape_label = str(head_node.input_shapes[binding.upstream_ref])
+            except Exception:  # noqa: BLE001, S110
+                pass
         edges.append(
             EdgeIR(
                 id=f"e{e_ctr}",
                 src=sampler_nir,
                 dst=head_nir,
-                conn_spec=EdgeConnectionSpec(style="-->", label=None),
+                conn_spec=EdgeConnectionSpec(style="-->", label=shape_label),
                 anim_spec=EDGE_ANIMATION_DASH_MEDIUM,
             ),
         )
         e_ctr += 1
 
-    return n_ctr, e_ctr
+    return n_ctr, e_ctr, edges
 
 
 def _attach_losses(
@@ -371,6 +390,20 @@ def _attach_losses(
         e_ctr += 1
 
     return n_ctr, e_ctr
+
+
+def _animate_active_edges(
+    edges: list[EdgeIR],
+    node_map: dict[str, NodeIR],
+    active_ids: set[str],
+) -> None:
+    """Apply dash animation to all edges whose source and destination are active graph nodes."""
+    # Build a set of NodeIR ids that correspond to active graph nodes
+    active_nir_ids = {nir.id for nid, nir in node_map.items() if nid in active_ids}
+
+    for edge in edges:
+        if edge.src.id in active_nir_ids and edge.dst.id in active_nir_ids:
+            edge.anim_spec = EDGE_ANIMATION_DASH_MEDIUM
 
 
 def _annotate_split_edges(
@@ -425,6 +458,7 @@ class GraphIR:
     def _build_model_graph_ir(
         cls,
         mg: ModelGraph,
+        opts: ModelGraphDisplayOptions | None = None,
     ) -> tuple[
         list[NodeIR],
         list[EdgeIR],
@@ -435,6 +469,10 @@ class GraphIR:
     ]:
         """
         Build the base IR from a ModelGraph.
+
+        Args:
+            mg: The model graph to convert.
+            opts: Display options controlling what is shown on nodes.
 
         Returns:
             tuple containing:
@@ -450,6 +488,9 @@ class GraphIR:
         from modularml.core.topology.merge_nodes.merge_node import MergeNode
         from modularml.core.topology.model_node import ModelNode
 
+        if opts is None:
+            opts = ModelGraphDisplayOptions()
+
         nodes: list[NodeIR] = []
         edges: list[EdgeIR] = []
         node_map: dict[str, NodeIR] = {}  # graph node_id -> NodeIR
@@ -462,24 +503,30 @@ class GraphIR:
             node = mg.nodes[node_id]
 
             if isinstance(node, ModelNode):
-                # Collect upstream features/targets for head nodes
-                ups_features: tuple[str, ...] | None = None
-                ups_targets: tuple[str, ...] | None = None
+                # Collect upstream features/targets/tags for head nodes
+                ups_features: list[str] | None = None
+                ups_targets: list[str] | None = None
+                ups_tags: list[str] | None = None
                 if is_head_node(node):
                     for ref in node.get_upstream_refs(error_mode=ErrorMode.IGNORE):
                         if isinstance(ref, FeatureSetReference):
-                            ups_features = ref.features
-                            ups_targets = ref.targets
-                            break  # ModelNode has max 1 upstream
+                            if opts.show_features and ref.features:
+                                ups_features = [f.split(".")[1] for f in ref.features]
+                            if opts.show_targets and ref.targets:
+                                ups_targets = [t.split(".")[1] for t in ref.targets]
+                            if opts.show_tags and ref.tags:
+                                ups_tags = [t.split(".")[1] for t in ref.tags]
 
+                show_frozen = node.is_frozen and opts.show_frozen
                 label = _format_model_node_label(
                     node_label=node.label,
                     backend=str(node.backend.value) if node.is_built else None,
-                    is_frozen=node.is_frozen,
+                    is_frozen=show_frozen,
                     upstream_features=ups_features,
                     upstream_targets=ups_targets,
+                    upstream_tags=ups_tags,
                 )
-                spec = MODEL_NODE_FROZEN if node.is_frozen else MODEL_NODE
+                spec = MODEL_NODE_FROZEN if show_frozen else MODEL_NODE
                 nir = NodeIR(id=f"n{n_ctr}", spec=spec, label=label)
 
             elif isinstance(node, MergeNode):
@@ -533,7 +580,13 @@ class GraphIR:
                         n_ctr += 1
 
                     src_nir = fs_map[fs_id]
-                    edge_label = f"{ref.features}\n{ref.targets}"
+                    try:
+                        if hasattr(node, "input_shape"):
+                            edge_label = node.input_shape
+                        elif hasattr(node, "input_shapes"):
+                            edge_label = node.inputs_shapes[ref]
+                    except Exception:  # noqa: BLE001
+                        edge_label = None
 
                 else:
                     # GraphNodeReference -> edge to another graph node
@@ -545,12 +598,11 @@ class GraphIR:
                     # Show output shape of upstream node on the edge
                     edge_label = None
                     ups_node = mg.nodes.get(ups_node_id)
-                    if ups_node is not None and hasattr(ups_node, "output_shape"):
+                    if ups_node is not None:
                         try:
-                            if ups_node.is_built:
+                            if hasattr(ups_node, "output_shape"):
                                 edge_label = str(ups_node.output_shape)
                         except Exception:  # noqa: BLE001, S110
-                            # Shape not available; skip label
                             pass
 
                 edges.append(
@@ -604,18 +656,23 @@ class GraphIR:
     # Public constructors
     # ------------------------------------------------
     @classmethod
-    def from_model_graph(cls, mg: ModelGraph) -> GraphIR:
+    def from_model_graph(
+        cls,
+        mg: ModelGraph,
+        opts: ModelGraphDisplayOptions | None = None,
+    ) -> GraphIR:
         """
         Converts a ModelGraph into a GraphIR.
 
         Args:
             mg (ModelGraph): The model graph to convert.
+            opts (ModelGraphDisplayOptions | None): Display options.
 
         Returns:
             GraphIR: The resulting internal graph representation.
 
         """
-        nodes, edges, _, _, _, _ = cls._build_model_graph_ir(mg)
+        nodes, edges, _, _, _, _ = cls._build_model_graph_ir(mg, opts=opts)
         return cls(nodes=nodes, edges=edges, label=mg.label)
 
     @classmethod
@@ -800,15 +857,19 @@ class GraphIR:
                 nir.spec = INACTIVE_NODE
 
         # Insert samplers
-        n_ctr, e_ctr = _insert_samplers(
+        n_ctr, e_ctr, edges = _insert_samplers(
             nodes,
             edges,
             phase.input_sources,
             node_map,
             fs_map,
+            mg,
             n_ctr,
             e_ctr,
         )
+
+        # Animate all edges between active nodes
+        _animate_active_edges(edges, node_map, active_ids)
 
         # Attach losses
         if phase.losses:
@@ -851,8 +912,31 @@ class GraphIR:
             if nir.spec == MODEL_NODE:
                 nir.spec = MODEL_NODE_FROZEN
 
-        # Annotate edges with split info
-        _annotate_split_edges(edges, phase.input_sources, node_map, fs_map)
+        # Dim inactive nodes
+        active_ids = set(phase.active_nodes)
+        for nid, nir in node_map.items():
+            if nid not in active_ids:
+                nir.spec = INACTIVE_NODE
+
+        # Insert samplers (if any bindings define one)
+        has_samplers = any(b.sampler is not None for b in phase.input_sources)
+        if has_samplers:
+            n_ctr, e_ctr, edges = _insert_samplers(
+                nodes,
+                edges,
+                phase.input_sources,
+                node_map,
+                fs_map,
+                mg,
+                n_ctr,
+                e_ctr,
+            )
+        else:
+            # Annotate edges with split info (no sampler nodes to show)
+            _annotate_split_edges(edges, phase.input_sources, node_map, fs_map)
+
+        # Animate all edges between active nodes
+        _animate_active_edges(edges, node_map, active_ids)
 
         # Attach losses if any
         if phase.losses:
@@ -901,8 +985,31 @@ class GraphIR:
             if nir.spec == MODEL_NODE:
                 nir.spec = MODEL_NODE_FROZEN
 
-        # Annotate edges with split info
-        _annotate_split_edges(edges, phase.input_sources, node_map, fs_map)
+        # Dim inactive nodes
+        active_ids = set(phase.active_nodes)
+        for nid, nir in node_map.items():
+            if nid not in active_ids:
+                nir.spec = INACTIVE_NODE
+
+        # Insert samplers (if any bindings define one)
+        has_samplers = any(b.sampler is not None for b in phase.input_sources)
+        if has_samplers:
+            n_ctr, e_ctr, edges = _insert_samplers(
+                nodes,
+                edges,
+                phase.input_sources,
+                node_map,
+                fs_map,
+                mg,
+                n_ctr,
+                e_ctr,
+            )
+        else:
+            # Annotate edges with split info (no sampler nodes to show)
+            _annotate_split_edges(edges, phase.input_sources, node_map, fs_map)
+
+        # Animate all edges between active nodes
+        _animate_active_edges(edges, node_map, active_ids)
 
         # Attach losses if any
         if phase.losses:
