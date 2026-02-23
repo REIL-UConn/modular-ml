@@ -147,7 +147,7 @@ class RandomSplitter(BaseSplitter):
 
         # Case 3: No grouping or stratification
         n = len(view)
-        rel_indices = np.arange()
+        rel_indices = np.arange(n)
         self.rng.shuffle(rel_indices)
         boundaries = self._compute_split_boundaries(n)
         split_indices: dict[str, np.ndarray] = {}
