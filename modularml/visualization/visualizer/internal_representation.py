@@ -562,9 +562,14 @@ class GraphIR:
                             fs_label = _format_featureset_label(
                                 fs_label=fs.label,
                                 n_samples=len(fs),
-                                splits=fs.available_splits
-                                if fs.available_splits
-                                else None,
+                                splits=(
+                                    fs.available_splits
+                                    if (
+                                        opts.show_splits
+                                        and len(fs.available_splits) > 0
+                                    )
+                                    else None
+                                ),
                             )
                         except Exception:  # noqa: BLE001
                             fs_label = _format_featureset_label(

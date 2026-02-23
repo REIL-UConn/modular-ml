@@ -157,6 +157,7 @@ class ModelGraphDisplayOptions(DisplayOptions):
         show_targets: Show target columns on head nodes.
         show_tags: Show tag columns on head nodes.
         show_frozen: Show frozen state (label text and dimmed styling) on ModelNodes.
+        show_splits: Show available splits on FeatureSet nodes
 
     """
 
@@ -164,6 +165,7 @@ class ModelGraphDisplayOptions(DisplayOptions):
     show_targets: bool = True
     show_tags: bool = False
     show_frozen: bool = True
+    show_splits: bool = False
 
 
 # ================================================
