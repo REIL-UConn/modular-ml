@@ -133,7 +133,8 @@ class Visualizer:
         Requires Mermaid support in the notebook viewer.
         """
         mermaid_str = self.get_mermaid_str()
-        display(Markdown(f"```mermaid\n{mermaid_str}\n```"))
+        disp_str = f"```{{mermaid}}\n{mermaid_str}\n```"
+        display(Markdown(disp_str))
 
     def display(self, backend: str = "mermaid"):
         """

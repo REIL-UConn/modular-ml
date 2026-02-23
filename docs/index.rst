@@ -12,4 +12,4 @@ Version: |version|
 
    /explanation/index
    /how_to/index
-   /reference/index
+   /tutorials/index

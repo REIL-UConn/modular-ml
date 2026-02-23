@@ -10,7 +10,7 @@ This document explains how phases work, what each phase type is responsible for,
 
 All phases share a common base and specialize for their execution mode:
 
-```mermaid
+```{mermaid}
 classDiagram
     ExperimentPhase <|-- TrainPhase
     ExperimentPhase <|-- EvalPhase

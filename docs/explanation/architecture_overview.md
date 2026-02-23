@@ -14,7 +14,7 @@ ModularML addresses this by separating concerns into layers that can be composed
 
 The framework is organized into four conceptual layers, each building on the one below it:
 
-```mermaid
+```{mermaid}
 graph TB
     subgraph "Layer 1: Data Storage"
         FeatureSet --> SampleCollection
@@ -46,10 +46,10 @@ graph TB
 
 ```
 
-    
-    
 
-    
+
+
+
 
 ### Layer 1: Data storage
 
@@ -107,7 +107,7 @@ The `AppliedLoss` object binds a loss function to a specific node's output and a
 
 During each batch pass, an `ExecutionContext` is created to hold the transient state: which inputs were fed to which head nodes, what each node produced, and what losses were accumulated. This context is available to callbacks and loss functions, giving them full visibility into the current execution state without requiring global mutables.
 
-For more on how phases structure the training lifecycle, see [Training Phases](training_phases.md). For details on what the execution context tracks and how it surfaces in callbacks, see [Execution Context](execution_context.md).
+For more on how phases structure the training lifecycle, see [Training Phases](training_phases.md).
 
 ## Cross-cutting concerns
 
@@ -148,4 +148,3 @@ A typical ModularML workflow moves through the layers in sequence:
 
 Each step is independent enough that it can be modified without affecting the others. Swapping a sampler does not require changing the graph. Adding a new model stage does not require rewriting the experiment. This composability is the central design goal of ModularML.
 
-For a detailed walkthrough of how data moves through each stage, see [Data Flow](data_flow.md).

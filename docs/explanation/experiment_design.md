@@ -25,7 +25,7 @@ The policy choice reflects a tension between safety and convenience. In a script
 
 An Experiment's execution plan is a `PhaseGroup`—an ordered container of phases and nested sub-groups. Phases are added via `add_phase()` and executed in registration order when `experiment.run()` is called.
 
-```mermaid
+```{mermaid}
 graph LR
     Experiment --> PhaseGroup
     PhaseGroup --> FitPhase
@@ -133,7 +133,7 @@ The axis structure enables flexible querying and aggregation:
 
 Each AxisSeries subclass declares its supported reduction methods. `LossDataSeries` supports `"mean"`, `"sum"`, `"first"`, and `"last"`. `TensorDataSeries` supports `"first"`, `"last"`, and `"concat"` (backend-aware concatenation). This type-level constraint prevents invalid reductions—you cannot average tensors, but you can average scalar losses.
 
-AxisSeries appears throughout the results system because the same pattern—multi-dimensional indexed data with semantic axes—applies to losses, tensors, metrics, batches, and callback results alike. Rather than building a custom query interface for each, the framework uses a single generic container with type-specific specializations. 
+AxisSeries appears throughout the results system because the same pattern—multi-dimensional indexed data with semantic axes—applies to losses, tensors, metrics, batches, and callback results alike. Rather than building a custom query interface for each, the framework uses a single generic container with type-specific specializations.
 
 *Please note that this AxisSeries class, and broader result tracking/access is still an active focus area, and is subject to change in future releases.*
 

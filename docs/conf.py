@@ -3,14 +3,10 @@
 # For the full list of built-in configuration values, see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
-import importlib.metadata
-import os
-import sys
-
-sys.path.insert(0, os.path.abspath("../"))
-
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
+
+import importlib.metadata
 
 project = "ModularML"
 copyright = "2025, The ModularML Team"
@@ -19,7 +15,6 @@ version = importlib.metadata.version("modularml")
 release = version
 language = "en"
 
-
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
@@ -27,22 +22,32 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
-    "myst_parser",
-    "nbsphinx",
+    "myst_nb",
     "sphinx_design",
     "sphinx_copybutton",
     "sphinx_inline_tabs",
+    "sphinxcontrib.mermaid",
 ]
-source_suffix = {
-    ".rst": "restructuredtext",
-}
 
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
-master_doc = "index"
 
 # Mock heavy optional dependencies so autodoc can import all modules
-autodoc_mock_imports = ["matplotlib", "torch", "tensorflow", "scikit-learn"]
+autodoc_mock_imports = [
+    "matplotlib",
+    "torch",
+    "tensorflow",
+    "scikit-learn",
+    "sklearn",
+    "optuna",
+]
+
+nb_render_markdown_format = "myst"
+myst_enable_extensions = [
+    "colon_fence",
+    "deflist",
+]
+myst_fence_as_directive = ["mermaid"]
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
@@ -83,10 +88,3 @@ html_theme_options = {
         "last-updated",
     ],
 }
-
-# -- nbsphinx config ---------------------------------------------------------
-nbsphinx_execute = "never"  # do not execute notebooks during doc build
-nbsphinx_requirejs_path = ""  # prevent conflicts with require.js
-
-# Optional: avoid Pandoc by keeping Markdown cells as raw HTML
-nbsphinx_allow_errors = True  # (not strictly required, but handy for CI)
