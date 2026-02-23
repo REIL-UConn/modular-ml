@@ -373,7 +373,7 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
     def _resolve_caller_attributes(
         self,
     ) -> tuple[SampleCollection, list[str] | None, np.ndarray | None]:
-        return (self.collection, None, None)
+        return (self.collection, None, None, self.node_id)
 
     # ================================================
     # FeatureSet Properties & Dunders

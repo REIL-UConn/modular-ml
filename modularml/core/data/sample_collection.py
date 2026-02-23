@@ -107,6 +107,23 @@ class SampleCollection:
         self._validate_schema()
         self._embed_metadata()
 
+    @classmethod
+    def _from_projection(cls, table: pa.Table) -> SampleCollection:
+        """
+        Create a :class:`SampleCollection` from a pre-validated table projection.
+
+        Description:
+            Bypasses ``__post_init__`` validation, in particular the UUID
+            uniqueness check.  This is required for read-only projections
+            produced by :meth:`SampleCollectionMixin._resolve_collection`
+            where duplicate row indices are intentional (e.g. sampling with
+            replacement) and the original UUIDs must be preserved.
+        """
+        obj = object.__new__(cls)
+        obj.table = table
+        obj.schema = SampleSchema.from_table(table)
+        return obj
+
     def _ensure_sample_id(self):
         """
         Ensure the presence of a unique string-based `sample_id` column.
@@ -1053,6 +1070,8 @@ class SampleCollection:
         all_ds = []
         all_rs = []
         for col in columns:
+            if col == DOMAIN_SAMPLE_UUIDS:
+                continue
             domain, _, rep = col.split(".", maxsplit=2)
             all_ds.append(domain)
             all_rs.append(rep)
