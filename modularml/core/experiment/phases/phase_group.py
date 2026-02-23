@@ -34,11 +34,11 @@ class PhaseGroup:
         phases: List of phases (or nested PhaseGroups) in execution order.
 
     Example:
-    ```python
+        ```python
         group = PhaseGroup("training_workflow")
         group.add_phase(train_phase)
         group.add_phase(eval_phase)
-    ```
+        ```
 
     """
 

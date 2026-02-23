@@ -10,7 +10,6 @@ from modularml.core.data.schema_constants import (
     DOMAIN_SAMPLE_UUIDS,
     DOMAIN_TAGS,
     DOMAIN_TARGETS,
-    INVALID_LABEL_CHARACTERS,
     REP_RAW,
     REP_TRANSFORMED,
     ROLE_ANCHOR,

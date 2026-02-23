@@ -71,11 +71,11 @@ class ExperimentReference(ReferenceLike, Configurable):
             str: Dotted string representation of the reference.
 
         Example:
-        ```python
-        ref = DataReference(node="PulseFeatures", domain="features", key="voltage")
-        ref.to_string()
-        "PulseFeatures.features.voltage"
-        ```
+            ```python
+            ref = DataReference(node="PulseFeatures", domain="features", key="voltage")
+            ref.to_string()
+            "PulseFeatures.features.voltage"
+            ```
 
         """
         attrs = {

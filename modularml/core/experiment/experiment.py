@@ -262,10 +262,10 @@ class Experiment:
             even if an exception is raised.
 
         Examples:
-        ```python
+            ```python
             with experiment.disable_checkpointing():
                 experiment.run_phase(training_phase)
-        ```
+            ```
 
         """
         prev = self._checkpointing_disabled

@@ -31,7 +31,7 @@ class Visualizer:
     control which sections are shown (features, targets, tags, shapes, overlaps).
 
     Examples:
-    ```python
+        ```python
         # Visualize a FeatureSet (tags only on root node by default)
         Visualizer(feature_set).display()
 
@@ -46,7 +46,7 @@ class Visualizer:
 
         # Export to .mmd file
         Visualizer(model_graph).mermaid_to_mmd("my_graph")
-    ```
+        ```
 
     """
 

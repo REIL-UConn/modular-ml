@@ -64,17 +64,19 @@ class EarlyStopping(Callback):
         in-memory state snapshots as a fallback.
 
     Examples:
-    ```python
+        ```python
         # Stop if validation loss doesn't improve for 5 epochs
         phase.add_callback(EarlyStopping(monitor="val_loss", patience=5))
 
         # Stop and restore model to best epoch
-        phase.add_callback(EarlyStopping(
-            monitor="val_loss",
-            patience=5,
-            restore_best=True,
-        ))
-    ```
+        phase.add_callback(
+            EarlyStopping(
+                monitor="val_loss",
+                patience=5,
+                restore_best=True,
+            )
+        )
+        ```
 
     """
 

@@ -33,7 +33,7 @@ from modularml.callbacks.eval_loss_metric import EvalLossMetric
 Other callbacks are accessed with:
 
 ```python
-    from modularml.callbacks import ...
+from modularml.callbacks import ...
 ```
 """
 
@@ -57,7 +57,7 @@ from modularml.core.models.tensorflow_base_model import TensorflowBaseModel
 Built-in models and merge nodes are accessed with:
 
 ```python
-    from modularml.models import ...
+from modularml.models import ...
 ```
 """
 
@@ -78,7 +78,7 @@ from modularml.core.sampling.similiarity_condition import SimilarityCondition
 All built-in splitters are accessed with:
 
 ```python
-    from modularml.splitters import ...
+from modularml.splitters import ...
 ```
 """
 
@@ -93,7 +93,7 @@ supported_scalers = Scaler.get_supported_scalers()
 All built-in transformed are accessed with:
 
 ```python
-    from modularml.transforms import ...
+from modularml.transforms import ...
 ```
 """
 

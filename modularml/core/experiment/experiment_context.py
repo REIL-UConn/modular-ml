@@ -116,10 +116,10 @@ class ExperimentContext:
         Activates a new ExperimentContext within the context scope.
 
         Example Usage:
-        ```python
-        with ExperimentContext(experiment=my_exp).activate():
-            ref.resolve()  # resolves using a context of `my_exp`
-        ```
+            ```python
+            with ExperimentContext(experiment=my_exp).activate():
+                ref.resolve()  # resolves using a context of `my_exp`
+            ```
 
         Yields:
             ExperimentContext
@@ -149,14 +149,14 @@ class ExperimentContext:
             other meta-execution procedures.
 
         Example:
-        ```python
+            ```python
             ctx = ExperimentContext.get_active()
             with ctx.temporary():
                 ctx.set_registration_policy("overwrite")
                 ctx.register_experiment_node(new_fs)
                 run_fold()
             # context fully restored
-        ```
+            ```
 
         Yields:
             ExperimentContext
@@ -234,10 +234,10 @@ class ExperimentContext:
         to the active ExperimentContext.
 
         Example Usage:
-        ```python
-        with ExperimentContext.dont_register():
-            internal_copy = ModelStage.from_state(...)
-        ```
+            ```python
+            with ExperimentContext.dont_register():
+                internal_copy = ModelStage.from_state(...)
+            ```
 
         """
         old = self._policy

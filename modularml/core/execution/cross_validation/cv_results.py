@@ -29,14 +29,14 @@ class CVResults(PhaseGroupResults):
         :class:`PhaseGroupResults` containing :class:`TrainResults`,
         :class:`EvalResults`, etc.
 
-        Structure:
-        ```python
-            CVResults(label='CV')
-            ├── fold_0: PhaseGroupResults
-            │     ├── train: TrainResults
-            │     └── eval: EvalResults
-            ├── fold_1: PhaseGroupResults
-            ...
+    Structure:
+        ```
+        CVResults(label='CV')
+        ├── fold_0: PhaseGroupResults
+        │     ├── train: TrainResults
+        │     └── eval: EvalResults
+        ├── fold_1: PhaseGroupResults
+        ...
         ```
 
         The :meth:`collect` method applies an extractor to each fold and

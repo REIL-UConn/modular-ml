@@ -72,7 +72,7 @@ class ConcatNode(MergeNode):
             Value to use for constant padding. Defaults to 0.0.
 
     Example:
-    ```python
+        ```python
         fs_ref = FeatureSet(...).reference(columns=...)
         mn = ModelNode(...)
 
@@ -81,9 +81,9 @@ class ConcatNode(MergeNode):
             label="merge",
             upstream_refs=[fs_ref, mn],
             concat_axis=1,
-            concat_axis_targets="first", # first = fs_ref
+            concat_axis_targets="first",  # first = fs_ref
         )
-    ```
+        ```
 
     """
 

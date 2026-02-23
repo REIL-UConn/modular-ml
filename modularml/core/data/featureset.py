@@ -1259,11 +1259,13 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
             restore_scalers (bool, optional):
                 If True, all ScalerRecords are re-applied in order to
                 regenerate transformed representations.
+                If True, `restore_splits` must be also be enabled.
 
             register (bool, optional):
                 Whether to register the copied FeatureSet in the
                 ExperimentContext registry. If True, a new node ID will
                 be generated for the copied instance.
+                Must be True if `restore_scalers` or `restore_splits` are enabled.
 
         Returns:
             FeatureSet:
@@ -1275,6 +1277,13 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
                 scalers depend on split-specific fitting.
 
         """
+        if (restore_scalers or restore_splits) and not register:
+            msg = (
+                "Cannot copy splits and/or scaler without registering the copy. "
+                "Set `register=True` and try again."
+            )
+            raise ValueError(msg)
+
         new_label = label if label is not None else f"{self.label}_copy"
 
         # Copy collection (only REP_RAW columns)
@@ -1284,10 +1293,13 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
         )
 
         # Instantiate new FeatureSet
+        # When restoring splits, the node must be registered so that
+        # splitter reference resolution (e.g. group_by) can find it.
+        needs_registration = register or restore_splits or restore_scalers
         new_fs = FeatureSet(
             label=new_label,
             collection=new_coll,
-            register=register,
+            register=needs_registration,
         )
 
         # Restore splits (if specified)

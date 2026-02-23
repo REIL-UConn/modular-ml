@@ -151,11 +151,11 @@ class AxisSeries(Generic[T]):
         Each coordinate may be a scalar or an iterable of allowed values.
 
         Examples:
-        ```python
+            ```python
             series.where(epoch=1)
             series.where(epoch=[1, 2, 3])
             series.where(epoch=[0, 1], batch=0)
-        ```
+            ```
 
         Args:
             **coords: Axis names mapped to scalar values, iterables of values, or predicates.
@@ -198,10 +198,10 @@ class AxisSeries(Generic[T]):
         Select all values matching a partial axis specification.
 
         Examples:
-        ```python
+            ```python
             series.select(epoch=0)
             series.select(epoch=[1, 2])
-        ```
+            ```
 
         Args:
             **coords: Axis selectors defined via scalars, iterables, or predicates.
@@ -431,11 +431,11 @@ class AxisSeries(Generic[T]):
             AxisSeries[T]: New series with the specified axis removed.
 
         Examples:
-        ```python
+            ```python
             train_results.losses(...).collapse("batch", reducer=LossCollection.mean)
             train_results.losses(...).collapse("batch", reducer="mean")
             train_results.tensors(...).collapse("batch", reducer=torch.stack)
-        ```
+            ```
 
         """
         # Validate axis name
