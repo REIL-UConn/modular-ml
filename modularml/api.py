@@ -11,6 +11,7 @@ from modularml.core.experiment.phases.phase import InputBinding
 from modularml.core.experiment.phases.fit_phase import FitPhase
 from modularml.core.experiment.results.fit_results import FitResults
 from modularml.core.experiment.checkpointing import Checkpointing
+from modularml.core.experiment.phases.train_phase import ResultRecording
 
 
 # ================================================
@@ -118,6 +119,7 @@ __all__ = [
     "ModelNode",
     "Optimizer",
     "PhaseGroup",
+    "ResultRecording",
     "Scaler",
     "SimilarityCondition",
     "TensorflowBaseModel",

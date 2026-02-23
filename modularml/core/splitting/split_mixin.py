@@ -774,6 +774,7 @@ class SplitMixin:
         *,
         group_by: str | Sequence[str] | None = None,
         stratify_by: str | Sequence[str] | None = None,
+        strict_stratification: bool = False,
         seed: int = 13,
         return_views: bool = False,
         register: bool = True,
@@ -794,11 +795,14 @@ class SplitMixin:
         Args:
             ratios (Mapping[str, float]):
                 Subset ratios that sum to 1.0 (e.g., `{"train": 0.7, "val": 0.3}`).
-            group_by (str | Sequence[str] | None):
-                Tag keys that ensure grouped samples stay together.
-            stratify_by (str | Sequence[str] | None):
-                Tag keys that enforce proportional representation across subsets.
+            group_by (list[str] | None):
+                Column selectors used to keep groups together.
+            stratify_by (list[str] | None):
+                Column selectors used to balance strata.
                 Mutually exclusive with `group_by`.
+            strict_stratification (bool):
+                Whether the returned splits should be perfectly stratified,
+                or use all samples. Defaults to False.
             seed (int):
                 Random seed used by :class:`RandomSplitter`.
             return_views (bool):
@@ -827,6 +831,7 @@ class SplitMixin:
             ratios,
             group_by=group_by,
             stratify_by=stratify_by,
+            strict_stratification=strict_stratification,
             seed=seed,
         )
         return self.split(
