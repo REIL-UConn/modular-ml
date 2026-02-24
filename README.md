@@ -68,7 +68,7 @@ It enables rapid experimentation with complex model architectures, supports doma
 
 ## Getting Started
 
-Requires Python >= 3.9
+Requires Python >= 3.10
 
 ### Installation
 Install from PyPI:
@@ -83,10 +83,10 @@ pip install git+https://github.com/REIL-UConn/modular-ml.git
 
 
 ## Explore More
-- **[Explanation](docs/explanation/)** – Conceptual material that explains why ModularML is structured the way it is.
-- **[How-To](docs/how_to/)** – Deep dive on core components of the ModularML framework.
-- **[Tutorial](docs/tutorials/)** – Explore complete walkthroughs of solving common machine learning tasks with ModularML.
-- **[Full API Reference](https://modular-ml.readthedocs.io/en/latest/)** – API reference, component explanations, configuration guides, and tutorials.
+- **[Explanation](https://modular-ml.readthedocs.io/en/latest/explanation/index.html)** – Conceptual material that explains why ModularML is structured the way it is.
+- **[How-To](https://modular-ml.readthedocs.io/en/latest/how_to/index.html)** – Deep dive on core components of the ModularML framework.
+- **[Tutorials](https://modular-ml.readthedocs.io/en/latest/tutorials/index.html)** – Explore complete walkthroughs of solving common machine learning tasks with ModularML.
+- **[API Reference](https://modular-ml.readthedocs.io/en/latest/reference/index.html)** – API reference, component explanations, configuration guides, and tutorials.
 - **[Discussions](https://github.com/REIL-UConn/modular-ml/discussions)** – Join the community, ask questions, suggest features, or share use cases.
 
 ---
