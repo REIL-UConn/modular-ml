@@ -55,6 +55,7 @@ autodoc_mock_imports = [
     "pyarrow",
     "numexpr",
     "bottleneck",
+    "rich",
 ]
 
 nb_render_markdown_format = "myst"
