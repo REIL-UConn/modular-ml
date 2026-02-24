@@ -64,6 +64,9 @@ myst_enable_extensions = [
     "deflist",
 ]
 myst_fence_as_directive = ["mermaid"]
+nb_execution_timeout = 120
+nb_execution_mode = "cache"
+nb_execution_cache_path = str(ROOT / ".jupyter_cache")
 
 autodoc_default_options = {
     "members": True,
