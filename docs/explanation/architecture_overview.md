@@ -12,46 +12,20 @@ ModularML addresses this by separating concerns into layers that can be composed
 
 ## The four layers
 
-The framework is organized into four conceptual layers, each building on the one below it:
-
-```{mermaid}
-graph TB
-    subgraph "Layer 1: Data Storage"
-        FeatureSet --> SampleCollection
-        SampleCollection --> PyArrow["PyArrow Table"]
-    end
-
-    subgraph "Layer 2: Data Processing"
-        FeatureSetView -->|"view into"| FeatureSet
-
-        Sampler -->|"draws from"| FeatureSetView
-        Sampler --> Batch
-        Splitter <--> FeatureSetView
-        Scaler <-->|"representations"| SampleCollection
-    end
-
-    subgraph "Layer 3: Graph Topology"
-        ModelGraph --> ModelNode
-        ModelGraph --> MergeNode
-        ModelNode --> BaseModel
-        ModelGraph -->|"recevies"| Batch
-    end
-
-    subgraph "Layer 4: Orchestration"
-        Experiment --> PhaseGroup
-        PhaseGroup --> TrainPhase
-        PhaseGroup --> EvalPhase
-        PhaseGroup --> FitPhase
-    end
-
-```
-
-
-
-
-
+The framework is organized into four conceptual layers, each building on the one below it.
 
 ### Layer 1: Data storage
+
+```{mermaid}
+---
+title: Layer 1 - Data Storage
+---
+graph LR
+    FeatureSetView -->|"view into"| FeatureSet
+    FeatureSet --> SampleCollection
+    SampleCollection --> PyArrow["PyArrow Table"]
+
+```
 
 At the foundation sits the `FeatureSet`, ModularML's central data container. Internally, a FeatureSet holds a `SampleCollection`—an immutable Apache Arrow table whose columns follow a structured naming convention: `<domain>.<key>.<representation>`. For example, `features.velocity.raw` or `targets.label.transformed`.
 
@@ -62,6 +36,17 @@ Every sample is also assigned a UUID, which persists through splits and transfor
 The choice of Apache Arrow as the storage backend reflects a preference for columnar, zero-copy data access. Arrow tables can be sliced without copying memory, which is what enables `FeatureSetView`—a lightweight object that holds only a set of row indices and column names pointing back into the parent FeatureSet. Splits, column selections, and subset operations all produce views rather than copies.
 
 ### Layer 2: Data processing
+
+```{mermaid}
+---
+title: Layer 2 - Data Processing
+---
+graph LR
+    Sampler -->|"draws from"| FeatureSetView
+    Sampler -->|"produces"| Batch
+    Splitter <--> FeatureSetView
+    Scaler <-->|"representations"| SampleCollection
+```
 
 Between raw storage and model consumption sit three processing components: **splitters**, **scalers**, and **samplers**. Each transforms or partitions data in a specific way, and each is tracked so its effects can be inspected or undone.
 
@@ -81,6 +66,17 @@ Although the role and stream abstractions add structure, they remain lightweight
 
 ### Layer 3: Graph topology
 
+```{mermaid}
+---
+title: Layer 3 - Graph Topology
+---
+graph TB
+    ModelGraph --> ModelNode
+    ModelGraph --> MergeNode
+    MergeNode --> ConcatNode
+    ModelNode --> BaseModel
+```
+
 ModularML represents model architectures as a directed acyclic graph (DAG) of nodes. The base class, `GraphNode`, provides identity, labeling, and upstream/downstream wiring. Its subclass `ComputeNode` adds a `forward()` method, and the two concrete compute node types are `ModelNode` (wrapping a trainable or static model) and `MergeNode` (combining outputs from multiple upstream nodes).
 
 A `ModelNode` holds a `BaseModel` instance—an abstraction over backend-specific implementations. `BaseModel` has subclasses for *PyTorch* (`TorchBaseModel`), *TensorFlow* (`TensorflowBaseModel`), and *scikit-learn* (`ScikitWrapper`). This means the graph topology is defined independently of the ML backend. A graph can mix nodes from different backends, though in practice most workflows use a single backend throughout.
@@ -94,6 +90,17 @@ The `ModelGraph` itself is the container that owns all nodes and manages executi
 For a deeper discussion of graph composition patterns and design principles, see [Model Graph Design](model_graph_design.md).
 
 ### Layer 4: Orchestration
+
+```{mermaid}
+---
+title: Layer 4 - Orchestration
+---
+graph TB 
+    Experiment --> PhaseGroup
+    PhaseGroup --> TrainPhase
+    PhaseGroup --> EvalPhase
+    PhaseGroup --> FitPhase
+```
 
 The orchestration layer ties everything together through three components: the `ExperimentContext`, `Experiment`, and **phases**.
 
