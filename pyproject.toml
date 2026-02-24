@@ -68,18 +68,20 @@ docs = [
     "pydata-sphinx-theme",
     "sphinx_design",
     "sphinx-copybutton",
+    "sphinxcontrib-napoleon",
+    "sphinxcontrib.mermaid",
+    "myst_nb",
     "myst-parser",
     "sphinx-inline-tabs",
     "sphinxcontrib-bibtex",
     "sphinx-autobuild",
     "sphinx-last-updated-by-git",
-    "nbsphinx",
     "ipykernel",
     "ipywidgets",
     "sphinx-gallery",
     "sphinx-docsearch",
-    "sphinxcontrib.mermaid",
 ]
+
 examples = [
     "jupyter",
     "ipykernel",

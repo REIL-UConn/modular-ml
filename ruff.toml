@@ -21,6 +21,7 @@ extend-select = [
     "TRY", "FLY", "NPY", "FAST", "AIR", "PERF", "FURB", "RUF",
 ]
 ignore = [
+    "FIX002",
     "E501", "D1", "FBT003", "D203", "D212", "D401", "S311",
     "PERF401", "RET504", "FA102", "TRY003", "EM101",
 
