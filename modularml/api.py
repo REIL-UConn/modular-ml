@@ -2,6 +2,7 @@
 # Experiment & Phases
 # ================================================
 from modularml.core.experiment.experiment import Experiment
+from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.experiment.phases.phase_group import PhaseGroup
 from modularml.core.experiment.results.group_results import PhaseGroupResults
 from modularml.core.experiment.phases.eval_phase import EvalPhase
@@ -102,6 +103,7 @@ __all__ = [
     "EvalPhase",
     "EvalResults",
     "Experiment",
+    "ExperimentContext",
     "FeatureSet",
     "FeatureSetView",
     "FitPhase",

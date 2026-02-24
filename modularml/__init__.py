@@ -10,6 +10,7 @@ from modularml.api import (
     EvalPhase,
     EvalResults,
     Experiment,
+    ExperimentContext,
     FeatureSet,
     FeatureSetView,
     FitPhase,
@@ -30,7 +31,6 @@ from modularml.api import (
     TrainResults,
     supported_scalers,
 )
-from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.registry import register_all
 
 register_all()
