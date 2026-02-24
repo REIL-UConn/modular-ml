@@ -95,7 +95,7 @@ For a deeper discussion of graph composition patterns and design principles, see
 ---
 title: Layer 4 - Orchestration
 ---
-graph TB 
+graph TB
     Experiment --> PhaseGroup
     PhaseGroup --> TrainPhase
     PhaseGroup --> EvalPhase
@@ -154,4 +154,3 @@ A typical ModularML workflow moves through the layers in sequence:
 5. **Persistence**: Save checkpoints, export model state, or serialize the full experiment for reproduction.
 
 Each step is independent enough that it can be modified without affecting the others. Swapping a sampler does not require changing the graph. Adding a new model stage does not require rewriting the experiment. This composability is the central design goal of ModularML.
-
