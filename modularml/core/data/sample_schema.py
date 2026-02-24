@@ -250,7 +250,7 @@ def ensure_sample_id(table: pa.Table) -> pa.Table:
     """
     if DOMAIN_SAMPLE_UUIDS in table.column_names:
         col = table[DOMAIN_SAMPLE_UUIDS]
-        if not pa.types.is_string(col.type):
+        if not (pa.types.is_string(col.type) or pa.types.is_large_string(col.type)):
             msg = f"'{DOMAIN_SAMPLE_UUIDS}' column must be of type string, got {col.type}."
             raise TypeError(msg)
         return table
