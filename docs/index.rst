@@ -13,3 +13,4 @@ Version: |version|
    /explanation/index
    /how_to/index
    /tutorials/index
+   /references/index

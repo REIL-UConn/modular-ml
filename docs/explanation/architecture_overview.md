@@ -20,7 +20,7 @@ The framework is organized into four conceptual layers, each building on the one
 ---
 title: Layer 1 - Data Storage
 ---
-graph LR
+graph TB
     FeatureSetView -->|"view into"| FeatureSet
     FeatureSet --> SampleCollection
     SampleCollection --> PyArrow["PyArrow Table"]

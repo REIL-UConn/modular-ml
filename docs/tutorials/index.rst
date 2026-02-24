@@ -1,8 +1,10 @@
 ==================
-Tutorial Playbook
+Tutorials
 ==================
 
 These notebooks provide guided, end-to-end workflows that show how to assemble ModularML components in realistic scenarios. Follow them in order or jump to the workflow that matches your needs.
+
+*This section is a work in progress*
 
 .. toctree::
    :maxdepth: 1

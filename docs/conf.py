@@ -7,6 +7,11 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 import importlib.metadata
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 project = "ModularML"
 copyright = "2025, The ModularML Team"
@@ -21,6 +26,7 @@ language = "en"
 extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
+    "sphinx.ext.autodoc.typehints",
     "sphinx.ext.viewcode",
     "myst_nb",
     "sphinx_design",
@@ -32,6 +38,11 @@ extensions = [
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
+source_suffix = {
+    ".rst": "restructuredtext",
+    ".md": "restructuredtext",
+}
+
 # Mock heavy optional dependencies so autodoc can import all modules
 autodoc_mock_imports = [
     "matplotlib",
@@ -40,6 +51,10 @@ autodoc_mock_imports = [
     "scikit-learn",
     "sklearn",
     "optuna",
+    "pandas",
+    "pyarrow",
+    "numexpr",
+    "bottleneck",
 ]
 
 nb_render_markdown_format = "myst"
@@ -48,6 +63,12 @@ myst_enable_extensions = [
     "deflist",
 ]
 myst_fence_as_directive = ["mermaid"]
+
+autodoc_default_options = {
+    "members": True,
+    "undoc-members": False,
+    "special-members": "__init__",
+}
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
@@ -88,3 +109,27 @@ html_theme_options = {
         "last-updated",
     ],
 }
+
+
+def _add_noindex_to_docstring_attributes(_app, _what, _name, _obj, _options, lines):
+    """Prevent duplicate attribute targets when docstrings list dataclass fields."""
+    idx = 0
+    while idx < len(lines):
+        line = lines[idx]
+        stripped = line.lstrip()
+        if stripped.startswith((".. attribute::", ".. py:attribute::")):
+            indent = line[: len(line) - len(stripped)]
+            next_idx = idx + 1
+            while next_idx < len(lines) and lines[next_idx].strip() == "":
+                next_idx += 1
+            has_noindex = (next_idx < len(lines)) and (
+                lines[next_idx].lstrip().startswith(":no-index:")
+            )
+            if not has_noindex:
+                lines.insert(idx + 1, f"{indent}   :no-index:")
+                idx += 1
+        idx += 1
+
+
+def setup(app):
+    app.connect("autodoc-process-docstring", _add_noindex_to_docstring_attributes)
