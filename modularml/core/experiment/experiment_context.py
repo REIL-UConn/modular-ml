@@ -115,14 +115,14 @@ class ExperimentContext:
         """
         Activates a new ExperimentContext within the context scope.
 
-        Example Usage:
-            ```python
-            with ExperimentContext(experiment=my_exp).activate():
-                ref.resolve()  # resolves using a context of `my_exp`
-            ```
-
         Yields:
             ExperimentContext
+
+        Example:
+            Activating a new context is done as follows:
+
+            >>> with ExperimentContext(experiment=my_exp).activate():  # doctest: +SKIP
+            ...     ref.resolve()  # resolves using a context of `my_exp`
 
         """
         token = _ACTIVE_EXPERIMENT_CONTEXT.set(self)
@@ -148,18 +148,18 @@ class ExperimentContext:
             This is primarily used for cross-validation and
             other meta-execution procedures.
 
-        Example:
-            ```python
-            ctx = ExperimentContext.get_active()
-            with ctx.temporary():
-                ctx.set_registration_policy("overwrite")
-                ctx.register_experiment_node(new_fs)
-                run_fold()
-            # context fully restored
-            ```
-
         Yields:
             ExperimentContext
+
+        Example:
+            Creating a temporary context scope is done as follows:
+
+            >>> ctx = ExperimentContext.get_active()  # doctest: +SKIP
+            >>> with ctx.temporary():
+            ...     ctx.set_registration_policy("overwrite")
+            ...     ctx.register_experiment_node(new_fs)
+            ...     run_fold()
+            ... # context fully restored on exit
 
         """
         # Record context state
@@ -233,11 +233,11 @@ class ExperimentContext:
         Any nodes created inside this context will not be registered
         to the active ExperimentContext.
 
-        Example Usage:
-            ```python
-            with ExperimentContext.dont_register():
-                internal_copy = ModelStage.from_state(...)
-            ```
+        Example:
+            Scoped policy setting to no registration:
+
+            >>> with ExperimentContext.dont_register():  # doctest: +SKIP
+            ...     internal_copy = ModelStage.from_state(...)
 
         """
         old = self._policy

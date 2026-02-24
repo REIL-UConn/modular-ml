@@ -14,19 +14,22 @@ class EvalLossMetric(EvaluationMetric):
     """
     Extracts a scalar loss from an Evaluation callback and logs it as a metric.
 
-    Description:
-        This built-in EvaluationMetric reads the results of its parent
-        Evaluation callback and extracts the aggregated loss value for a
-        specific node. The extracted value is logged as a named metric
-        (default: "val_loss") into the MetricStore.
+    This built-in EvaluationMetric reads the results of its parent
+    Evaluation callback and extracts the aggregated loss value for a
+    specific node. The extracted value is logged as a named metric
+    (default: "val_loss") into the MetricStore.
 
-    Examples:
-        ```python
-        mse_loss = AppliedLoss(...)
-        val_metric = EvalLossMetric(loss=mse_loss, name="val_loss")
-        eval_cb = Evaluation(eval_phase=eval_phase, metrics=[val_metric])
-        phase.add_callback(eval_cb)
-        ```
+    Example:
+        Below showcases created a tracked "val_loss" during a training phase.
+
+        >>> mse_loss = AppliedLoss(...)  # doctest: +SKIP
+        >>> val_metric = EvalLossMetric(
+        ...     loss=mse_loss, name="val_loss"
+        ... )  # doctest: +SKIP
+        >>> eval_cb = Evaluation(  # doctest: +SKIP
+        ...     eval_phase=eval_phase, metrics=[val_metric]
+        ... )
+        >>> phase.add_callback(eval_cb)  # doctest: +SKIP
 
     """
 

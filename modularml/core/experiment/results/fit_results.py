@@ -83,22 +83,21 @@ class FitResults(PhaseResults):
             TensorLike:
                 A single tensor containing concatenated data from all batches.
 
-        Examples:
-            ```python
-            # Get all predictions stacked
-            predictions = fit_results.stacked_tensors(
-                node="output_node",
-                domain="outputs",
-            )
+        Example:
+            Getting concatenated tensors across all stacked batches:
 
-            # Get targets, unscaled, as numpy
-            targets = fit_results.stacked_tensors(
-                node="output_node",
-                domain="targets",
-                fmt="np",
-                unscale=True,
-            )
-            ```
+            >>> # Get all predictions stacked
+            >>> predictions = fit_results.stacked_tensors(  # doctest: +SKIP
+            ...     node="output_node",
+            ...     domain="outputs",
+            ... )
+            >>> # Get targets, unscaled, as numpy
+            >>> targets = fit_results.stacked_tensors(  # doctest: +SKIP
+            ...     node="output_node",
+            ...     domain="targets",
+            ...     fmt="np",
+            ...     unscale=True,
+            ... )
 
         """
         tensor_series = self.tensors(
@@ -133,12 +132,14 @@ class FitResults(PhaseResults):
             Batch:
                 A single Batch containing concatenated data from all batches.
 
-        Examples:
-            ```python
-            batch = fit_results.stacked_batches(node="output_node")
-            print(f"Total samples: {batch.batch_size}")
-            print(f"Outputs shape: {batch.outputs.shape}")
-            ```
+        Example:
+            Accessing stacked Batch objects across all execution batches
+
+            >>> batch = fit_results.stacked_batches(  # doctest: +SKIP
+            ...     node="output_node"
+            ... )
+            >>> print(f"Total samples: {batch.batch_size}")  # doctest: +SKIP
+            >>> print(f"Outputs shape: {batch.outputs.shape}")  # doctest: +SKIP
 
         """
         batch = self.batches(node=node).one()

@@ -109,11 +109,6 @@ class AxisSeries(Generic[T]):
 
         Values for all axes must be specified.
 
-        Examples:
-            ```python
-            series.at(epoch=0, batch=3)
-            ```
-
         Args:
             **coords: Axis name to value mappings for every axis.
 
@@ -122,6 +117,9 @@ class AxisSeries(Generic[T]):
 
         Raises:
             KeyError: If any axis is missing or coordinate lookup fails.
+
+        Example:
+            >>> series.at(epoch=0, batch=3) Values for all axes must be specified.
 
         """
         key = self._make_key(coords)
@@ -150,18 +148,16 @@ class AxisSeries(Generic[T]):
 
         Each coordinate may be a scalar or an iterable of allowed values.
 
-        Examples:
-            ```python
-            series.where(epoch=1)
-            series.where(epoch=[1, 2, 3])
-            series.where(epoch=[0, 1], batch=0)
-            ```
-
         Args:
             **coords: Axis names mapped to scalar values, iterables of values, or predicates.
 
         Returns:
             AxisSeries[T]: Filtered series containing only matching entries.
+
+        Example:
+            >>> series.where(epoch=1)  # doctest: +SKIP
+            >>> series.where(epoch=[1, 2, 3])  # doctest: +SKIP
+            >>> series.where(epoch=[0, 1], batch=0)  # doctest: +SKIP
 
         """
         selectors = self._coord_selectors(coords)
@@ -197,17 +193,15 @@ class AxisSeries(Generic[T]):
         """
         Select all values matching a partial axis specification.
 
-        Examples:
-            ```python
-            series.select(epoch=0)
-            series.select(epoch=[1, 2])
-            ```
-
         Args:
             **coords: Axis selectors defined via scalars, iterables, or predicates.
 
         Returns:
             list[T]: Values matching the partial specification.
+
+        Example:
+            >>> series.select(epoch=0)  # doctest: +SKIP
+            >>> series.select(epoch=[1, 2])  # doctest: +SKIP
 
         """
         selectors = self._coord_selectors(coords)
@@ -430,12 +424,16 @@ class AxisSeries(Generic[T]):
         Returns:
             AxisSeries[T]: New series with the specified axis removed.
 
-        Examples:
-            ```python
-            train_results.losses(...).collapse("batch", reducer=LossCollection.mean)
-            train_results.losses(...).collapse("batch", reducer="mean")
-            train_results.tensors(...).collapse("batch", reducer=torch.stack)
-            ```
+        Example:
+            >>> train_results.losses(...).collapse(  # doctest: +SKIP
+            ...     "batch", reducer=LossCollection.mean
+            ... )
+            >>> train_results.losses(...).collapse(  # doctest: +SKIP
+            ...     "batch", reducer="mean"
+            ... )
+            >>> train_results.tensors(...).collapse(  # doctest: +SKIP
+            ...     "batch", reducer=torch.stack
+            ... )
 
         """
         # Validate axis name
@@ -474,13 +472,11 @@ class AxisSeries(Generic[T]):
         Returns:
             AxisSeries[T]: Series with singleton axes removed when possible.
 
-        Examples:
-            ```python
-            my_series.shape
-            # ('epoch': 1, 'batch': 32)
-            my_series.squeeze().shape
-            # ('batch': 32)
-            ```
+        Example:
+            >>> my_series.shape  # doctest: +SKIP
+            >>> # ('epoch': 1, 'batch': 32)
+            >>> my_series.squeeze().shape  # doctest: +SKIP
+            >>> # ('batch': 32)
 
         """
         # Get axis labels with cardinality of 1

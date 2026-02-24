@@ -244,19 +244,19 @@ class BatchView(Summarizable):
                 - `shapes`: per-node :class:`SampleShapes` objects describing \
                     per-sample tensor shapes (without batch dimension).
 
-        Example:
-            ```python
-            batch = batch_view.materialize_batch(fmt=DataFormat.TORCH)
-            batch.outputs["MyFeatureSet"]["anchor"].features.shape
-            # torch.Size([1, 101])
-            ```
-
         Raises:
             TypeError:
                 If the requested `fmt` is not a tensor-compatible DataFormat.
             ValueError:
                 If any tensor does not have the batch size as its leading dimension,
                 or if sample weight shapes do not match `n_samples`.
+
+        Example:
+            Batch materialization uses a specified data format:
+
+            >>> batch = batch_view.materialize_batch(fmt=DataFormat.TORCH) # doctest: +SKIP
+            >>> batch.outputs["MyFeatureSet"]["anchor"].features.shape # doctest: +SKIP
+            ... # torch.Size([1, 101])
 
         """
         # Format must be tensor-like:

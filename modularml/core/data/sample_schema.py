@@ -288,12 +288,6 @@ def validate_str_list(keys: list[str]):
               - Keys contain invalid characters.
               - Keys use reserved schema names or internal label conventions.
 
-    Example:
-        ```python
-        validate_str_list(["cell_id", "cycle_number", "soh"])  # OK
-        validate_str_list(["cell.id", "cycle_number"])  # Raises ValueError
-        ```
-
     """
     # Detect duplicate elements in keys
     if len(set(keys)) != len(keys):

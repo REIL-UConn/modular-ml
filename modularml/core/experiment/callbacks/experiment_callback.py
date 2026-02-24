@@ -28,14 +28,14 @@ class ExperimentCallback(ABC):
         :meth:`get_config` / :meth:`from_config` for serialization.
 
     Examples:
-        ```python
-        class MyExperimentLogger(ExperimentCallback):
-            def on_phase_end(self, *, experiment, phase, results):
-                print(f"Phase '{phase.label}' completed.")
+        Custom ExperimentCallback subclass:
 
-            def get_config(self):
-                return {"callback_type": "MyExperimentLogger"}
-        ```
+        >>> class MyExperimentLogger(ExperimentCallback):  # doctest: +SKIP
+        ...     def on_phase_end(self, *, experiment, phase, results):
+        ...         print(f"Phase '{phase.label}' completed.")
+        ...
+        ...     def get_config(self):
+        ...         return {"callback_type": "MyExperimentLogger"}
 
     """
 

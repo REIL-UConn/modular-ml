@@ -34,11 +34,6 @@ def import_from_path(path: str) -> Any:
     """
     Dynamically import a class, function, or variable from a full module path.
 
-    Example:
-        ```python
-        cls = import_from_path("torch.nn.Linear")
-        ```
-
     Args:
         path (str):
             Fully-qualified import path of the form
@@ -51,6 +46,10 @@ def import_from_path(path: str) -> Any:
         ValueError: If the path is malformed or target object cannot be resolved.
         ImportError: If the module cannot be imported.
         AttributeError: If the object is not found in the module.
+
+    Example:
+        >>> cls = import_from_path("torch.nn.Linear")  # doctest: +SKIP
+
 
     """
     if not isinstance(path, str) or "." not in path:

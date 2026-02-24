@@ -261,11 +261,11 @@ class Experiment:
             The previous checkpointing configuration is restored on exit,
             even if an exception is raised.
 
-        Examples:
-            ```python
-            with experiment.disable_checkpointing():
-                experiment.run_phase(training_phase)
-            ```
+        Example:
+            Scoped checkpoint disabling:
+
+            >>> with experiment.disable_checkpointing():  # doctest: +SKIP
+            ...     experiment.run_phase(training_phase)
 
         """
         prev = self._checkpointing_disabled

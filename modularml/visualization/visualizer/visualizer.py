@@ -30,24 +30,6 @@ class Visualizer:
     For FeatureSet visualization, pass a :class:`FeatureSetDisplayOptions` to
     control which sections are shown (features, targets, tags, shapes, overlaps).
 
-    Examples:
-        ```python
-        # Visualize a FeatureSet (tags only on root node by default)
-        Visualizer(feature_set).display()
-
-        # Visualize a FeatureSet with tags on all nodes
-        Visualizer(feature_set, FeatureSetDisplayOptions(show_tags=True)).display()
-
-        # Visualize a ModelGraph
-        Visualizer(model_graph).display()
-
-        # Get raw Mermaid string
-        mermaid_str = Visualizer(model_graph).get_mermaid_str()
-
-        # Export to .mmd file
-        Visualizer(model_graph).mermaid_to_mmd("my_graph")
-        ```
-
     """
 
     def __init__(

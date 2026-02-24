@@ -208,7 +208,7 @@ class SplitMixin:
             ValueError:
                 If a :class:`FeatureSetColumnReference` cannot be resolved.
 
-        Notes:
+        Example:
             For a FeatureSet where its samples have the following attributes:
             - FeatureSet.tag_keys() -> 'cell_id', 'group_id', 'pulse_type'
             - FeatureSet.feature_keys() -> 'voltage', 'current',
@@ -220,15 +220,14 @@ class SplitMixin:
             - `group_id` is greater than 1, and
             - `pulse_type` equals 'charge'.
 
-            ```python
-            FeatureSet.filter(
-                where={
-                    "tags.cell_id": [1, 2, 3],
-                    "tags.group_id": (lambda x: x > 1),
-                    "tags.pulse_type": "charge",
-                }
-            )
-            ```
+
+            >>> FeatureSet.filter(  # doctest: +SKIP
+            ...     where={
+            ...         "tags.cell_id": [1, 2, 3],
+            ...         "tags.group_id": (lambda x: x > 1),
+            ...         "tags.pulse_type": "charge",
+            ...     }
+            ... )
 
         """
         from modularml.core.data.featureset_view import FeatureSetView
@@ -820,13 +819,13 @@ class SplitMixin:
                 Resulting views if `return_views=True`; else `None`.
 
         Example:
-            ```python
-            fs.split_random(
-                ratios={"train": 0.8, "val": 0.2},
-                group_by="cell_id",
-                seed=42,
-            )
-            ```
+            Using random splitting:
+
+            >>> fs.split_random(  # doctest: +SKIP
+            ...     ratios={"train": 0.8, "val": 0.2},
+            ...     group_by="cell_id",
+            ...     seed=42,
+            ... )
 
         """
         from modularml.splitters.random_splitter import RandomSplitter
@@ -883,15 +882,15 @@ class SplitMixin:
                 Resulting views if `return_views=True`; else `None`.
 
         Example:
-            ```python
-            fs.split_by_condition(
-                {
-                    "low_temp": {"temperature": lambda x: x < 20},
-                    "high_temp": {"temperature": lambda x: x >= 20},
-                    "cell_5": {"cell_id": 5},
-                }
-            )
-            ```
+            Using condition-based splitter:
+
+            >>> fs.split_by_condition(  # doctest: +SKIP
+            ...     {
+            ...         "low_temp": {"temperature": lambda x: x < 20},
+            ...         "high_temp": {"temperature": lambda x: x >= 20},
+            ...         "cell_5": {"cell_id": 5},
+            ...     }
+            ... )
 
         """
         from modularml.splitters.condition_splitter import ConditionSplitter

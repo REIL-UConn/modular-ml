@@ -42,18 +42,6 @@ def resolve_activation(
         ValueError:
             If `activation` is a string but `backend` is not provided.
 
-    Examples:
-        ```python
-        resolve_activation("relu", backend="torch")
-        # ReLU()
-
-        resolve_activation(torch.nn.Tanh())
-        # Tanh()
-
-        resolve_activation(tf.keras.layers.ReLU)
-        # <class 'keras.layers.activation.relu.ReLU'>
-        ```
-
     Notes:
         - Passing instantiated objects (`torch.nn.ReLU()`, `tf.keras.layers.ReLU()`)
           will return them unchanged.
@@ -110,15 +98,6 @@ def resolve_activation_by_name(name: str, backend: Backend | str):
         BackendNotSupportedError: If the provided backend is not supported.
         ActivationError: If the activation name is not recognized for the \
             selected backend.
-
-    Examples:
-        ```python
-        resolve_activation_by_name("relu", "torch")
-        # ReLU()
-
-        resolve_activation_by_name("tanh", "tensorflow")
-        # <keras.src.layers.activation.tanh.Tanh object at ...>
-        ```
 
     Notes:
         - Each call returns a **new layer instance**, not a shared singleton.

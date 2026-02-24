@@ -29,26 +29,24 @@ class PhaseGroupResults:
         - Flattening nested results into a single-level mapping
         - Iterating over results in execution order
 
-    Examples:
-        ```python
-        # Access results by label
-        train_res = group_results.get_phase_result("train")
-        eval_res = group_results.get_phase_result("eval")
-
-        # Flatten nested structure
-        flat = group_results.flatten()
-        for label, phase_res in flat.items():
-            print(f"{label}: {phase_res!r}")
-
-        # Iterate in execution order
-        for label, result in group_results.items():
-            print(label, type(result).__name__)
-        ```
-
     Attributes:
         label (str): Phase-group label associated with this result tree.
         _results (dict[str, PhaseResults | PhaseGroupResults]):
             Ordered mapping of labels to phase or nested group results.
+
+    Example:
+        Accessing phase group results
+
+        >>> # Access results by label
+        >>> train_res = group_results.get_phase_result("train")  # doctest: +SKIP
+        >>> eval_res = group_results.get_phase_result("eval")  # doctest: +SKIP
+        >>> # Flatten nested structure
+        >>> flat = group_results.flatten()  # doctest: +SKIP
+        >>> for label, phase_res in flat.items():  # doctest: +SKIP
+        ...     print(f"{label}: {phase_res!r}")
+        >>> # Iterate in execution order
+        >>> for label, result in group_results.items():  # doctest: +SKIP
+        ...     print(label, type(result).__name__)
 
     """
 
@@ -344,12 +342,12 @@ class PhaseGroupResults:
             ValueError:
                 If duplicate phase labels exist across the hierarchy.
 
-        Examples:
-            ```python
-            flat = group_results.flatten()
-            for label, phase_res in flat.items():
-                print(f"{label}: {type(phase_res).__name__}")
-            ```
+        Example:
+            All internal PhaseResults can be flattened to a single list:
+
+            >>> flat = group_results.flatten()  # doctest: +SKIP
+            >>> for label, phase_res in flat.items():  # doctest: +SKIP
+            ...     print(f"{label}: {type(phase_res).__name__}")
 
         """
         flat: dict[str, PhaseResults] = {}

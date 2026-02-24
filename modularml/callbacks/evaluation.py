@@ -435,22 +435,20 @@ class EvaluationCallbackResult(CallbackResult):
             TensorLike:
                 A single tensor containing concatenated data from all batches.
 
-        Examples:
-            ```python
-            # Get all predictions stacked
-            predictions = eval_cb_results.stacked_tensors(
-                node="output_node",
-                domain="outputs",
-            )
+        Example:
+            >>> # Get all predictions stacked
+            >>> predictions = eval_cb_results.stacked_tensors( # doctest: +SKIP
+            ...    node="output_node",
+            ...    domain="outputs",
+            ...)
 
-            # Get targets, unscaled, as numpy
-            targets = eval_cb_results.stacked_tensors(
-                node="output_node",
-                domain="targets",
-                fmt="np",
-                unscale=True,
-            )
-            ```
+            >>> # Get targets, unscaled, as numpy
+            >>> targets = eval_cb_results.stacked_tensors(  # doctest: +SKIP
+            ...     node="output_node",
+            ...     domain="targets",
+            ...     fmt="np",
+            ...     unscale=True,
+            ... )
 
         """
         return self.get_eval_results().stacked_tensors(
@@ -486,12 +484,14 @@ class EvaluationCallbackResult(CallbackResult):
             Batch:
                 A single Batch containing concatenated data from all batches.
 
-        Examples:
-            ```python
-            batch = eval_cb_results.stacked_batches(node="output_node")
-            print(f"Total samples: {batch.batch_size}")
-            print(f"Outputs shape: {batch.outputs.shape}")
-            ```
+        Example:
+            Batches are accessed for a specified node:
+
+            >>> batch = eval_cb_results.stacked_batches(  # doctest: +SKIP
+            ...     node="output_node"
+            ... )
+            >>> print(f"Total samples: {batch.batch_size}")  # doctest: +SKIP
+            >>> print(f"Outputs shape: {batch.outputs.shape}")  # doctest: +SKIP
 
         """
         return self.get_eval_results().stacked_batches(node=node, fmt=fmt)

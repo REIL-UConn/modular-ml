@@ -71,20 +71,6 @@ class ConcatNode(MergeNode):
         pad_value (float, optional):
             Value to use for constant padding. Defaults to 0.0.
 
-    Example:
-        ```python
-        fs_ref = FeatureSet(...).reference(columns=...)
-        mn = ModelNode(...)
-
-        # Concatenate features, use first input's targets
-        stage = ConcatNode(
-            label="merge",
-            upstream_refs=[fs_ref, mn],
-            concat_axis=1,
-            concat_axis_targets="first",  # first = fs_ref
-        )
-        ```
-
     """
 
     def __init__(

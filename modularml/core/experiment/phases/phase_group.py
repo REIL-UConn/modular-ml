@@ -34,11 +34,11 @@ class PhaseGroup:
         phases: List of phases (or nested PhaseGroups) in execution order.
 
     Example:
-        ```python
-        group = PhaseGroup("training_workflow")
-        group.add_phase(train_phase)
-        group.add_phase(eval_phase)
-        ```
+        PhaseGroup serial modification:
+
+        >>> group = PhaseGroup("training_workflow")  # doctest: +SKIP
+        >>> group.add_phase(train_phase)  # doctest: +SKIP
+        >>> group.add_phase(eval_phase)  # doctest: +SKIP
 
     """
 
@@ -486,12 +486,10 @@ class PhaseGroup:
 
                 The outputs of each policy is given below:
 
-                ```python
-                "zip_strict": (b1, c1), (b2, c2)
-                "zip_cycle": (b1, c1), (b2, c2), (b3, c1)
-                "alternate_strict": b1, c1, b2, c2
-                "alternate_cycle": b1, c1, b2, c2, b3, c1
-                ```
+                * "zip_strict": (b1, c1), (b2, c2)
+                * "zip_cycle": (b1, c1), (b2, c2), (b3, c1)
+                * "alternate_strict": b1, c1, b2, c2
+                * "alternate_cycle": b1, c1, b2, c2, b3, c1
 
                 See also :class:`BatchSchedulingPolicy`.
 
