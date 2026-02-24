@@ -437,10 +437,10 @@ class EvaluationCallbackResult(CallbackResult):
 
         Example:
             >>> # Get all predictions stacked
-            >>> predictions = eval_cb_results.stacked_tensors( # doctest: +SKIP
-            ...    node="output_node",
-            ...    domain="outputs",
-            ...)
+            >>> predictions = eval_cb_results.stacked_tensors(  # doctest: +SKIP
+            ...     node="output_node",
+            ...     domain="outputs",
+            ... )
 
             >>> # Get targets, unscaled, as numpy
             >>> targets = eval_cb_results.stacked_tensors(  # doctest: +SKIP

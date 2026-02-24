@@ -155,7 +155,7 @@ class ExperimentContext:
             Creating a temporary context scope is done as follows:
 
             >>> ctx = ExperimentContext.get_active()  # doctest: +SKIP
-            >>> with ctx.temporary():
+            >>> with ctx.temporary():  # doctest: +SKIP
             ...     ctx.set_registration_policy("overwrite")
             ...     ctx.register_experiment_node(new_fs)
             ...     run_fold()

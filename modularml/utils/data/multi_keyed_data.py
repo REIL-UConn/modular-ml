@@ -119,7 +119,9 @@ class AxisSeries(Generic[T]):
             KeyError: If any axis is missing or coordinate lookup fails.
 
         Example:
-            >>> series.at(epoch=0, batch=3) Values for all axes must be specified.
+            Values for all axes must be specified
+
+            >>> series.at(epoch=0, batch=3)  # doctest: +SKIP
 
         """
         key = self._make_key(coords)
