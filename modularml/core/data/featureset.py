@@ -161,20 +161,20 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
                 If required keys are missing, or column lengths are inconsistent.
 
         Example:
-            ```python
-            fs = FeatureSet.from_dict(
-                label="CycleData",
-                data={
-                    "voltage": [[3.1, 3.2, 3.3], [3.2, 3.3, 3.4]],
-                    "current": [[1.0, 1.1, 1.0], [0.9, 1.0, 1.1]],
-                    "soh": [0.95, 0.93],
-                    "cell_id": ["A1", "A2"],
-                },
-                feature_keys=["voltage", "current"],
-                target_keys=["soh"],
-                tag_keys=["cell_id"],
-            )
-            ```
+            FeatureSet construction via a dict of data:
+
+            >>> fs = FeatureSet.from_dict( # doctest: +SKIP
+            ...     label="CycleData",
+            ...     data={
+            ...         "voltage": [[3.1, 3.2, 3.3], [3.2, 3.3, 3.4]],
+            ...         "current": [[1.0, 1.1, 1.0], [0.9, 1.0, 1.1]],
+            ...         "soh": [0.95, 0.93],
+            ...         "cell_id": ["A1", "A2"],
+            ...     },
+            ...     feature_keys=["voltage", "current"],
+            ...     target_keys=["soh"],
+            ...     tag_keys=["cell_id"],
+            ...     )
 
         """
         # 1. Standardize input args
@@ -250,17 +250,17 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
                 SampleSchema convention.
 
         Example:
-            ```python
-            fs = FeatureSet.from_pandas(
-                label="PulseData",
-                df=raw_df,
-                feature_cols=["voltage", "current"],
-                target_cols=["soh"],
-                group_by=["cell_id", "cycle_index"],
-                tag_cols=["temperature", "cell_id"],
-                sort_by="timestamp",
-            )
-            ```
+            FeatureSet construction from a Pandas dataframe:
+
+            >>> fs = FeatureSet.from_pandas( # doctest: +SKIP
+            ...     label="PulseData",
+            ...     df=raw_df,
+            ...     feature_cols=["voltage", "current"],
+            ...     target_cols=["soh"],
+            ...     group_by=["cell_id", "cycle_index"],
+            ...     tag_cols=["temperature", "cell_id"],
+            ...     sort_by="timestamp",
+            ... )
 
         """
         # 1. Standardize input args
@@ -373,7 +373,7 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
     def _resolve_caller_attributes(
         self,
     ) -> tuple[SampleCollection, list[str] | None, np.ndarray | None]:
-        return (self.collection, None, None)
+        return (self.collection, None, None, self.node_id)
 
     # ================================================
     # FeatureSet Properties & Dunders
@@ -1259,11 +1259,13 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
             restore_scalers (bool, optional):
                 If True, all ScalerRecords are re-applied in order to
                 regenerate transformed representations.
+                If True, `restore_splits` must be also be enabled.
 
             register (bool, optional):
                 Whether to register the copied FeatureSet in the
                 ExperimentContext registry. If True, a new node ID will
                 be generated for the copied instance.
+                Must be True if `restore_scalers` or `restore_splits` are enabled.
 
         Returns:
             FeatureSet:
@@ -1275,6 +1277,13 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
                 scalers depend on split-specific fitting.
 
         """
+        if (restore_scalers or restore_splits) and not register:
+            msg = (
+                "Cannot copy splits and/or scaler without registering the copy. "
+                "Set `register=True` and try again."
+            )
+            raise ValueError(msg)
+
         new_label = label if label is not None else f"{self.label}_copy"
 
         # Copy collection (only REP_RAW columns)
@@ -1284,10 +1293,13 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
         )
 
         # Instantiate new FeatureSet
+        # When restoring splits, the node must be registered so that
+        # splitter reference resolution (e.g. group_by) can find it.
+        needs_registration = register or restore_splits or restore_scalers
         new_fs = FeatureSet(
             label=new_label,
             collection=new_coll,
-            register=register,
+            register=needs_registration,
         )
 
         # Restore splits (if specified)

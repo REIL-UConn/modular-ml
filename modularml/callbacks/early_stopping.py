@@ -48,33 +48,34 @@ class EarlyStopping(Callback):
     """
     Stop training when a monitored metric stops improving.
 
-    Description:
-        This callback monitors a named metric from the MetricStore and stops
-        training if no improvement is observed for a given number of epochs
-        (patience). Improvement is determined by the `mode` parameter:
-        "min" expects the metric to decrease, "max" expects it to increase.
+    This callback monitors a named metric from the MetricStore and stops
+    training if no improvement is observed for a given number of epochs
+    (patience). Improvement is determined by the `mode` parameter:
+    "min" expects the metric to decrease, "max" expects it to increase.
 
-        When triggered, EarlyStopping calls `phase.request_stop()` which
-        sets a flag that the training loop checks at the end of each epoch.
+    When triggered, EarlyStopping calls `phase.request_stop()` which
+    sets a flag that the training loop checks at the end of each epoch.
 
-        When `restore_best=True`, the model state is restored to the epoch
-        with the best monitored metric value at the end of the phase. If the
-        phase has a `Checkpointing` callback configured, its saved states are
-        used for restoration. Otherwise, EarlyStopping manages its own
-        in-memory state snapshots as a fallback.
+    When `restore_best=True`, the model state is restored to the epoch
+    with the best monitored metric value at the end of the phase. If the
+    phase has a `Checkpointing` callback configured, its saved states are
+    used for restoration. Otherwise, EarlyStopping manages its own
+    in-memory state snapshots as a fallback.
 
-    Examples:
-    ```python
-        # Stop if validation loss doesn't improve for 5 epochs
-        phase.add_callback(EarlyStopping(monitor="val_loss", patience=5))
+    Example:
+        >>> # Stop if validation loss doesn't improve for 5 epochs
+        >>> phase.add_callback(  # doctest: +SKIP
+        ...     EarlyStopping(monitor="val_loss", patience=5)
+        ... )
 
-        # Stop and restore model to best epoch
-        phase.add_callback(EarlyStopping(
-            monitor="val_loss",
-            patience=5,
-            restore_best=True,
-        ))
-    ```
+        >>> # Stop and restore model to best epoch
+        >>> phase.add_callback(  # doctest: +SKIP
+        ...     EarlyStopping(
+        ...         monitor="val_loss",
+        ...         patience=5,
+        ...         restore_best=True,
+        ...     )
+        ... )
 
     """
 

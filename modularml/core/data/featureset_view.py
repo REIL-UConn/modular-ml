@@ -128,6 +128,7 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
             self.source.collection,
             self.columns,
             self.indices,
+            self.source.node_id,
         )
 
     # ================================================

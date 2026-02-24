@@ -29,14 +29,14 @@ class CVResults(PhaseGroupResults):
         :class:`PhaseGroupResults` containing :class:`TrainResults`,
         :class:`EvalResults`, etc.
 
-        Structure:
-        ```python
-            CVResults(label='CV')
-            ├── fold_0: PhaseGroupResults
-            │     ├── train: TrainResults
-            │     └── eval: EvalResults
-            ├── fold_1: PhaseGroupResults
-            ...
+    Structure:
+        ```
+        CVResults(label='CV')
+        ├── fold_0: PhaseGroupResults
+        │     ├── train: TrainResults
+        │     └── eval: EvalResults
+        ├── fold_1: PhaseGroupResults
+        ...
         ```
 
         The :meth:`collect` method applies an extractor to each fold and
@@ -45,20 +45,23 @@ class CVResults(PhaseGroupResults):
         :class:`AxisSeries` API (:meth:`AxisSeries.where`,
         :meth:`AxisSeries.collapse`, :meth:`AxisSeries.at`).
 
-    Examples:
-        ```python
-        cv_results = cv.run()
+    Example:
+        Accessing CVResults after a CrossValidation run:
 
-        # Cross-fold epoch losses (convenience method)
-        losses = cv_results.epoch_losses(node="output")
-        losses.where(epoch=3)  # all folds at epoch 3
-        losses.collapse("fold", reducer="mean")  # mean across folds
+        >>> cv_results = cv.run()  # doctest: +SKIP
+        >>> # Cross-fold epoch losses (convenience method)
+        >>> losses = cv_results.epoch_losses(node="output")  # doctest: +SKIP
+        >>> losses.where(epoch=3)  # all folds at epoch 3 # doctest: +SKIP
+        >>> losses.collapse(  # doctest: +SKIP
+        ...     "fold", reducer="mean"
+        ... )  # mean across folds
 
-        # Generic collect
-        cv_results.collect(
-            lambda fold: fold.get_eval_result("eval").aggregated_losses(node="output")
-        )
-        ```
+        >>> # Generic collect
+        >>> cv_results.collect(  # doctest: +SKIP
+        ...     lambda fold: fold.get_eval_result("eval").aggregated_losses(
+        ...         node="output"
+        ...     )
+        ... )
 
     """
 
@@ -133,21 +136,6 @@ class CVResults(PhaseGroupResults):
         Returns:
             AxisSeries[T]:
                 Merged results with `fold` as the first axis.
-
-        Examples:
-            ```python
-            # AxisSeries extractor - epoch losses across folds
-            losses = cv_results.collect(
-                lambda fold: fold.get_train_result("train").epoch_losses(node="out")
-            )
-            # -> AxisSeries[LossCollection] keyed by (fold, epoch)
-
-            # Scalar extractor - aggregated eval loss per fold
-            eval_losses = cv_results.collect(
-                lambda fold: fold.get_eval_result("eval").aggregated_losses(node="out")
-            )
-            # -> AxisSeries[LossCollection] keyed by (fold,)
-            ```
 
         """
         fold_results: dict[str, AxisSeries[T] | T] = {}

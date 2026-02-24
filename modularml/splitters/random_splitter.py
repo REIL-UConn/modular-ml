@@ -6,7 +6,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from modularml.core.data.schema_constants import DOMAIN_TAGS, REP_RAW
+from modularml.core.experiment.experiment_context import ExperimentContext
+from modularml.core.references.featureset_reference import FeatureSetColumnReference
 from modularml.core.splitting.base_splitter import BaseSplitter
 from modularml.utils.data.data_format import DataFormat
 from modularml.utils.data.formatting import ensure_list, to_hashable
@@ -38,8 +39,10 @@ class RandomSplitter(BaseSplitter):
     def __init__(
         self,
         ratios: Mapping[str, float],
+        *,
         group_by: str | Sequence[str] | None = None,
         stratify_by: str | Sequence[str] | None = None,
+        strict_stratification: bool = False,
         seed: int = 13,
     ):
         """
@@ -50,13 +53,16 @@ class RandomSplitter(BaseSplitter):
                 Subset ratios that sum to 1.0
                 (e.g., `{"train": 0.7, "val": 0.2, "test": 0.1}`).
 
-            group_by (str | Sequence[str] | None):
-                Tag keys that ensure grouped samples are sent to the same subset.
-                Mutually exclusive with `stratify_by`.
+            group_by (list[str] | None):
+                Column selectors used to keep groups together.
 
-            stratify_by (str | Sequence[str] | None):
-                Tag keys that enforce proportional representation across subsets.
+            stratify_by (list[str] | None):
+                Column selectors used to balance strata.
                 Mutually exclusive with `group_by`.
+
+            strict_stratification (bool):
+                Whether the returned splits should be perfectly stratified,
+                or use all samples. Defaults to False.
 
             seed (int): Random seed used to initialize the generator.
 
@@ -81,7 +87,7 @@ class RandomSplitter(BaseSplitter):
         self.stratify_by: list[str] | None = (
             None if stratify_by is None else ensure_list(stratify_by)
         )
-
+        self.strict_stratification = strict_stratification
         if self.group_by and self.stratify_by:
             raise ValueError("`group_by` and `stratify_by` are mutually exclusive.")
 
@@ -121,131 +127,32 @@ class RandomSplitter(BaseSplitter):
             ValueError: If grouping/stratification yields empty subsets.
 
         """
-        n = len(view)
-
-        # ================================================
-        # Case 1: No grouping or stratification
-        # ================================================
-        if self.group_by is None and self.stratify_by is None:
-            rel_indices = np.arange(n)
-            self.rng.shuffle(rel_indices)
-            boundaries = self._compute_split_boundaries(n)
-            split_indices: dict[str, np.ndarray] = {}
-            for label, (start, end) in boundaries.items():
-                split_indices[label] = rel_indices[start:end]
-            return self._return_splits(
-                view=view,
-                split_indices=split_indices,
-                return_views=return_views,
-            )
-
-        # ================================================
-        # Case 2: Stratify by tag(s)
-        # ================================================
+        # Case 1: Stratify
         if self.stratify_by is not None:
-            coll = view.source.collection
-
-            # Extract raw tag arrays as numpy, aligned with the FULL FeatureSet
-            tag_data: dict[str, np.ndarray] = coll._get_domain_data(
-                domain=DOMAIN_TAGS,
-                keys=self.stratify_by,
-                fmt=DataFormat.DICT_NUMPY,
-                rep=REP_RAW,
-                include_rep_suffix=False,
-                include_domain_prefix=False,
-            )
-            # Restrict to the samples inside this view
-            view_abs_indices = view.indices  # absolute sample indices
-            tag_cols_view: list[np.ndarray] = [
-                tag_data[k][view_abs_indices] for k in self.stratify_by
-            ]
-
-            # Build stratum keys
-            stratum_keys = np.array(
-                [tuple(to_hashable(col[i]) for col in tag_cols_view) for i in range(n)],
-                dtype=object,
-            )
-
-            # Map unique tuple to stratum ID
-            unique_strata, inv = np.unique(stratum_keys, return_inverse=True)
-
-            # Build mapping: stratum_id to list of relative indices
-            stratum_to_rel_idxs: dict[int, list[int]] = {}
-            for rel_idx, s_id in enumerate(inv):
-                stratum_to_rel_idxs.setdefault(to_hashable(s_id), []).append(rel_idx)
-
-            # For each stratum, shuffle and split according to ratios
-            # Then combine into final split_indices
-            split_indices: dict[str, list[int]] = {label: [] for label in self.ratios}
-
-            for s_id in range(len(unique_strata)):
-                stratum_rel_idxs = np.array(stratum_to_rel_idxs[s_id])
-                self.rng.shuffle(stratum_rel_idxs)
-
-                # Apply split boundaries within this stratum
-                stratum_n = len(stratum_rel_idxs)
-                boundaries = self._compute_split_boundaries(stratum_n)
-                for label, (start, end) in boundaries.items():
-                    split_indices[label].extend(stratum_rel_idxs[start:end])
-
-            # Convert to sorted numpy arrays
-            split_indices = {
-                label: np.sort(np.array(idxs, dtype=int))
-                for label, idxs in split_indices.items()
-            }
-
+            split_idxs = self._stratify(view=view)
             return self._return_splits(
                 view=view,
-                split_indices=split_indices,
+                split_indices=split_idxs,
                 return_views=return_views,
             )
 
-        # ================================================
-        # Case 3: Group by tag(s)
-        # ================================================
-        # Extract raw tag arrays as numpy for the grouping keys
-        tag_data: dict[str, np.ndarray] = view.get_tags(
-            fmt=DataFormat.DICT_NUMPY,
-            tags=self.group_by,
-            rep=REP_RAW,
-            include_rep_suffix=False,
-            include_domain_prefix=False,
-        )
+        # Case 2: Groupby
+        if self.group_by is not None:
+            split_idxs = self._groupby(view=view)
+            return self._return_splits(
+                view=view,
+                split_indices=split_idxs,
+                return_views=return_views,
+            )
 
-        # Build group keys
-        # Example:
-        #   if grouping by ["cell_id", "cycle_number"]
-        #   then group_keys[i] = ("A1", 45)
-        group_keys = np.array(
-            [tuple(col[i] for col in tag_data.values()) for i in range(n)],
-            dtype=object,
-        )
-        unique_groups, inv = np.unique(group_keys, return_inverse=True)
-
-        # Build mapping: group_id to list of relative indices
-        group_to_rel_idxs: dict[int, list[int]] = {}
-        for rel_idx, g_id in enumerate(inv):
-            group_to_rel_idxs.setdefault(g_id, []).append(rel_idx)
-
-        # Shuffle group IDs, not individual samples
-        group_ids = np.arange(len(unique_groups))
-        self.rng.shuffle(group_ids)
-
-        # Apply split boundaries at the group level
-        boundaries = self._compute_split_boundaries(len(group_ids))
-        split_indices: dict[str, list[int]] = {label: [] for label in self.ratios}
-
+        # Case 3: No grouping or stratification
+        n = len(view)
+        rel_indices = np.arange(n)
+        self.rng.shuffle(rel_indices)
+        boundaries = self._compute_split_boundaries(n)
+        split_indices: dict[str, np.ndarray] = {}
         for label, (start, end) in boundaries.items():
-            selected = set(group_ids[start:end])
-            for g in selected:
-                split_indices[label].extend(group_to_rel_idxs[g])
-
-        # Convert & sort
-        split_indices = {
-            label: np.sort(np.array(idxs, dtype=int))
-            for label, idxs in split_indices.items()
-        }
-
+            split_indices[label] = rel_indices[start:end]
         return self._return_splits(
             view=view,
             split_indices=split_indices,
@@ -317,6 +224,119 @@ class RandomSplitter(BaseSplitter):
             boundaries[lbl] = (current, current + cnt)
             current += cnt
         return boundaries
+
+    def _stratify(self, view: FeatureSetView) -> dict[str, list[int]]:
+        # self.stratify_by contains a list of strings, each string can be any column in FeatureSet
+        # FeatureSetColumnReference infers the node, domain, key, and variant given a user-defined strings
+        # E.g, "voltages" -> ("MyFS", "features", "voltages", "raw")
+        strata_refs: list[FeatureSetColumnReference] = [
+            FeatureSetColumnReference.from_string(
+                val=x,
+                known_attrs={
+                    "node_label": view.source.label,
+                    "node_id": view.source.node_id,
+                },
+                experiment=ExperimentContext.get_active(),
+            )
+            for x in self.stratify_by
+        ]
+
+        # Collect data for each defined stratify_by key
+        # The np data for each key uses relative indices (role_indices defines absolute indices)
+        strata_data: dict[str, np.ndarray] = {}
+        for ref in strata_refs:
+            # Get source data
+            k = ref.to_string()
+            if k in strata_data:
+                msg = (
+                    f"ColumnReference.to_string() already exists in `strata_data`: {k}"
+                )
+                raise ValueError(msg)
+            ref_data: np.ndarray = view.get_data(
+                columns=f"{ref.domain}.{ref.key}.{ref.rep}",
+                fmt=DataFormat.NUMPY,
+            )
+            strata_data[k] = ref_data
+
+        # Construct strata buckets
+        # Each bucket defines a unique strata class
+        # Each bucket holds relative indices of the rows of `view` belonging to each strata
+        buckets: dict[tuple, list[int]] = {}
+        for i in range(len(view)):
+            row_vals = tuple(to_hashable(strata_data[k][i]) for k in strata_data)
+            buckets.setdefault(row_vals, []).append(i)
+
+        # Shuffle relative indices in each bucket
+        for k, rel_idxs in buckets.items():
+            buckets[k] = np.asarray(rel_idxs)
+            self.rng.shuffle(buckets[k])
+
+        # If strict, trim all buckets to the size of the smallest stratum
+        if self.strict_stratification:
+            min_size = min(len(v) for v in buckets.values())
+            buckets = {k: v[:min_size] for k, v in buckets.items()}
+
+        # Split each stratum independently by ratios, then merge per split label.
+        # This guarantees every split contains samples from every stratum.
+        split_labels = list(self.ratios.keys())
+        split_indices: dict[str, list[int]] = {lbl: [] for lbl in split_labels}
+
+        for stratum_idxs in buckets.values():
+            boundaries = self._compute_split_boundaries(len(stratum_idxs))
+            for label, (start, end) in boundaries.items():
+                split_indices[label].extend(stratum_idxs[start:end])
+
+        return split_indices
+
+    def _groupby(self, view: FeatureSetView) -> dict[str, list[int]]:
+        # self.group_by contains a list of strings, each string can be any column in FeatureSet
+        # FeatureSetColumnReference infers the node, domain, key, and variant given a user-defined strings
+        # E.g, "voltages" -> ("MyFS", "features", "voltages", "raw")
+        group_refs: list[FeatureSetColumnReference] = [
+            FeatureSetColumnReference.from_string(
+                val=x,
+                known_attrs={
+                    "node_label": view.source.label,
+                    "node_id": view.source.node_id,
+                },
+                experiment=ExperimentContext.get_active(),
+            )
+            for x in self.group_by
+        ]
+
+        # Collect data for each defined group_by key
+        group_data: dict[str, np.ndarray] = {}
+        for ref in group_refs:
+            # Get source data
+            k = ref.to_string()
+            if k in group_data:
+                msg = f"ColumnReference.to_string() already exists in `group_data`: {k}"
+                raise ValueError(msg)
+            ref_data: np.ndarray = view.get_data(
+                columns=f"{ref.domain}.{ref.key}.{ref.rep}",
+                fmt=DataFormat.NUMPY,
+            )
+            group_data[k] = ref_data
+
+        # Convert `group_data` to rows of tuples, each tuple becomes the unique grouping key
+        # These row_tuples are used to construct unique group buckets
+        # Each bucket holds relative indices of the rows of `view` belonging to each bucket
+        buckets: dict[tuple, list[int]] = {}
+        for i in range(len(view)):
+            row_vals = tuple(to_hashable(group_data[k][i]) for k in group_data)
+            buckets.setdefault(row_vals, []).append(i)
+
+        # Split groups on ratios
+        group_keys = list(buckets.keys())
+        boundaries = self._compute_split_boundaries(len(group_keys))
+        split_indices: dict[str, list[int]] = {}
+        for split_lbl, (start, end) in boundaries.items():
+            split_groups = group_keys[start:end]
+            split_indices[split_lbl] = []
+            for g in split_groups:
+                split_indices[split_lbl].extend(buckets[g])
+
+        return split_indices
 
     # ================================================
     # Configurable

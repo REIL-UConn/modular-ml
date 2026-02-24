@@ -220,11 +220,14 @@ class SplitMixin:
             - `group_id` is greater than 1, and
             - `pulse_type` equals 'charge'.
 
-            FeatureSet.filter(where={
-                "tags.cell_id": [1, 2, 3],
-                "tags.group_id": (lambda x: x > 1),
-                "tags.pulse_type": "charge",
-            })
+
+            >>> FeatureSet.filter(  # doctest: +SKIP
+            ...     where={
+            ...         "tags.cell_id": [1, 2, 3],
+            ...         "tags.group_id": (lambda x: x > 1),
+            ...         "tags.pulse_type": "charge",
+            ...     }
+            ... )
 
         """
         from modularml.core.data.featureset_view import FeatureSetView
@@ -774,6 +777,7 @@ class SplitMixin:
         *,
         group_by: str | Sequence[str] | None = None,
         stratify_by: str | Sequence[str] | None = None,
+        strict_stratification: bool = False,
         seed: int = 13,
         return_views: bool = False,
         register: bool = True,
@@ -794,11 +798,14 @@ class SplitMixin:
         Args:
             ratios (Mapping[str, float]):
                 Subset ratios that sum to 1.0 (e.g., `{"train": 0.7, "val": 0.3}`).
-            group_by (str | Sequence[str] | None):
-                Tag keys that ensure grouped samples stay together.
-            stratify_by (str | Sequence[str] | None):
-                Tag keys that enforce proportional representation across subsets.
+            group_by (list[str] | None):
+                Column selectors used to keep groups together.
+            stratify_by (list[str] | None):
+                Column selectors used to balance strata.
                 Mutually exclusive with `group_by`.
+            strict_stratification (bool):
+                Whether the returned splits should be perfectly stratified,
+                or use all samples. Defaults to False.
             seed (int):
                 Random seed used by :class:`RandomSplitter`.
             return_views (bool):
@@ -812,13 +819,13 @@ class SplitMixin:
                 Resulting views if `return_views=True`; else `None`.
 
         Example:
-        ```python
-            fs.split_random(
-                ratios={"train": 0.8, "val": 0.2},
-                group_by="cell_id",
-                seed=42,
-            )
-        ```
+            Using random splitting:
+
+            >>> fs.split_random(  # doctest: +SKIP
+            ...     ratios={"train": 0.8, "val": 0.2},
+            ...     group_by="cell_id",
+            ...     seed=42,
+            ... )
 
         """
         from modularml.splitters.random_splitter import RandomSplitter
@@ -827,6 +834,7 @@ class SplitMixin:
             ratios,
             group_by=group_by,
             stratify_by=stratify_by,
+            strict_stratification=strict_stratification,
             seed=seed,
         )
         return self.split(
@@ -874,15 +882,15 @@ class SplitMixin:
                 Resulting views if `return_views=True`; else `None`.
 
         Example:
-        ```python
-            fs.split_by_condition(
-                {
-                    "low_temp": {"temperature": lambda x: x < 20},
-                    "high_temp": {"temperature": lambda x: x >= 20},
-                    "cell_5": {"cell_id": 5},
-                }
-            )
-        ```
+            Using condition-based splitter:
+
+            >>> fs.split_by_condition(  # doctest: +SKIP
+            ...     {
+            ...         "low_temp": {"temperature": lambda x: x < 20},
+            ...         "high_temp": {"temperature": lambda x: x >= 20},
+            ...         "cell_5": {"cell_id": 5},
+            ...     }
+            ... )
 
         """
         from modularml.splitters.condition_splitter import ConditionSplitter

@@ -59,6 +59,13 @@ def run_examples(session):
     """Run Jupyter notebook examples with nbmake."""
     set_env(session, PROJECT_ENV)
     session.install("-e", ".[all,dev]", "nbmake", silent=False)
+    session.install("nbformat", "nbstripout", "pytest", "nbconvert")
+
+    # Normalize all notebooks in the docs or notebooks directory
+    nb_files = list(Path("docs").rglob("*.ipynb"))
+    if nb_files:
+        session.run("nbstripout", *[str(f) for f in nb_files])
+
     notebooks = session.posargs if session.posargs else ["docs/how_to/"]
     session.run("pytest", "--nbmake", *notebooks, external=True)
 
@@ -102,17 +109,8 @@ def build_docs(session):
     session.install("-e", ".[docs]", silent=False)
     session.chdir("docs")
 
-    # Autogenerate API docs
-    session.run(
-        "sphinx-apidoc",
-        "-o",
-        "reference",
-        "../modularml",
-        "--templatedir",
-        "_templates/_autogen_api_template",
-        "--force",
-        external=True,
-    )
+    # Clean stale build artifacts to prevent cached duplicates
+    session.run("rm", "-rf", "_build", external=True)
 
     sourcedir = "."
     outputdir = "_build/html"

@@ -273,12 +273,10 @@ class TrainPhase(ExperimentPhase):
 
                 The outputs of each policy is given below:
 
-                ```python
-                "zip_strict": (b1, c1), (b2, c2)
-                "zip_cycle": (b1, c1), (b2, c2), (b3, c1)
-                "alternate_strict": b1, c1, b2, c2
-                "alternate_cycle": b1, c1, b2, c2, b3, c1
-                ```
+                * "zip_strict": (b1, c1), (b2, c2)
+                * "zip_cycle": (b1, c1), (b2, c2), (b3, c1)
+                * "alternate_strict": b1, c1, b2, c2
+                * "alternate_cycle": b1, c1, b2, c2, b3, c1
 
                 See also :class:`BatchSchedulingPolicy`.
 
@@ -384,12 +382,10 @@ class TrainPhase(ExperimentPhase):
 
                 The outputs of each policy is given below:
 
-                ```python
-                "zip_strict": (b1, c1), (b2, c2)
-                "zip_cycle": (b1, c1), (b2, c2), (b3, c1)
-                "alternate_strict": b1, c1, b2, c2
-                "alternate_cycle": b1, c1, b2, c2, b3, c1
-                ```
+                * "zip_strict": (b1, c1), (b2, c2)
+                * "zip_cycle": (b1, c1), (b2, c2), (b3, c1)
+                * "alternate_strict": b1, c1, b2, c2
+                * "alternate_cycle": b1, c1, b2, c2, b3, c1
 
                 See also :class:`BatchSchedulingPolicy`.
 
@@ -779,45 +775,49 @@ class TrainPhase(ExperimentPhase):
         """
         Iterate over all execution steps for this training phase.
 
-        Description:
-            This generator produces a sequence of :class:`ExecutionContext` objects
-            representing the full training schedule of the phase, across all epochs
-            and all batch steps within each epoch.
+        This generator produces a sequence of :class:`ExecutionContext`
+        objects representing the full training schedule of the phase,
+        across all epochs and all batch steps within each epoch.
 
-            The execution flow is:
+        The execution flow is:
 
-            1. Group input bindings into unique sampler executions via
-            `_build_sampler_executions()`. Samplers with identical configuration,
-            FeatureSet, and split are executed only once and shared across bindings.
+        1. Group input bindings into unique sampler executions via
+           ``_build_sampler_executions()``. Samplers with identical configuration,
+           FeatureSet, and split are executed only once and shared across bindings.
 
-            2. For each sampler execution, obtain the number of materialized batches
-            from its :class:`SampledView`.
+        2. For each sampler execution, obtain the number of materialized batches
+           from its :class:`SampledView`.
 
-            3. For each epoch:
-                a. Generate a step-wise batch schedule using `_iter_schedule()`,
-                according to `self.batch_schedule`.
-                b. For each schedule step, construct the inputs for *all* head-node
-                bindings:
-                    - If a sampler is active in the current step, its corresponding
-                        batch is selected.
-                    - If a sampler is inactive (ALTERNATE policies), its inputs are
-                        replaced with a fully masked :class:`BatchView`.
+        3. For each epoch:
 
-            4. Yield an :class:`ExecutionContext` containing:
-                - phase label
-                - epoch index
-                - batch index (within the epoch)
-                - resolved input BatchViews for all bindings
+           a. Generate a step-wise batch schedule using ``_iter_schedule()``
+              according to ``self.batch_schedule``.
+
+           b. For each schedule step, construct the inputs for *all* head-node
+              bindings:
+
+              - If a sampler is active in the current step, its corresponding
+                batch is selected.
+              - If a sampler is inactive (ALTERNATE policies), its inputs are
+                replaced with a fully masked :class:`BatchView`.
+
+        4. Yield an :class:`ExecutionContext` containing:
+
+           - Phase label
+           - Epoch index
+           - Batch index (within the epoch)
+           - Resolved input :class:`BatchView` objects for all bindings
 
         Notes:
             - ZIP scheduling policies always provide one batch per sampler per step.
             - ALTERNATE scheduling policies activate exactly one sampler per step;
-            all others are masked.
+              all others are masked.
             - No semantic alignment between samplers is performed here. Any required
-            alignment (e.g., contrastive pairs, matched samples) must be handled
-            inside the sampler itself via roles.
-            - The yielded ExecutionContexts are intended to be consumed directly by
-            the ModelGraph training loop (e.g., `ModelGraph.train_step(ctx)`).
+              alignment (e.g., contrastive pairs or matched samples) must be handled
+              inside the sampler itself via roles.
+            - The yielded :class:`ExecutionContext` objects are intended to be
+              consumed directly by the ModelGraph training loop
+              (e.g., ``ModelGraph.train_step(ctx)``).
 
         Args:
             results (TrainResults | None, optional):
@@ -829,26 +829,24 @@ class TrainPhase(ExperimentPhase):
                 Whether to show a progress bar for training execution.
                 Defaults to True.
             persist_progress (bool, optional):
-                Whether to leave all progress bars shown after they complete. Note that
-                overrides all nested progress bar persist settings. Defaults to
-                `IN_NOTEBOOK` (True if working in a notebook, False if in a script).
+                Whether to leave all progress bars visible after completion.
+                Overrides all nested progress bar persistence settings.
+                Defaults to ``IN_NOTEBOOK`` (True in notebooks, False in scripts).
             persist_epoch_progress (bool, optional):
-                Whether to leave per-epoch training bars shown after they complete.
-                Defaults to `IN_NOTEBOOK` (True if working in a notebook, False if in
-                a Python script).
+                Whether to leave per-epoch training bars visible after completion.
+                Defaults to ``IN_NOTEBOOK``.
             val_loss_metric (str, optional):
-                The name of a recorded ValidationLossMetrics to show in the progress
-                bar. Results must be tracked, and `val_loss_metric` must be an existing
-                loss metric. Otherwise, no val_loss field will be shown in the progress
-                bar. Defaults to `"val_loss"`.
+                Name of a recorded validation loss metric to display in the
+                progress bar. Results must be tracked and the metric must exist.
+                If not, no validation loss field will be shown.
+                Defaults to ``"val_loss"``.
 
         Yields:
             ExecutionContext:
-                A fully specified execution context for a single batch step in a
-                specific epoch of this training phase.
+                A fully specified execution context for a single batch step
+                within a specific epoch of this training phase.
 
-        """
-        # Reset stop flag
+        """  # Reset stop flag
         self._stop_requested = False
 
         # Samplers may be repeated over input bindings

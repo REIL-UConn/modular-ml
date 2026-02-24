@@ -1,15 +1,16 @@
 from modularml.api import (
     AppliedLoss,
     BaseModel,
-    CVBinding,
     Checkpointing,
     ConcatNode,
     CrossValidation,
+    CVBinding,
     EarlyStopping,
     EvalLossMetric,
     EvalPhase,
     EvalResults,
     Experiment,
+    ExperimentContext,
     FeatureSet,
     FeatureSetView,
     FitPhase,
@@ -20,6 +21,7 @@ from modularml.api import (
     ModelNode,
     Optimizer,
     PhaseGroup,
+    PhaseGroupResults,
     ResultRecording,
     Scaler,
     SimilarityCondition,
@@ -29,10 +31,6 @@ from modularml.api import (
     TrainResults,
     supported_scalers,
 )
-
-
-from modularml.core.experiment.experiment_context import ExperimentContext
-
 from modularml.registry import register_all
 
 register_all()

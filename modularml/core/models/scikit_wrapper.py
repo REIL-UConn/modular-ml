@@ -217,8 +217,8 @@ class ScikitModelWrapper(BaseModel):
         try:
             dummy_out = self.forward(x[:1])
             self._output_shape = tuple(dummy_out.shape[1:])
-        except Exception:
-            # Some models may not be ready for prediction right after fit
+        except Exception:  # noqa: BLE001
+            # TODO: Some models may not be ready for prediction right after fit
             # (e.g., partial_fit with insufficient data). Set to None.
             return
 

@@ -493,7 +493,7 @@ class FeatureSetColumnReference(ExperimentReference):
 
             else:
                 unmatched_cands = [
-                    (d, v) for k in unmatched if k in [a[1] for a in avail_parsed]
+                    a for k in unmatched for a in avail_parsed if k == a[1]
                 ]
                 if len(unmatched_cands) != 1:
                     msg = f"Could not uniquely identify a domain in '{val}'. Possible candidates: {unmatched_cands}."
@@ -529,9 +529,7 @@ class FeatureSetColumnReference(ExperimentReference):
                     d, col = k, None
                 avail_parsed.append((d, col))
 
-            candidates = [
-                (d, k) for k in unmatched if k in [a[1] for a in avail_parsed]
-            ]
+            candidates = [a for k in unmatched for a in avail_parsed if k == a[1]]
             if len(candidates) != 1:
                 msg = f"Could not uniquely identify column key in '{val}'. Possible candidates: {candidates}."
                 raise ResolutionError(msg)

@@ -19,17 +19,17 @@ class SampledView(Mapping[str, list[BatchView]], Summarizable):
         :class:`BatchView` objects. Each stream represents a lazily-evaluated
         sequence of batches.
 
-        Iteration over :class:`SampledView` yields *aligned batch groups*:
-            dict[str, BatchView]  # one BatchView per stream at the same index
+        Iteration over :class:`SampledView` yields *aligned batch groups*
+        (``dict[str, BatchView]`` — one ``BatchView`` per stream at the same index).
 
     Example:
-    ```python
-    sampled = SampledView({"main": [...], "aux": [...]})
-    sampled["main"]  # list[BatchView]
-    sampled.main  # list[BatchView]
-    for batch_map in sampled:
-        ... batch_map["main"]  # BatchView
-    ```
+        Attribute access of stream data in a SampledView
+
+        >>> sampled = SampledView({"main": [...], "aux": [...]})  # doctest: +SKIP
+        >>> sampled["main"]  # list[BatchView] # doctest: +SKIP
+        >>> sampled.main  # list[BatchView] # doctest: +SKIP
+        >>> for batch_map in sampled:  # doctest: +SKIP
+        ...     batch_map["main"]  # BatchView
 
     """
 

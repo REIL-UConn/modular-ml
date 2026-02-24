@@ -158,15 +158,14 @@ class LossDataSeries(AxisSeries[LossRecord]):
         """
         Retrieves the total trainable loss value of all records in this collection.
 
-        To get the trainable loss for a specific epoch/batch/label, use:
-
-        ```python
-        series = LossDataSeries(...)
-        series.where(epoch=1, ...).trainable
-        ```
-
         Returns:
             float: Sum of trainable components.
+
+        Example:
+            To get the trainable loss for a specific epoch/batch/label, use:
+
+            >>> series = LossDataSeries(...)  # doctest: +SKIP
+            >>> series.where(epoch=1, ...).trainable # doctest: +SKIP
 
         """
         vals = [lr.trainable for lr in self.values() if lr.trainable is not None]
@@ -177,15 +176,14 @@ class LossDataSeries(AxisSeries[LossRecord]):
         """
         Retrieves the total auxiliary loss value of all records in this collection.
 
-        To get the auxiliary loss for a specific epoch/batch/label, use:
-
-        ```python
-        series = LossDataSeries(...)
-        series.where(epoch=1, ...).auxiliary
-        ```
-
         Returns:
             float: Sum of auxiliary components.
+
+        Example:
+            To get the auxiliary loss for a specific epoch/batch/label, use:
+
+            >>> series = LossDataSeries(...)  # doctest: +SKIP
+            >>> series.where(epoch=1, ...).auxiliary # doctest: +SKIP
 
         """
         vals = [lr.auxiliary for lr in self.values() if lr.auxiliary is not None]

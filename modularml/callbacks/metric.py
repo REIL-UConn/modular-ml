@@ -127,27 +127,27 @@ class EvaluationMetric(MetricCallback):
         This avoids the need for metrics to search through `results._callbacks`
         by label.
 
-    Examples:
-        ```python
-        class ValidationR2(EvaluationMetric):
-            def __init__(self, node_id):
-                super().__init__(name="val_r2", mode="max")
-                self._node_id = node_id
+    Example:
+        Custom metric subclasses can be defined via:
 
-            def extract(self, *, eval_result, exec_ctx=None):
-                preds = eval_result.get_node_outputs(node=self._node_id, fmt="np")
-                targets = eval_result.get_node_targets(node=self._node_id, fmt="np")
-                r2 = r2_score(targets, preds)
-                return MetricResult(
-                    metric_name=self.metric_name,
-                    metric_value=float(r2),
-                )
-
-            def get_config(self):
-                cfg = super().get_config()
-                cfg["node_id"] = self._node_id
-                return cfg
-        ```
+        >>> class ValidationR2(EvaluationMetric):  # doctest: +SKIP
+        ...     def __init__(self, node_id):
+        ...         super().__init__(name="val_r2", mode="max")
+        ...         self._node_id = node_id
+        ...
+        ...     def extract(self, *, eval_result, exec_ctx=None):
+        ...         preds = eval_result.get_node_outputs(node=self._node_id, fmt="np")
+        ...         targets = eval_result.get_node_targets(node=self._node_id, fmt="np")
+        ...         r2 = r2_score(targets, preds)
+        ...         return MetricResult(
+        ...             metric_name=self.metric_name,
+        ...             metric_value=float(r2),
+        ...         )
+        ...
+        ...     def get_config(self):
+        ...         cfg = super().get_config()
+        ...         cfg["node_id"] = self._node_id
+        ...         return cfg
 
     """
 

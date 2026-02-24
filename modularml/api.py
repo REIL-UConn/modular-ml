@@ -2,7 +2,9 @@
 # Experiment & Phases
 # ================================================
 from modularml.core.experiment.experiment import Experiment
+from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.experiment.phases.phase_group import PhaseGroup
+from modularml.core.experiment.results.group_results import PhaseGroupResults
 from modularml.core.experiment.phases.eval_phase import EvalPhase
 from modularml.core.experiment.results.eval_results import EvalResults
 from modularml.core.experiment.phases.train_phase import TrainPhase
@@ -11,6 +13,7 @@ from modularml.core.experiment.phases.phase import InputBinding
 from modularml.core.experiment.phases.fit_phase import FitPhase
 from modularml.core.experiment.results.fit_results import FitResults
 from modularml.core.experiment.checkpointing import Checkpointing
+from modularml.core.experiment.phases.train_phase import ResultRecording
 
 
 # ================================================
@@ -30,9 +33,7 @@ from modularml.callbacks.eval_loss_metric import EvalLossMetric
 """
 Other callbacks are accessed with:
 
-```python
-    from modularml.callbacks import ...
-```
+>>> from modularml.callbacks import ... # doctest: +SKIP
 """
 
 
@@ -54,9 +55,7 @@ from modularml.core.models.tensorflow_base_model import TensorflowBaseModel
 """
 Built-in models and merge nodes are accessed with:
 
-```python
-    from modularml.models import ...
-```
+>>> from modularml.models import ... # doctest: +SKIP
 """
 
 
@@ -75,9 +74,7 @@ from modularml.core.sampling.similiarity_condition import SimilarityCondition
 """
 All built-in splitters are accessed with:
 
-```python
-    from modularml.splitters import ...
-```
+>>> from modularml.splitters import ... # doctest: +SKIP
 """
 
 
@@ -90,9 +87,7 @@ supported_scalers = Scaler.get_supported_scalers()
 """
 All built-in transformed are accessed with:
 
-```python
-    from modularml.transforms import ...
-```
+>>> from modularml.transforms import ... # doctest: +SKIP
 """
 
 
@@ -108,6 +103,7 @@ __all__ = [
     "EvalPhase",
     "EvalResults",
     "Experiment",
+    "ExperimentContext",
     "FeatureSet",
     "FeatureSetView",
     "FitPhase",
@@ -118,6 +114,8 @@ __all__ = [
     "ModelNode",
     "Optimizer",
     "PhaseGroup",
+    "PhaseGroupResults",
+    "ResultRecording",
     "Scaler",
     "SimilarityCondition",
     "TensorflowBaseModel",

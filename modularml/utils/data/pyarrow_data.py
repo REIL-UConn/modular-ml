@@ -1,5 +1,7 @@
 """PyArrow conversion helpers for ModularML sample domains."""
 
+from __future__ import annotations
+
 import ast
 import fnmatch
 import hashlib

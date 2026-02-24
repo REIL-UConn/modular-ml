@@ -37,7 +37,7 @@ class Samples:
         role_indices (dict[str, NDArray[np.int_]]):
             Absolute sample indices keyed by role name.
         role_weights (dict[str, NDArray[np.float32]] | None):
-            Optional per-role weights aligned with `role_indices`.
+            Optional per-role weights aligned with ``role_indices``.
 
     """
 

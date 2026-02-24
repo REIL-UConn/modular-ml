@@ -19,7 +19,7 @@ A sequential API can approximate some of these patterns through workarounds, but
 
 All graph nodes inherit from a common base and specialize through a focused hierarchy:
 
-```mermaid
+```{mermaid}
 classDiagram
     ExperimentNode <|-- GraphNode
     GraphNode <|-- ComputeNode

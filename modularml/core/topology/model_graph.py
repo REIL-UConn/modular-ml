@@ -29,7 +29,7 @@ from modularml.utils.data.dummy_data import make_dummy_sample_data
 from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
 from modularml.utils.errors.error_handling import ErrorMode
 from modularml.utils.errors.exceptions import BackendNotSupportedError
-from modularml.utils.logging.warnings import catch_warnings, warn
+from modularml.utils.logging.warnings import catch_warnings, get_logger, warn
 from modularml.utils.nn.backend import (
     Backend,
     backend_requires_optimizer,
@@ -55,6 +55,8 @@ if TYPE_CHECKING:
 
 tf = check_tensorflow()
 torch = check_torch()
+
+logger = get_logger("ModelGraph")
 
 
 class ModelGraph(Configurable, Stateful):
@@ -991,25 +993,36 @@ class ModelGraph(Configurable, Stateful):
                 Node ID, label, or instance of an existing ModelGraph node
                 to be removed.
 
-        Examples:
-        1. Removing an existing single-input, single-output node.
-            Given: `A -> B -> C`
-            Remove: `B`
-            Result: `A -> C`
+        Example:
+            1. Removing an existing single-input, single-output node.
 
-        2. Removing an existing multi-input, single-output node.
-            Given: `[A, B] -> C -> D`
-            Remove: `C`
-            Result: `[A, B] -> D`
-            Note that `D` must be able to accept multiple inputs or an error
-            will be thrown.
+               Given: `A -> B -> C`
 
-        3. Removing an existing single-input, multi-output node.
-            Given: `A -> B -> [C, D]`
-            Remove: `B`
-            Result: `A -> [C, D]`
-            Note that `A` must be able to accept multiple outputs or an error
-            will be thrown.
+               Remove: `B`
+
+               Result: `A -> C`
+
+            2. Removing an existing multi-input, single-output node.
+
+               Given: `[A, B] -> C -> D`
+
+               Remove: `C`
+
+               Result: `[A, B] -> D`
+
+               Note that `D` must be able to accept multiple inputs or an error
+               will be thrown.
+
+            3. Removing an existing single-input, multi-output node.
+
+               Given: `A -> B -> [C, D]`
+
+               Remove: `B`
+
+               Result: `A -> [C, D]`
+
+               Note that `A` must be able to accept multiple outputs or an error
+               will be thrown.
 
         Returns:
             ModelGraph: self
@@ -1481,7 +1494,8 @@ class ModelGraph(Configurable, Stateful):
         for n in nodes:
             if not isinstance(n, Trainable):
                 msg = f"GraphNode '{n.label}' is not Trainable. It cannot be frozen."
-                raise TypeError(msg)
+                logger.debug(msg)
+                continue
             n.freeze()
 
     def unfreeze(self, nodes: list[str, GraphNode] | None = None):
@@ -1507,7 +1521,8 @@ class ModelGraph(Configurable, Stateful):
         for n in nodes:
             if not isinstance(n, Trainable):
                 msg = f"GraphNode '{n.label}' is not Trainable. It cannot be frozen."
-                raise TypeError(msg)
+                logger.debug(msg)
+                continue
             n.unfreeze()
 
     def _train_step_torch(
@@ -2211,6 +2226,7 @@ class ModelGraph(Configurable, Stateful):
         show_targets: bool = False,
         show_tags: bool = False,
         show_frozen: bool = True,
+        show_splits: bool = False,
     ):
         """
         Displays a mermaid diagram for this FeatureSet.
@@ -2225,6 +2241,8 @@ class ModelGraph(Configurable, Stateful):
             show_frozen (bool, optional):
                 Show frozen state (label text and dimmed styling) on ModelNodes
                 Defaults to True.
+            show_splits (bool, optional):
+                Show available splits on FeatureSet nodes. Defaults to False.
 
         """
         display_opts = ModelGraphDisplayOptions(
@@ -2232,5 +2250,6 @@ class ModelGraph(Configurable, Stateful):
             show_targets=show_targets,
             show_tags=show_tags,
             show_frozen=show_frozen,
+            show_splits=show_splits,
         )
         return Visualizer(self, display_options=display_opts).display_mermaid()

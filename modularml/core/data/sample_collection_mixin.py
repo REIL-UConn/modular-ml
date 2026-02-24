@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -16,18 +17,25 @@ from modularml.core.data.schema_constants import (
     DOMAIN_TAGS,
     DOMAIN_TARGETS,
 )
+from modularml.core.experiment.experiment_context import ExperimentContext
+from modularml.core.references.featureset_reference import FeatureSetColumnReference
 from modularml.utils.data.conversion import convert_dict_to_format, convert_to_format
 from modularml.utils.data.data_format import (
     _TENSORLIKE_FORMATS,
     DataFormat,
     format_is_tensorlike,
 )
+from modularml.utils.data.formatting import ensure_list
 from modularml.utils.data.pyarrow_data import resolve_column_selectors
+from modularml.utils.logging.logger import get_logger
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from modularml.core.data.featureset import FeatureSet
+
+
+logger = get_logger("SampleCollectionMixin")
 
 
 class SampleCollectionMixin:
@@ -49,13 +57,18 @@ class SampleCollectionMixin:
     # ================================================
     def _resolve_caller_attributes(
         self,
-    ) -> tuple[SampleCollection, list[str] | None, np.ndarray | None]:
-        """Must resolve the source SampleCollection, list of columns, and row indices of the caller."""
+    ) -> tuple[SampleCollection, list[str] | None, np.ndarray | None, str]:
+        """
+        Resolves the caller instance into SampleCollection properties.
+
+        Must resolve the source SampleCollection, list of columns, row indices,
+        and source node_id of the caller.
+        """
         raise NotImplementedError
 
-    def _resolve_collection(self) -> tuple[SampleCollection, np.ndarray | None]:
-        """Returns :class:`SampleCollection` and mask over caller's columns and indices."""
-        collection, columns, indices = self._resolve_caller_attributes()
+    def _resolve_collection(self) -> tuple[SampleCollection, np.ndarray | None, str]:
+        """Returns :class:`SampleCollection`, mask over caller's indices, an caller node_id."""
+        collection, columns, indices, node_id = self._resolve_caller_attributes()
         if columns is not None and DOMAIN_SAMPLE_UUIDS not in columns:
             columns.append(DOMAIN_SAMPLE_UUIDS)
 
@@ -65,7 +78,7 @@ class SampleCollectionMixin:
         )
 
         if indices is None:
-            return SampleCollection(table=sub_table), None
+            return SampleCollection._from_projection(sub_table), None, node_id
 
         # Row filtering over only valid (non-negative indices)
         indices = np.asarray(indices)
@@ -74,7 +87,7 @@ class SampleCollectionMixin:
         sub_table = sub_table.take(pa.array(valid_indices))
 
         # Return collection of valid indices, and mask (zeros = areas to pad)
-        return SampleCollection(table=sub_table), mask
+        return SampleCollection._from_projection(sub_table), mask, node_id
 
     def _pad_output(
         self,
@@ -161,7 +174,7 @@ class SampleCollectionMixin:
     @property
     def n_samples(self) -> int:
         """Total number of samples (rows)."""
-        collection, _ = self._resolve_collection()
+        collection, _, _ = self._resolve_collection()
         return collection.n_samples
 
     def __len__(self) -> int:
@@ -171,7 +184,7 @@ class SampleCollectionMixin:
     @property
     def sample_mask(self) -> NDArray[np.int8] | None:
         """Mask over samples: 1=valid sample, 0=padded sample."""
-        _, _, indices = self._resolve_caller_attributes()
+        _, _, indices, _ = self._resolve_caller_attributes()
         if indices is None:
             return None
         return (np.asarray(indices) >= 0).astype(np.int8)
@@ -198,7 +211,7 @@ class SampleCollectionMixin:
             List of all feature column names.
 
         """
-        collection, _ = self._resolve_collection()
+        collection, _, _ = self._resolve_collection()
         return collection.get_feature_keys(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -223,7 +236,7 @@ class SampleCollectionMixin:
             List of all target column names.
 
         """
-        collection, _ = self._resolve_collection()
+        collection, _, _ = self._resolve_collection()
         return collection.get_target_keys(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -248,7 +261,7 @@ class SampleCollectionMixin:
             List of all tag column names.
 
         """
-        collection, _ = self._resolve_collection()
+        collection, _, _ = self._resolve_collection()
         return collection.get_tag_keys(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -270,7 +283,7 @@ class SampleCollectionMixin:
                 All unique columns in the SampleCollection.
 
         """
-        collection, _ = self._resolve_collection()
+        collection, _, _ = self._resolve_collection()
         return collection.get_all_keys(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -306,7 +319,7 @@ class SampleCollectionMixin:
                 Mapping of feature column representation names to their shapes.
 
         """
-        collection, _ = self._resolve_collection()
+        collection, _, _ = self._resolve_collection()
         return collection.get_feature_shapes(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -334,7 +347,7 @@ class SampleCollectionMixin:
                 Mapping of target column representation names to their shapes.
 
         """
-        collection, _ = self._resolve_collection()
+        collection, _, _ = self._resolve_collection()
         return collection.get_target_shapes(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -362,7 +375,7 @@ class SampleCollectionMixin:
                 Mapping of tag column representation names to their shapes.
 
         """
-        collection, _ = self._resolve_collection()
+        collection, _, _ = self._resolve_collection()
         return collection.get_tag_shapes(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -393,7 +406,7 @@ class SampleCollectionMixin:
                 Mapping of feature column names to their data-types.
 
         """
-        collection, _ = self._resolve_collection()
+        collection, _, _ = self._resolve_collection()
         return collection.get_feature_dtypes(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -419,7 +432,7 @@ class SampleCollectionMixin:
                 Mapping of targets column names to their data-types.
 
         """
-        collection, _ = self._resolve_collection()
+        collection, _, _ = self._resolve_collection()
         return collection.get_target_dtypes(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -445,7 +458,7 @@ class SampleCollectionMixin:
                 Mapping of tag column names to their data-types.
 
         """
-        collection, _ = self._resolve_collection()
+        collection, _, _ = self._resolve_collection()
         return collection.get_tag_dtypes(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -524,7 +537,7 @@ class SampleCollectionMixin:
             Data from the specified columns, in the request DataFormat.
 
         """
-        collection, mask = self._resolve_collection()
+        collection, mask, node_id = self._resolve_collection()
 
         # Extract real columns from collection
         all_cols: list[str] = collection.get_all_keys(
@@ -533,15 +546,64 @@ class SampleCollectionMixin:
         )
 
         # Build final column selection (organized by domain)
-        selected: dict[str, set[str]] = resolve_column_selectors(
-            all_columns=all_cols,
-            columns=columns,
-            features=features,
-            targets=targets,
-            tags=tags,
-            rep=rep,
-            include_all_if_empty=False,
-        )
+        try:
+            selected: dict[str, set[str]] = resolve_column_selectors(
+                all_columns=all_cols,
+                columns=columns,
+                features=features,
+                targets=targets,
+                tags=tags,
+                rep=rep,
+                include_all_if_empty=False,
+            )
+        except BaseException as e1:  # noqa: BLE001
+            msg = (
+                "Failed to resolve selectors via wildcard expansion: "
+                f"all_columns={all_cols}, "
+                f"columns={columns}, "
+                f"features={features}, "
+                f"targets={targets}, "
+                f"tags={tags}, "
+                f"rep={rep}. {e1}"
+            )
+            logger.debug(msg)
+
+            try:
+                selected: dict[str, set[str]] = defaultdict(list)
+
+                # Use references to resolve any string to a qualified column name
+                include_sample_uuid = False
+                if DOMAIN_SAMPLE_UUIDS in columns:
+                    include_sample_uuid = True
+                    columns.remove(DOMAIN_SAMPLE_UUIDS)
+
+                for domain, cols in zip(
+                    [None, DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS],
+                    [columns, features, targets, tags],
+                    strict=True,
+                ):
+                    known_attrs = {"node_id": node_id}
+                    if rep is not None:
+                        known_attrs["rep"] = rep
+                    if domain is not None:
+                        known_attrs["domain"] = domain
+                    for col in ensure_list(cols):
+                        ref = FeatureSetColumnReference.from_string(
+                            val=col,
+                            experiment=ExperimentContext.get_active(),
+                            known_attrs=known_attrs,
+                        )
+                        selected[ref.domain].append(f"{ref.domain}.{ref.key}.{ref.rep}")
+
+                # Ensure unique
+                selected = {k: set(vs) for k, vs in selected.items()}
+                if include_sample_uuid:
+                    selected[DOMAIN_SAMPLE_UUIDS] = {DOMAIN_SAMPLE_UUIDS}
+
+            except BaseException as e2:
+                msg = f"Failed to resolve selectors using Reference alignment. {e2}"
+                logger.debug(msg)
+                raise
 
         # Order and flatten columns: features -> targets -> tags
         sel_cols: list[str] = []
@@ -758,7 +820,7 @@ class SampleCollectionMixin:
             Padded data is given a sample UUID of "N/A".
 
         """
-        collection, mask = self._resolve_collection()
+        collection, mask, _ = self._resolve_collection()
 
         data = collection.get_sample_uuids(fmt=DataFormat.NUMPY)
 
@@ -785,7 +847,7 @@ class SampleCollectionMixin:
             pa.Table: All columns sorted alphabetically.
 
         """
-        collection, _ = self._resolve_collection()
+        collection, _, _ = self._resolve_collection()
 
         # Sort columns (not necessary but nicer for manual inspection)
         sorted_cols = collection.get_all_keys(
@@ -844,7 +906,7 @@ class SampleCollectionMixin:
             SampleCollection: Resolved collection with column and row filtering applied.
 
         """
-        coll, _ = self._resolve_collection()
+        coll, _, _ = self._resolve_collection()
         return coll
 
     def to_featureset(self, label: str) -> FeatureSet:

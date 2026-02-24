@@ -31,23 +31,26 @@ class EvalResults(PhaseResults):
         All methods leverage the base PhaseResults query interface and use
         AxisSeries.collapse() for batch aggregation.
 
-    Examples:
-        ```python
-        # Run evaluation
-        eval_results = experiment.run_evaluation(phase=eval_phase)
-
-        # Get stacked outputs for a node (all batches concatenated)
-        outputs = eval_results.stacked_tensors(node="output_node", domain="outputs")
-
-        # Get total loss across all batches
-        total_loss = eval_results.aggregated_losses(node="output_node")
-
-        # Get all source data utilized in evaluation
-        source_view = eval_results.source_view(node="output_node")
-        ```
-
     Attributes:
         label (str): Phase label inherited from :class:`PhaseResults`.
+
+
+    Example:
+        Accessing EvalPhase results
+
+        >>> # Run evaluation
+        >>> eval_results = experiment.run_evaluation(phase=eval_phase)  # doctest: +SKIP
+        >>> # Get stacked outputs for a node (all batches concatenated)
+        >>> outputs = eval_results.stacked_tensors(  # doctest: +SKIP
+        ...     node="output_node", domain="outputs"
+        ... )
+        >>> # Get total loss across all batches
+        >>> total_loss = eval_results.aggregated_losses(  # doctest: +SKIP
+        ...     node="output_node"
+        ... )
+        >>> # Get all source data utilized in evaluation
+        >>> source_view = eval_results.source_view(node="output_node")  # doctest: +SKIP
+
 
     """
 
@@ -131,22 +134,21 @@ class EvalResults(PhaseResults):
             TensorLike:
                 A single tensor containing concatenated data from all batches.
 
-        Examples:
-            ```python
-            # Get all predictions stacked
-            predictions = eval_results.stacked_tensors(
-                node="output_node",
-                domain="outputs",
-            )
+        Example:
+            Accessing all predictions across all eval batches:
 
-            # Get targets, unscaled, as numpy
-            targets = eval_results.stacked_tensors(
-                node="output_node",
-                domain="targets",
-                fmt="np",
-                unscale=True,
-            )
-            ```
+            >>> # Get all predictions stacked
+            >>> predictions = eval_results.stacked_tensors(  # doctest: +SKIP
+            ...     node="output_node",
+            ...     domain="outputs",
+            ... )
+            >>> # Get targets, unscaled, as numpy
+            >>> targets = eval_results.stacked_tensors(  # doctest: +SKIP
+            ...     node="output_node",
+            ...     domain="targets",
+            ...     fmt="np",
+            ...     unscale=True,
+            ... )
 
         """
         tensor_series = self.tensors(
@@ -185,12 +187,14 @@ class EvalResults(PhaseResults):
             Batch:
                 A single Batch containing concatenated data from all batches.
 
-        Examples:
-            ```python
-            batch = eval_results.stacked_batches(node="output_node")
-            print(f"Total samples: {batch.batch_size}")
-            print(f"Outputs shape: {batch.outputs.shape}")
-            ```
+        Example:
+            Getting concatenated batches across all execution batches
+
+            >>> batch = eval_results.stacked_batches(  # doctest: +SKIP
+            ...     node="output_node"
+            ... )
+            >>> print(f"Total samples: {batch.batch_size}")  # doctest: +SKIP
+            >>> print(f"Outputs shape: {batch.outputs.shape}")  # doctest: +SKIP
 
         """
         batch_series = self.batches(node=node)
