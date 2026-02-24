@@ -1,5 +1,5 @@
 fix = true
-line-length = 120
+line-length = 88
 indent-width = 4
 target-version = "py310"
 
@@ -21,11 +21,13 @@ extend-select = [
     "TRY", "FLY", "NPY", "FAST", "AIR", "PERF", "FURB", "RUF",
 ]
 ignore = [
+    "FIX002",
     "E501", "D1", "FBT003", "D203", "D212", "D401", "S311",
     "PERF401", "RET504", "FA102", "TRY003", "EM101",
 
     "TD003", "PLR0913", "C901", "TD002", "SLF001", "PD002",
-    "PLR2004", "PLR0912", "PLR0915", "S301",
+    "PLR2004", "PLR0912", "PLR0915", "S301", "PLC0415", "PLR0911",
+    "DTZ005", "DTZ006",
 ]
 
 
@@ -35,3 +37,8 @@ ignore = [
 "tests/*" = ["INP001", "S101", "PLC0415", "F841", "N803", "ARG001", "ARG002", "N806", ]
 "docs/*" = ["INP001", "A001", "PTH100", ]
 "**/__init__.py" = ["I", "F401", "F841", ]
+"**/registry.py" = ["E402", "I001", ]
+"modularml/callbacks/*.py" = ["ARG002", ]
+"modularml/core/experiment/callbacks/*.py" = ["ARG002", ]
+"modularml/scalers/*.py" = ["ARG002", "N803", "N806", ]
+"modularml/api.py" = ["I001", "E402", "F401", ]

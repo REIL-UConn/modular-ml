@@ -10,6 +10,7 @@ Version: |version|
    :maxdepth: 1
    :titlesonly:
 
-   source/user_guide/index
-   source/examples/index
-   source/api/index
+   /explanation/index
+   /how_to/index
+   /tutorials/index
+   /reference/index

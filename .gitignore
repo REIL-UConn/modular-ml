@@ -15,6 +15,9 @@ ModularMl.egg-info/*
 dist/*
 downloaded_data/*
 docs/source/examples/notebooks/downloaded_data/*
+tests/integration/training_comparisons/results/*
+tests/shared/data/battery_soh_featurset/*
+
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 
@@ -424,3 +427,4 @@ FodyWeavers.xsd
 # RTD local HTML files
 docs/_build/
 docs/api/generated/
+.jupyter_cache/

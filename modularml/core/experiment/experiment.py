@@ -1,507 +1,1394 @@
-import copy
-from collections import defaultdict
-from typing import Any, Literal
+"""Core Experiment orchestration and execution utilities."""
 
-import numpy as np
-import pandas as pd
-from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeElapsedColumn
+from __future__ import annotations
 
-from modularml.core.data_structures.data import Data
-from modularml.core.data_structures.node_outputs import NodeOutputs
-from modularml.core.data_structures.sample import Sample
-from modularml.core.data_structures.sample_collection import SampleCollection
-from modularml.core.experiment.eval_phase import EvaluationPhase
-from modularml.core.experiment.phase_results import EvaluationResult, TrainingResult
-from modularml.core.experiment.training_phase import TrainingPhase
-from modularml.core.graph import ModelGraph
-from modularml.core.graph.feature_set import FeatureSet
-from modularml.core.loss.loss_collection import LossCollection
-from modularml.core.loss.loss_record import LossRecord
-from modularml.utils.data_format import DataFormat, to_python
-from modularml.utils.exceptions import NotInvertibleError
-from modularml.utils.formatting import format_value_to_sig_digits
+from contextlib import contextmanager
+from copy import deepcopy
+from datetime import datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, overload
+
+from modularml.core.experiment.callbacks.experiment_callback import (
+    ExperimentCallback,
+)
+from modularml.core.experiment.checkpointing import (
+    EXPERIMENT_HOOKS,
+    EXPERIMENT_NAME_TEMPLATE,
+    EXPERIMENT_PLACEHOLDERS,
+    Checkpointing,
+)
+from modularml.core.experiment.experiment_context import (
+    ExperimentContext,
+    RegistrationPolicy,
+)
+from modularml.core.experiment.phases.eval_phase import EvalPhase
+from modularml.core.experiment.phases.fit_phase import FitPhase
+from modularml.core.experiment.phases.phase import ExperimentPhase
+from modularml.core.experiment.phases.phase_group import PhaseGroup
+from modularml.core.experiment.phases.train_phase import ResultRecording, TrainPhase
+from modularml.core.experiment.results.eval_results import EvalResults
+from modularml.core.experiment.results.execution_meta import (
+    PhaseExecutionMeta,
+    PhaseGroupExecutionMeta,
+)
+from modularml.core.experiment.results.experiment_run import ExperimentRun
+from modularml.core.experiment.results.fit_results import FitResults
+from modularml.core.experiment.results.group_results import PhaseGroupResults
+from modularml.core.experiment.results.train_results import TrainResults
+from modularml.core.io.checkpoint import Checkpoint
+from modularml.utils.environment.environment import IN_NOTEBOOK
+from modularml.utils.logging.logger import get_logger
+from modularml.utils.logging.warnings import warn
+
+if TYPE_CHECKING:
+    from modularml.core.experiment.results.phase_results import PhaseResults
+    from modularml.core.topology.model_graph import ModelGraph
+
+logger = get_logger(name="Experiment")
+
+
+def _phase_mutates_state(phase_or_group: ExperimentPhase | PhaseGroup) -> bool:
+    """Return True if executing the phase/group could modify model state."""
+    if isinstance(phase_or_group, EvalPhase):
+        return False
+    if isinstance(phase_or_group, PhaseGroup):
+        return any(_phase_mutates_state(el) for el in phase_or_group.all)
+    return True  # TrainPhase, FitPhase, or unknown
 
 
 class Experiment:
+    """High-level container coordinating phases, callbacks, and checkpoints."""
+
     def __init__(
         self,
-        graph: ModelGraph,
-        phases: list[TrainingPhase | EvaluationPhase] | None = None,
+        label: str,
+        registration_policy: RegistrationPolicy | str | None = None,
+        ctx: ExperimentContext | None = None,
+        checkpointing: Checkpointing | None = None,
+        callbacks: list[ExperimentCallback] | None = None,
     ):
         """
-        Initialize an Experiment with a model graph and a list of training and/or evaluation phases.
+        Constructs a new Experiment.
 
         Args:
-            graph (ModelGraph): The modular computation graph containing model stages and feature sets.
-            phases (list[Union[TrainingPhase, EvaluationPhase]] | None): Ordered list of training and evaluation phases
-                that define the experiment procedure. Defaults to None.
+            label (str):
+                A name to assign to this experiment.
+
+            registration_policy (RegistrationPolicy | str, optional):
+                Default registration policy for nodes created after this Experiment
+                is constructed.
+
+            ctx (ExperimentContext, optional):
+                Context to associate with this Experiment. If None, a new context
+                is created and activated.
+
+            checkpointing (Checkpointing | None, optional):
+                An optional Checkpointing configuration for automatically saving
+                the full experiment state to disk at execution lifecycle hooks
+                (e.g. `phase_end`, `group_end`). Must use `mode="disk"`
+                and `save_on` hooks from: `phase_start`, `phase_end`,
+                `group_start`, `group_end`. Defaults to None.
+
+            callbacks (list[ExperimentCallback] | None, optional):
+                An optional list of experiment-level callbacks to run during
+                `Experiment.run()` execution at phase/group boundaries.
+                Defaults to None.
 
         """
-        self.graph = graph
-        self.phases = [phases] if isinstance(phases, (TrainingPhase, EvaluationPhase)) else phases
+        self.label = label
 
-        # Build graph (required before .run())
-        if not self.graph.is_built:
-            self.graph.build_all()
+        # Initialize / attach context
+        if ctx is None:
+            ctx = ExperimentContext(
+                experiment=self,
+                registration_policy=registration_policy,
+            )
+            ExperimentContext._set_active(ctx)
+        else:
+            ctx.set_experiment(self)
+            if registration_policy is not None:
+                ctx.set_registration_policy(registration_policy)
+        self._ctx = ctx
 
-    def run(self):
-        for phase in self.phases:
-            if isinstance(phase, TrainingPhase):
-                self.run_training_phase(phase)
-            elif isinstance(phase, EvaluationPhase):
-                self.run_evaluation_phase(phase)
-            else:
-                msg = f"Unknown phase type: {type(phase)}"
-                raise TypeError(msg)
+        # Initialize phase registry
+        self._exec_plan = PhaseGroup(label=self.label)
 
-    def _should_stop_early(
-        self,
-        phase: TrainingPhase,
-        train_losses: list[LossCollection],
-        val_losses: list[LossCollection],
-        bad_epoch_count: int,
-        best_value: float | None,
-    ) -> tuple[bool, int, float]:
+        # For recording execution history
+        self._history: list[ExperimentRun] = []
+
+        # For checkpointing model graph state
+        self._checkpoints: dict[str, Path] = {}
+        self._checkpoint_dir: Path | None = None
+
+        # Experiment-level checkpointing
+        self._exp_checkpointing: Checkpointing | None = None
+        self.set_checkpointing(checkpointing)
+
+        # Experiment-level callbacks
+        self._exp_callbacks: list[ExperimentCallback] = list(callbacks or [])
+        self._exp_callbacks.sort(key=lambda cb: cb._exec_order)
+
+        # Bool flags for guarding
+        # True while executing inside a callback
+        self._in_callback: bool = False
+        # True disables all checkpointin (experiment-level and TrainPhase-level)
+        self._checkpointing_disabled: bool = False
+
+    # ================================================
+    # Constructors
+    # ================================================
+    @classmethod
+    def from_active_context(
+        cls,
+        label: str,
+        registration_policy: RegistrationPolicy | str | None = None,
+        checkpointing: Checkpointing | None = None,
+        callbacks: list[ExperimentCallback] | None = None,
+    ) -> Experiment:
         """
-        Check if training should stop early based on the phase's early stopping configuration.
+        Construct an Experiment using the active ExperimentContext.
+
+        Description:
+            Creates a new Experiment instance, but retains all nodes that have been
+            registered in the current ExperimentContext.
 
         Args:
-            phase (TrainingPhase): Current training phase (contains early stopping config).
-            train_losses (list[LossCollection]): Accumulated training losses per epoch.
-            val_losses (list[LossCollection]): Accumulated validation losses per epoch.
-            bad_epoch_count (int): Current count of epochs without improvement.
-            best_value (float | None): Best metric value seen so far.
+            label (str):
+                A name to assign to this experiment.
+
+            registration_policy (RegistrationPolicy | str | None, optional):
+                Default registration policy for nodes created after this Experiment
+                is constructed.
+
+            checkpointing (Checkpointing | None, optional):
+                An optional Checkpointing configuration for automatically saving
+                the full experiment state to disk at execution lifecycle hooks
+                (e.g. `phase_end`, `group_end`). Must use `mode="disk"`
+                and `save_on` hooks from: `phase_start`, `phase_end`,
+                `group_start`, `group_end`. Defaults to None.
+
+            callbacks (list[ExperimentCallback] | None, optional):
+                An optional list of experiment-level callbacks to run during
+                `Experiment.run()` execution at phase/group boundaries.
+                Defaults to None.
 
         Returns:
-            tuple:
-                - stop (bool): Whether to stop training early.
-                - bad_epoch_count (int): Updated bad epoch count.
-                - best_value (float): Updated best metric value.
+            Experiment: A new Experiment utilizing the active context.
 
         """
-        if phase.early_stop_patience is None:
-            return False, bad_epoch_count, best_value
-
-        # Choose history
-        if phase.early_stop_metric == "val_loss":
-            history = val_losses
-        elif phase.early_stop_metric == "train_loss":
-            history = train_losses
-        else:
-            msg = f"Unsupported early_stop_metric: {phase.early_stop_metric}"
+        active_ctx = ExperimentContext.get_active()
+        if active_ctx._experiment_ref is not None:
+            msg = "An Experiment has already been associated with the active context."
             raise ValueError(msg)
 
-        if not history:
-            return False, bad_epoch_count, best_value
+        return cls(
+            label=label,
+            registration_policy=registration_policy,
+            ctx=active_ctx,
+            checkpointing=checkpointing,
+            callbacks=callbacks,
+        )
 
-        current_value = history[-1].total  # you could swap to .trainable if desired
+    # ================================================
+    # Properties
+    # ================================================
+    @property
+    def ctx(self) -> ExperimentContext:
+        """Gets the context associated with this Experiment."""
+        return self._ctx
 
-        # First epoch → initialize best_value
-        if best_value is None:
-            return False, 0, current_value
+    @property
+    def model_graph(self) -> ModelGraph | None:
+        """Gets the ModelGraph associated with this Experiment."""
+        return self._ctx.model_graph
 
-        # Check improvement
-        improved = False
-        if phase.early_stop_mode == "min":
-            if best_value - current_value > phase.early_stop_min_delta:
-                improved = True
-        elif phase.early_stop_mode == "max":
-            if current_value - best_value > phase.early_stop_min_delta:
-                improved = True
-        else:
-            msg = f"Unknown early stop mode: {phase.early_stop_mode}"
+    @property
+    def execution_plan(self) -> PhaseGroup:
+        """Group of phases (and sub-groups) to be executed."""
+        return self._exec_plan
+
+    @property
+    def history(self) -> list[ExperimentRun]:
+        """All completed experiment runs in chronological order."""
+        return list(self._history)
+
+    @property
+    def last_run(self) -> ExperimentRun | None:
+        """Most recent ExperimentRun."""
+        return self._history[-1] if self._history else None
+
+    @property
+    def checkpointing(self) -> Checkpointing | None:
+        """The experiment-level Checkpointing configuration, or None."""
+        return self._exp_checkpointing
+
+    @property
+    def available_checkpoints(self) -> dict[str, Path]:
+        """All available disk checkpoints (from both TrainPhase and Experiment)."""
+        return dict(self._checkpoints)
+
+    @property
+    def exp_callbacks(self) -> list[ExperimentCallback]:
+        """Experiment-level callbacks in execution order."""
+        return list(self._exp_callbacks)
+
+    # ================================================
+    # Experiment Callback Management
+    # ================================================
+    def add_callback(self, callback: ExperimentCallback) -> None:
+        """
+        Register an experiment-level callback.
+
+        Args:
+            callback (ExperimentCallback):
+                The callback to add.
+
+        """
+        if not isinstance(callback, ExperimentCallback):
+            msg = f"Expected ExperimentCallback, got {type(callback)}."
+            raise TypeError(msg)
+        self._exp_callbacks.append(callback)
+        self._exp_callbacks.sort(key=lambda cb: cb._exec_order)
+
+    @contextmanager
+    def disable_checkpointing(self):
+        """
+        Context manager that disables all checkpointing while active.
+
+        Description:
+            Suppresses both experiment-level checkpointing and any
+            TrainPhase-level checkpointing that occurs within the block.
+            The previous checkpointing configuration is restored on exit,
+            even if an exception is raised.
+
+        Example:
+            Scoped checkpoint disabling:
+
+            >>> with experiment.disable_checkpointing():  # doctest: +SKIP
+            ...     experiment.run_phase(training_phase)
+
+        """
+        prev = self._checkpointing_disabled
+        self._checkpointing_disabled = True
+        try:
+            yield
+        finally:
+            self._checkpointing_disabled = prev
+
+    # ================================================
+    # Checkpointing
+    # ================================================
+    def set_checkpointing(self, checkpointing: Checkpointing | None) -> None:
+        """
+        Attach or replace the Checkpointing configuration for this experiment.
+
+        Validates that the mode is `"disk"`, that all `save_on` hooks are
+        valid for an Experiment, and that the `name_template` only uses
+        allowed placeholders. If no `name_template` is set, the experiment
+        default is applied.
+
+        Args:
+            checkpointing (Checkpointing | None):
+                The Checkpointing configuration, or None to disable.
+
+        """
+        if checkpointing is None:
+            self._exp_checkpointing = None
+            return
+
+        # Experiment only supports disk mode
+        if checkpointing.mode != "disk":
+            msg = (
+                "Experiment-level checkpointing only supports mode='disk'. "
+                "In-memory checkpointing of the full experiment state is "
+                "not supported due to memory overhead."
+            )
             raise ValueError(msg)
 
-        if improved:
-            best_value = current_value
-            bad_epoch_count = 0
-        else:
-            bad_epoch_count += 1
-
-        stop = bad_epoch_count >= phase.early_stop_patience
-        return stop, bad_epoch_count, best_value
-
-    def run_training_phase(self, phase: TrainingPhase) -> TrainingResult:
-        # Resolve losses
-        if not phase.resolved:
-            phase.resolve(graph=self.graph)
-
-        # Determine frozen vs trainable nodes:
-        trainable_nodes = set(self.graph._nodes_req_opt.keys()).difference(set(phase.frozen_nodes))
-
-        # Record losses and model outputs over each epoch
-        train_losses_per_epoch: list[LossCollection] = []
-        val_losses_per_epoch: list[LossCollection] = []
-        train_outputs_per_epoch: list[dict[str, Any]] = []
-
-        # Get training batches
-        train_batches = phase.train_io.get_batches(
-            featuresets={k: self.graph._nodes[k] for k in self.graph.source_node_labels},
-        )
-        n_train_batches = min([len(b) for b in train_batches.values()])
-
-        # Get validation batches
-        val_batches = None
-        if phase.val_io is not None:
-            val_batches = phase.val_io.get_batches(
-                featuresets={k: self.graph._nodes[k] for k in self.graph.source_node_labels},
+        # Validate hooks
+        invalid = set(checkpointing.save_on) - EXPERIMENT_HOOKS
+        if invalid:
+            msg = (
+                f"Invalid save_on hooks for Experiment: {sorted(invalid)}. "
+                f"Valid hooks: {sorted(EXPERIMENT_HOOKS)}."
             )
-        n_val_batches = 0 if val_batches is None else min([len(b) for b in val_batches.values()])
+            raise ValueError(msg)
 
-        with Progress(
-            TextColumn("[bold blue]{task.description}"),
-            BarColumn(),
-            MofNCompleteColumn(),
-            TimeElapsedColumn(),
-            transient=False,
-        ) as progress:
-            task_id = progress.add_task(f"TrainingPhase: {phase.label}", total=phase.n_epochs)
+        # Apply default template if not set
+        if checkpointing.name_template is None:
+            checkpointing.name_template = EXPERIMENT_NAME_TEMPLATE
 
-            last_epoch, bad_epoch_count, best_value = 0, 0, None
-            for epoch in range(phase.n_epochs):
-                # 1. Perform Training
-                n_train_samples = 0
-                epoch_outputs = defaultdict(list)
-                epoch_train_loss: LossCollection | None = None
+        # Validate placeholders
+        Checkpointing.validate_placeholders(
+            checkpointing.name_template,
+            EXPERIMENT_PLACEHOLDERS,
+            context_name="Experiment",
+        )
 
-                for i in range(n_train_batches):
-                    ref_key = next(iter(train_batches.keys()))
-                    n_train_samples += train_batches[ref_key][i].n_samples
-                    batch = {k: v[i] for k, v in train_batches.items()}
-                    step_res = self.graph.train_step(
-                        batch_input=batch,
-                        losses=phase.train_io.losses_mapped_by_node,
-                        trainable_stages=trainable_nodes,
-                    )
-                    for k, v in batch.items():
-                        epoch_outputs[k].append(v)
-                    for k in step_res.node_outputs:
-                        epoch_outputs[k].append(step_res.node_outputs[k])
+        self._exp_checkpointing = checkpointing
 
-                    if epoch_train_loss is None:
-                        epoch_train_loss = step_res.losses.to_float()
-                    else:
-                        epoch_train_loss += step_res.losses.to_float()
+        # Eagerly set experiment checkpoint directory from the config
+        if checkpointing.directory is not None and self._checkpoint_dir is None:
+            self.set_checkpoint_dir(checkpointing.directory, create=True)
 
-                # Scale losses (average loss per sample)
-                _conv_lrs = [
-                    LossRecord(
-                        value=rec.value / n_train_samples,
-                        label=rec.label,
-                        contributes_to_update=rec.contributes_to_update,
-                    )
-                    for rec in epoch_train_loss._records
-                ]
-                epoch_train_loss = LossCollection(records=_conv_lrs)
-                train_losses_per_epoch.append(epoch_train_loss)
-                train_outputs_per_epoch.append(epoch_outputs)
+    def set_checkpoint_dir(self, path: Path, *, create: bool = True):
+        """
+        Set directory used for storing experiment checkpoints.
 
-                # 2. Perform Evaluation (optional)
-                n_val_samples = 0
-                epoch_val_loss: LossCollection | None = None
-                if phase.val_io is not None:
-                    for i in range(n_val_batches):
-                        ref_key = next(iter(val_batches.keys()))
-                        n_val_samples += val_batches[ref_key][i].n_samples
-                        batch = {k: v[i] for k, v in val_batches.items()}
-                        step_res = self.graph.eval_step(
-                            batch_input=batch,
-                            losses=phase.val_io.losses_mapped_by_node,
-                        )
-                        for k in step_res.node_outputs:
-                            epoch_outputs[k].append(step_res.node_outputs[k])
+        Args:
+            path (Path):
+                Directory path.
+            create (bool, optional):
+                Whether to create directory if it does not exist.
 
-                        if epoch_val_loss is None:
-                            epoch_val_loss = step_res.losses.to_float()
-                        else:
-                            epoch_val_loss += step_res.losses.to_float()
+        """
+        path = Path(path)
+        if create:
+            path.mkdir(parents=True, exist_ok=True)
+        if not path.is_dir():
+            msg = f"No directory exists at '{path!r}'."
+            raise FileExistsError(msg)
 
-                    # Scale losses (average loss per sample)
-                    _conv_lrs = [
-                        LossRecord(
-                            value=rec.value / n_val_samples,
-                            label=rec.label,
-                            contributes_to_update=rec.contributes_to_update,
-                        )
-                        for rec in epoch_val_loss._records
-                    ]
-                    epoch_val_loss = LossCollection(records=_conv_lrs)
-                    val_losses_per_epoch.append(epoch_val_loss)
-
-                # 3. Update progress bar
-                dsc = (
-                    f"{phase.label} "
-                    f"[{epoch + 1}/{phase.n_epochs}] "
-                    f"T={format_value_to_sig_digits(epoch_train_loss.total, sig_digits=4)}"
-                    f"({format_value_to_sig_digits(epoch_train_loss.trainable, sig_digits=4)})"
-                )
-                if epoch_val_loss is not None:
-                    dsc += f" V={format_value_to_sig_digits(epoch_val_loss.total, sig_digits=4)}"
-                progress.update(
-                    task_id,
-                    advance=1,
-                    description=dsc,
-                )
-                last_epoch = epoch
-
-                # 4. Early stopping check
-                stop, bad_epoch_count, best_value = self._should_stop_early(
-                    phase=phase,
-                    train_losses=train_losses_per_epoch,
-                    val_losses=val_losses_per_epoch,
-                    bad_epoch_count=bad_epoch_count,
-                    best_value=best_value,
-                )
-                if stop:
-                    break
-
-            # 5. Update final progress bar
-            dsc = (
-                f"{phase.label} "
-                f"[{epoch + 1}/{phase.n_epochs}] "
-                f"T={format_value_to_sig_digits(epoch_train_loss.total, sig_digits=4)}"
-                f"({format_value_to_sig_digits(epoch_train_loss.trainable, sig_digits=4)})"
+        # Warn if directory already contains checkpoint files
+        existing = list(path.glob("*.ckpt.mml"))
+        if existing:
+            warn(
+                f"Checkpoint directory '{path}' already contains "
+                f"{len(existing)} checkpoint file(s). Existing files will "
+                f"only be overwritten if an exact name match occurs and "
+                f"overwrite=True.",
+                stacklevel=2,
             )
-            if epoch_val_loss is not None:
-                dsc += f" V={format_value_to_sig_digits(epoch_val_loss.total, sig_digits=4)}"
-            progress.update(
-                task_id,
-                completed=last_epoch + 1,
-                description=dsc,
-            )
-            progress.refresh()
 
-        # 6. Convert raw outputs to user-friendly format
-        train_outputs = NodeOutputs(
-            node_batches=train_outputs_per_epoch[-1],
-            node_source_metadata={k: self.graph.get_node_source(k) for k in train_outputs_per_epoch[-1]},
-        )
+        self._checkpoint_dir = path
 
-        return TrainingResult(
-            phase_label=phase.label,
-            final_train_loss=train_losses_per_epoch[-1],
-            train_losses=train_losses_per_epoch,
-            final_val_loss=val_losses_per_epoch[-1] if len(val_losses_per_epoch) > 0 else val_losses_per_epoch,
-            val_losses=val_losses_per_epoch,
-            train_outputs=train_outputs,
-            last_epoch=last_epoch,
-            stopped_early=last_epoch < phase.n_epochs,
-        )
-
-    def run_evaluation_phase(self, phase: EvaluationPhase) -> EvaluationResult:
-        # Resolve losses
-        if not phase.resolved:
-            phase.resolve(graph=self.graph)
-
-        # Get batches
-        eval_batches = phase.eval_io.get_batches(
-            featuresets={k: self.graph._nodes[k] for k in self.graph.source_node_labels},
-        )
-        n_eval_batches = min([len(b) for b in eval_batches.values()])
-
-        n_eval_samples = 0
-        outputs = defaultdict(list)
-        loss: LossCollection | None = None
-
-        # 1. Forward pass + eval of all batches
-        for i in range(n_eval_batches):
-            ref_key = next(iter(eval_batches.keys()))
-            n_eval_samples += eval_batches[ref_key][i].n_samples
-            batch = {k: v[i] for k, v in eval_batches.items()}
-            step_res = self.graph.eval_step(
-                batch_input=batch,
-                losses=phase.eval_io.losses_mapped_by_node,
-            )
-            for k, v in batch.items():
-                outputs[k].append(v)
-            for k in step_res.node_outputs:
-                outputs[k].append(step_res.node_outputs[k])
-
-            if loss is None:
-                loss = step_res.losses.to_float()
-            else:
-                loss += step_res.losses.to_float()
-
-        # 2. Scale losses (average loss per sample)
-        _conv_lrs = [
-            LossRecord(
-                value=rec.value / n_eval_samples,
-                label=rec.label,
-                contributes_to_update=rec.contributes_to_update,
-            )
-            for rec in loss._records
-        ]
-        loss = LossCollection(records=_conv_lrs)
-
-        # 3. Convert raw outputs to user-friendly format
-        # For each node, get its source FeatureSets and annotate with subset
-        node_source_metadata = {}
-        # Build mapping: FeatureSet -> subset (from PhaseIO)
-        fs_to_fss = {fs_lbl: fss_lbl for (fs_lbl, fss_lbl) in phase.eval_io.samplers}  # noqa: C416
-        for node_lbl in outputs:
-            sources = self.graph.get_node_source(node_lbl)
-            if sources is None:
-                node_source_metadata[node_lbl] = None
-            elif isinstance(sources, str):
-                node_source_metadata[node_lbl] = (sources, fs_to_fss.get(sources))
-            else:  # tuple of sources
-                node_source_metadata[node_lbl] = [(src, fs_to_fss.get(src)) for src in sources]
-
-        node_outputs = NodeOutputs(
-            node_batches=outputs,
-            node_source_metadata=node_source_metadata,
-        )
-
-        return EvaluationResult(
-            phase_label=phase.label,
-            losses=loss,
-            outputs=node_outputs,
-        )
-
-    def inverse_transform_node_outputs(
+    def save_checkpoint(
         self,
-        all_outputs: NodeOutputs,
-        node: str,
+        name: str,
         *,
-        component: Literal["features", "targets"] = "targets",
-        which: Literal["all", "last"] = "all",
-        strict: bool = True,
-    ) -> pd.DataFrame:
+        overwrite: bool = False,
+        meta: dict[str, Any] | None = None,
+    ) -> Path:
         """
-        Apply inverse transforms to the outputs of a single node.
+        Save full experiment state to a Checkpoint file.
 
-        Results are mapping them back into the original feature/target space defined by the \
-        originating FeatureSet.
-
-        This method reconstructs the pre-transform values for model predictions or FeatureSet
-        outputs by applying the inverse of the transform chain recorded in the relevant
-        FeatureSet. Only nodes that trace unambiguously to a single FeatureSet (with an optional
-        subset) can be inverted.
+        Creates a :class:`Checkpoint` container with the full experiment
+        state and serializes it to disk.
 
         Args:
-            all_outputs (NodeOutputs):
-                Aggregated outputs from a training or evaluation phase.
-            node (str):
-                The node label to invert (e.g., "Regressor").
-            component ({"features", "targets"}, optional):
-                Which transform family to apply. For predictions, this is typically "targets".
-                Currently, only "targets" is supported. Default = "targets".
-            which ({"all", "last"}, optional):
-                Whether to invert all transforms in the recorded chain, or only the most
-                recently applied one. Default = "all".
-            strict (bool, optional):
-                If True, raise an error when inversion is impossible or ambiguous.
-                If False, return the original scaled values unchanged. Default = True.
+            name (str):
+                Unique name to assign to this checkpoint.
+            overwrite (bool, optional):
+                Whether to overwrite existing checkpoints with this name.
+                Defaults to False.
+            meta (dict[str, Any], optional):
+                Additional meta data to attach to the checkpoint.
 
         Returns:
-            pd.DataFrame:
-                A DataFrame containing the outputs for the specified node with the
-                "output" and "target" columns inverse-transformed to the original space.
-                Other metadata columns (node, role, sample_uuid, batch, tags, etc.) are preserved.
+            Path: The saved checkpoint file path.
+
+        """
+        from modularml.core.io.serialization_policy import SerializationPolicy
+        from modularml.core.io.serializer import serializer
+
+        if self._checkpoint_dir is None:
+            msg = (
+                "Checkpoint directory not set. Call `set_checkpoint_dir()` "
+                "or set `directory` on the Checkpointing config."
+            )
+            raise RuntimeError(msg)
+
+        if name in self._checkpoints and not overwrite:
+            msg = f"Checkpoint '{name}' already exists."
+            raise ValueError(msg)
+
+        filepath = self._checkpoint_dir / name
+
+        ckpt = Checkpoint()
+        ckpt.add_entry(key="experiment", obj=self)
+
+        if meta is not None:
+            for k, v in meta.items():
+                ckpt.add_meta(k, v)
+
+        save_path = serializer.save(
+            ckpt,
+            filepath,
+            policy=SerializationPolicy.BUILTIN,
+            overwrite=overwrite,
+        )
+        self._checkpoints[name] = Path(save_path)
+        return Path(save_path)
+
+    def restore_checkpoint(self, name_or_path: str | Path) -> None:
+        """
+        Restore state from a previously saved checkpoint.
+
+        Description:
+            Accepts either a checkpoint name (a key from
+            :attr:`available_checkpoints`) or an explicit file path. The
+            checkpoint type is detected automatically:
+
+            - **Experiment checkpoint** (contains an ``"experiment"`` entry):
+              restores the full experiment state via :meth:`set_state`.
+            - **ModelGraph checkpoint** (contains a ``"modelgraph"`` entry):
+              restores the model graph state via
+              :meth:`ModelGraph.restore_checkpoint`.
+
+        Args:
+            name_or_path (str | Path):
+                Either a checkpoint name registered in
+                :attr:`available_checkpoints`, or the file path to a
+                ``.ckpt.mml`` checkpoint file.
 
         Raises:
-            KeyError:
-                If `node` is not found in `all_outputs`.
-            NotInvertibleError:
-                If the node is downstream of a merge or has no valid FeatureSet source,
-                and `strict=True`.
-            NotImplementedError:
-                If `component="features"` is requested (not yet supported).
-
-        Notes:
-            - This method does **not** modify `all_outputs`. It returns a new DataFrame.
-            - Nodes with multiple upstream sources (e.g., MergeStages) cannot be inverted,
-            because the transform chain is ambiguous.
-            - For `component="targets"`, the method reconstructs a temporary SampleCollection
-            and delegates inversion to the FeatureSet's `inverse_transform` method.
-            - If transforms were applied to only a specific subset, inversion will respect
-            that subset if available in metadata.
+            ValueError: If ``name_or_path`` is not a registered name and
+                does not point to an existing file.
+            TypeError: If the loaded checkpoint contains neither an
+                ``"experiment"`` nor a ``"modelgraph"`` entry.
 
         """
-        # region: Step 1 - Prelim Error Checking
-        if node not in all_outputs.node_batches:
-            msg = f"Node `{node}` not found in outputs. Available: {list(all_outputs.node_batches.keys())}"
-            raise KeyError(msg)
+        from modularml.core.io.serializer import _enforce_file_suffix, serializer
 
-        meta = all_outputs.node_source_metadata.get(node, None)
-
-        # Determine (fs_label, fss_label) or refuse if merged
-        fs_label: str | None = None
-        fss_label: str | None = None
-
-        def _fail_or_passthrough(msg: str):
-            if strict:
-                raise NotInvertibleError(msg)
-            # non-strict: just return original
-            return all_outputs
-
-        # Case 1 - Node has no source (ie, is a FeatureSet)
-        if meta is None:
-            # If meta is None, only invertible when the node is itself a FeatureSet (source node).
-            # We can still try (component may be "features" or "targets").
-            # Figure out if node is a FeatureSet:
-            src_is_featureset = node in self.graph.source_node_labels
-            if not src_is_featureset:
-                return _fail_or_passthrough(
-                    f"Node `{node}` has no source metadata and is not a FeatureSet source; cannot invert.",
-                )
-            fs_label = node
-            fss_label = None
-
-        # Case 2 - Node has a single source (FeatureSet or FeatureSubset)
-        elif isinstance(meta, tuple) and len(meta) == 2 and all(isinstance(x, (str, type(None))) for x in meta):
-            fs_label, fss_label = meta
-        elif isinstance(meta, str):
-            fs_label, _subset_label = meta, None
-
-        # Case 3 - Node has multiple sources (ie, node is downstream of a MergeStage)
+        # Resolve to filepath
+        name_or_path_str = str(name_or_path)
+        if name_or_path_str in self._checkpoints:
+            filepath = self._checkpoints[name_or_path_str]
         else:
-            return _fail_or_passthrough(
-                f"Node `{node}` appears to be downstream of a merge (sources={meta}); cannot invert.",
+            filepath = Path(name_or_path)
+
+        filepath = Path(filepath)
+        if filepath.suffix == "":
+            filepath = _enforce_file_suffix(path=filepath, cls=Checkpoint)
+
+        if not filepath.exists():
+            msg = (
+                f"No checkpoint named '{name_or_path}' exists and no file "
+                f"found at '{filepath}'. "
+                f"Available checkpoints: {list(self._checkpoints.keys())}."
             )
-        # endregion
+            raise ValueError(msg)
 
-        # region: Step 2 - Get FeatureSet node
-        if fs_label not in self.graph._nodes:
-            return _fail_or_passthrough(f"Origin FeatureSet `{fs_label}` not found in graph.")
+        ckpt: Checkpoint = serializer.load(filepath)
 
-        fs_node = self.graph._nodes[fs_label]
-        if not isinstance(fs_node, FeatureSet):
-            return _fail_or_passthrough(f"Origin node `{fs_label}` is not a FeatureSet. Received: {type(fs_node)}.")
-        # endregion
+        # Auto-detect checkpoint type and restore
+        if "experiment" in ckpt.entries:
+            exp_state = ckpt.entries["experiment"].entry_state
+            self._history = exp_state["history"]
+            self.model_graph.set_state(exp_state["mg_state"])
 
-        # region: Step 3 - Apply inverse_transform
-        df = all_outputs.to_dataframe()
-        if component == "targets":
-            # Filter all_outputs to only specified node and convert to dict of lists
-            df_node = df.loc[df["node"] == node]
-            results = copy.deepcopy(df_node.to_dict(orient="list"))
-            # Overwrite
-            for k in ["output", "target"]:
-                scaled = np.vstack(df_node[k].values)
-                temp = SampleCollection(
-                    [
-                        Sample(
-                            features={"dummy": Data(0.0)},
-                            targets={k: Data(x[i]) for i, k in enumerate(fs_node.target_keys)},
-                            tags={},
-                        )
-                        for x in scaled
-                    ],
-                )
-                temp = fs_node.inverse_transform(
-                    data=temp,
-                    component=component,
-                    subset=fss_label,
-                    which=which,
-                    inplace=False,
-                )
-                unscaled = temp.get_all_targets(fmt=DataFormat.NUMPY).reshape(scaled.shape)
-                results[k] = to_python(unscaled)
-
+        elif "modelgraph" in ckpt.entries:
+            self.model_graph.restore_checkpoint(filepath)
         else:
-            msg = "Inverse transform of node outputs using feature transforms is not supported yet."
-            raise NotImplementedError(msg)
-        # endregion
+            msg = (
+                f"Checkpoint at '{filepath}' does not contain a recognized "
+                f"entry. Expected 'experiment' or 'modelgraph' key, "
+                f"found: {list(ckpt.entries.keys())}."
+            )
+            raise TypeError(msg)
 
-        return pd.DataFrame(results)
+    def _save_experiment_checkpoint(self, label: str) -> None:
+        """
+        Save the full experiment to disk using the checkpointing config.
+
+        Args:
+            label (str):
+                The phase or group label to use as the checkpoint key.
+
+        """
+        ckpt = self._exp_checkpointing
+        name = ckpt.format_name(label=label)
+
+        # Ensure checkpoint directory
+        if self._checkpoint_dir is None:
+            if ckpt.directory is not None:
+                self.set_checkpoint_dir(ckpt.directory, create=True)
+            else:
+                msg = "Cannot save experiment checkpoint: no checkpoint directory set."
+                raise RuntimeError(msg)
+
+        save_path = self.save_checkpoint(
+            name=name,
+            overwrite=ckpt.overwrite,
+        )
+        ckpt.record_disk(key=label, path=save_path)
+
+    # ================================================
+    # Execution
+    # ================================================
+    # Private helpers
+    def _execute_training(
+        self,
+        phase: TrainPhase,
+        *,
+        show_sampler_progress: bool = True,
+        show_training_progress: bool = True,
+        persist_progress: bool = IN_NOTEBOOK,
+        persist_epoch_progress: bool = IN_NOTEBOOK,
+        val_loss_metric: str = "val_loss",
+    ) -> TrainResults:
+        """
+        Executes a training phase on this experiment.
+
+        Description:
+            The provided TrainPhase will be executed regardless of whether it
+            is registered to this Experiment (`execution_plan`).
+            **This will mutate the experiment state, but history will not be
+            recorded.**
+
+        Args:
+            phase (TrainPhase):
+                Training phase to be executed.
+            show_sampler_progress (bool, optional):
+                Whether to show a progress bar for sampler batching.
+                Defaults to True.
+            show_training_progress (bool, optional):
+                Whether to show a progress bar for training execution.
+                Defaults to True.
+            persist_progress (bool, optional):
+                Whether to leave all epoch progress bars shown after they complete.
+                Defaults to `IN_NOTEBOOK` (True if working in a notebook, False if in
+                a Python script).
+            persist_epoch_progress (bool, optional):
+                Whether to leave all per-epoch training bars shown after they complete.
+                Defaults to `IN_NOTEBOOK` (True if working in a notebook, False if in
+                a Python script).
+            val_loss_metric (str, optional):
+                The name of a recorded ValidationLossMetrics to show in the progress
+                bar. Results must be tracked, and `val_loss_metric` must be an existing
+                loss metric. Otherwise, no val_loss field will be shown in the progress
+                bar. Defaults to `"val_loss"`.
+
+        Returns:
+            TrainResults: Tracked results from training.
+
+        """
+        # Ensure active nodes are not frozen
+        self.model_graph.unfreeze(phase.active_nodes)
+
+        # Run training and track results
+        res = TrainResults(label=phase.label)
+        recording = phase.result_recording
+
+        # For LAST mode, find any EarlyStopping callback with restore_best
+        early_stop = None
+        if recording == ResultRecording.LAST:
+            from modularml.callbacks.early_stopping import EarlyStopping
+
+            for cb in phase.callbacks:
+                if isinstance(cb, EarlyStopping) and cb.restore_best:
+                    early_stop = cb
+                    break
+
+        best_ctxs: list = []
+        prev_epoch = -1
+
+        for ctx in phase.iter_execution(
+            results=res,
+            show_sampler_progress=show_sampler_progress,
+            show_training_progress=show_training_progress,
+            persist_progress=persist_progress,
+            persist_epoch_progress=persist_epoch_progress,
+            val_loss_metric=val_loss_metric,
+        ):
+            self.model_graph.train_step(
+                ctx=ctx,
+                losses=phase.losses,
+                active_nodes=phase.active_nodes,
+            )
+
+            if recording == ResultRecording.ALL:
+                res.add_execution_context(ctx=ctx)
+            elif recording == ResultRecording.LAST:
+                # On epoch boundary, snapshot best and clear
+                if ctx.epoch_idx != prev_epoch and prev_epoch >= 0:
+                    if early_stop and early_stop.best_epoch == prev_epoch:
+                        best_ctxs = list(res._execution)
+                    res._execution.clear()
+                    res._series_cache.clear()
+                res.add_execution_context(ctx=ctx)
+                prev_epoch = ctx.epoch_idx
+            # NONE: skip recording execution contexts entirely
+
+        # LAST mode: resolve final vs best epoch
+        if recording == ResultRecording.LAST and early_stop is not None:
+            # Check if the final completed epoch was also the best
+            if early_stop.best_epoch == prev_epoch:
+                best_ctxs = list(res._execution)
+
+            # If best epoch differs from the final epoch, restore snapshot
+            if best_ctxs and early_stop.best_epoch != prev_epoch:
+                res._execution = best_ctxs
+                res._series_cache.clear()
+
+        return res
+
+    def _execute_evaluation(
+        self,
+        phase: EvalPhase,
+        *,
+        show_eval_progress: bool = False,
+        persist_progress: bool = IN_NOTEBOOK,
+    ) -> EvalResults:
+        """
+        Executes an evaluation phase on this experiment.
+
+        Description:
+            The provided EvalPhase will be executed regardless of whether it
+            is registered to this Experiment (`execution_plan`).
+            **This will mutate the experiment state, but history will not be
+            recorded.**
+
+        Args:
+            phase (EvalPhase):
+                Evaluation phase to be executed.
+            show_eval_progress (bool, optional):
+                Whether to show a progress bar for eval batches. Defaults to False.
+            persist_progress (bool, optional):
+                Whether to leave all eval progress bars shown after they complete.
+                Defaults to `IN_NOTEBOOK` (True if working in a notebook, False if in
+                a Python script).
+
+        Returns:
+            EvalResults: Tracked results from evaluation.
+
+        """
+        # Ensure all nodes are frozen
+        self.model_graph.freeze()
+
+        # Run evaluation and track results
+        res = EvalResults(label=phase.label)
+        for ctx in phase.iter_execution(
+            results=res,
+            show_eval_progress=show_eval_progress,
+            persist_progress=persist_progress,
+        ):
+            self.model_graph.eval_step(
+                ctx=ctx,
+                losses=phase.losses,
+                active_nodes=phase.active_nodes,
+            )
+            res.add_execution_context(ctx=ctx)
+
+        return res
+
+    def _execute_fit(
+        self,
+        phase: FitPhase,
+    ) -> FitResults:
+        """
+        Executes a fit phase on this experiment.
+
+        Description:
+            The provided FitPhase will be executed regardless of whether it
+            is registered to this Experiment (`execution_plan`).
+            **This will mutate the experiment state, but history will not be
+            recorded.**
+
+        Args:
+            phase (FitPhase):
+                Fit phase to be executed.
+
+        Returns:
+            FitResults: Tracked results from fitting.
+
+        """
+        res = FitResults(label=phase.label)
+        for ctx in phase.iter_execution(results=res):
+            self.model_graph.fit_step(
+                ctx=ctx,
+                losses=phase.losses,
+                active_nodes=phase.active_nodes,
+                freeze_after_fit=phase.freeze_after_fit,
+            )
+            res.add_execution_context(ctx=ctx)
+
+        return res
+
+    def _execute_phase_with_meta(
+        self,
+        phase: TrainPhase | EvalPhase | FitPhase,
+        **kwargs,
+    ) -> tuple[PhaseResults, PhaseExecutionMeta]:
+        """
+        Wraps phase execution with meta data.
+
+        The phase is executed, with results and meta data returned.
+        **This will mutate the experiment state, but history will not be
+        recorded.**
+        """
+        # ------------------------------------------------
+        # Propagate checkpoint directory to TrainPhase if needed
+        # ------------------------------------------------
+        if (
+            isinstance(phase, TrainPhase)
+            and phase.checkpointing is not None
+            and phase.checkpointing.mode == "disk"
+            and phase.checkpointing.directory is None
+        ):
+            exp_dir = self._checkpoint_dir
+            if exp_dir is None and self._exp_checkpointing is not None:
+                exp_dir = self._exp_checkpointing.directory
+            if exp_dir is not None:
+                phase_dir = exp_dir / phase.label
+                phase_dir.mkdir(parents=True, exist_ok=True)
+                phase.checkpointing._directory = phase_dir
+
+        # Skip callbacks and checkpointing when inside a callback
+        run_hooks = not self._in_callback
+        run_ckpt = run_hooks and not self._checkpointing_disabled
+
+        # ------------------------------------------------
+        # on_phase_start
+        # - Run experiment callback
+        # - Run experiment checkpointing
+        # ------------------------------------------------
+        if run_hooks:
+            self._in_callback = True
+            try:
+                for cb in self._exp_callbacks:
+                    cb._on_phase_start(experiment=self, phase=phase)
+            finally:
+                self._in_callback = False
+
+        if (
+            run_ckpt
+            and (self._exp_checkpointing is not None)
+            and (self._exp_checkpointing.should_save("phase_start"))
+        ):
+            self._save_experiment_checkpoint(label=phase.label)
+
+        # ------------------------------------------------
+        # run phase
+        # - modifies experiment state but does not update history
+        # ------------------------------------------------
+        phase_start = datetime.now()
+        if isinstance(phase, TrainPhase):
+            train_keys = {
+                "show_sampler_progress",
+                "show_training_progress",
+                "persist_progress",
+                "persist_epoch_progress",
+                "val_loss_metric",
+            }
+            phase_res: TrainResults = self._execute_training(
+                phase,
+                **{k: v for k, v in kwargs.items() if k in train_keys},
+            )
+        elif isinstance(phase, EvalPhase):
+            eval_keys = {"show_eval_progress", "persist_progress"}
+            phase_res: EvalResults = self._execute_evaluation(
+                phase,
+                **{k: v for k, v in kwargs.items() if k in eval_keys},
+            )
+        elif isinstance(phase, FitPhase):
+            phase_res: FitResults = self._execute_fit(phase)
+        else:
+            msg = f"Expected type of TrainPhase, EvalPhase, or FitPhase. Received: {type(phase)}."
+            raise TypeError(msg)
+
+        # Create meta for run
+        phase_end = datetime.now()
+        phase_meta = PhaseExecutionMeta(
+            label=phase.label,
+            started_at=phase_start,
+            ended_at=phase_end,
+            status="completed",
+        )
+
+        # ------------------------------------------------
+        # on_phase_end
+        # - Run experiment callback
+        # - Run experiment checkpointing
+        # ------------------------------------------------
+        if run_hooks:
+            self._in_callback = True
+            try:
+                for cb in self._exp_callbacks:
+                    cb.on_phase_end(
+                        experiment=self,
+                        phase=phase,
+                        results=phase_res,
+                    )
+            finally:
+                self._in_callback = False
+
+        if (
+            run_ckpt
+            and (self._exp_checkpointing is not None)
+            and self._exp_checkpointing.should_save("phase_end")
+        ):
+            self._save_experiment_checkpoint(label=phase.label)
+
+        return phase_res, phase_meta
+
+    def _execute_group_with_meta(
+        self,
+        group: PhaseGroup,
+        **kwargs,
+    ) -> tuple[PhaseGroupResults, PhaseGroupExecutionMeta]:
+        """
+        Wraps group execution with meta data.
+
+        The group is executed, with results and meta data returned.
+        **This will mutate the experiment state, but history will not be
+        recorded.**
+        """
+        if not isinstance(group, PhaseGroup):
+            msg = f"Expected type of PhaseGroup. Received: {type(group)}."
+            raise TypeError(msg)
+
+        # Skip callbacks and checkpointing when inside a callback
+        run_hooks = not self._in_callback
+        run_ckpt = run_hooks and not self._checkpointing_disabled
+
+        # ------------------------------------------------
+        # on_group_start
+        # - Run experiment callback
+        # - Run experiment checkpointing
+        # ------------------------------------------------
+        if run_hooks:
+            self._in_callback = True
+            try:
+                for cb in self._exp_callbacks:
+                    cb.on_group_start(experiment=self, group=group)
+            finally:
+                self._in_callback = False
+
+        if (
+            run_ckpt
+            and (self._exp_checkpointing is not None)
+            and self._exp_checkpointing.should_save("group_start")
+        ):
+            self._save_experiment_checkpoint(label=group.label)
+
+        # ------------------------------------------------
+        # run phase group
+        # - construct result container
+        # - run each phase in order
+        # ------------------------------------------------
+        group_results = PhaseGroupResults(label=group.label)
+        group_meta = PhaseGroupExecutionMeta(
+            label=group.label,
+            started_at=datetime.now(),
+            ended_at=None,
+        )
+        for element in group.all:
+            if isinstance(element, ExperimentPhase):
+                # Run phase with meta tracking
+                phase_res, phase_meta = self._execute_phase_with_meta(
+                    phase=element,
+                    **kwargs,
+                )
+
+                # Record phase results
+                group_results.add_result(phase_res)
+                # Record phase meta
+                group_meta.add_child(phase_meta)
+
+            elif isinstance(element, PhaseGroup):
+                # Run group with meta tracking
+                sub_res, sub_meta = self._execute_group_with_meta(
+                    group=element,
+                    **kwargs,
+                )
+
+                # Record group results
+                group_results.add_result(sub_res)
+                # Record group meta
+                group_meta.add_child(sub_meta)
+
+            else:
+                msg = (
+                    "Unsupported group element. Expected ExperimentPhase "
+                    f"or PhaseGroup. Received: {type(element)}."
+                )
+                raise TypeError(msg)
+
+        # Update group meta
+        group_meta.ended_at = datetime.now()
+
+        # ------------------------------------------------
+        # on_group_end
+        # - Run experiment callback
+        # - Run experiment checkpointing
+        # ------------------------------------------------
+        if run_hooks:
+            self._in_callback = True
+            try:
+                for cb in self._exp_callbacks:
+                    cb.on_group_end(
+                        experiment=self,
+                        group=group,
+                        results=group_results,
+                    )
+            finally:
+                self._in_callback = False
+
+        if (
+            run_ckpt
+            and (self._exp_checkpointing is not None)
+            and self._exp_checkpointing.should_save("group_end")
+        ):
+            self._save_experiment_checkpoint(label=group.label)
+
+        return group_results, group_meta
+
+    # Run API
+    @overload
+    def run_phase(
+        self,
+        phase: TrainPhase,
+        *,
+        show_sampler_progress: bool = True,
+        show_training_progress: bool = True,
+        persist_progress: bool = IN_NOTEBOOK,
+        persist_epoch_progress: bool = IN_NOTEBOOK,
+        val_loss_metric: str = "val_loss",
+    ) -> TrainResults: ...
+
+    @overload
+    def run_phase(
+        self,
+        phase: EvalPhase,
+        *,
+        show_eval_progress: bool = False,
+        persist_progress: bool = IN_NOTEBOOK,
+    ) -> EvalResults: ...
+
+    @overload
+    def run_phase(
+        self,
+        phase: FitPhase,
+    ) -> FitResults: ...
+
+    def run_phase(
+        self,
+        phase: ExperimentPhase,
+        **kwargs,
+    ) -> PhaseResults:
+        """
+        Execute a single phase and record the results.
+
+        Description:
+            The provided :class:`ExperimentPhase` runs regardless of whether it
+            is registered on :attr:`execution_plan`, and its outputs are stored
+            under :attr:`history`. This mutates experiment state. To run a phase
+            without mutating state, use :meth:`preview_phase`.
+
+        Args:
+            phase (ExperimentPhase):
+                Phase to run.
+            **kwargs (Any):
+                Display flags forwarded to the phase-specific run method.
+
+        Returns:
+            PhaseResults: Results produced by the executed phase.
+
+        """
+        # Initiallize run attributes
+        started_at = datetime.now()
+        status = "completed"
+
+        # Run phase and record phase-level meta data
+        try:
+            res, meta = self._execute_phase_with_meta(
+                phase=phase,
+                **kwargs,
+            )
+        except Exception:
+            status = "failed"
+            raise
+        finally:
+            ended_at = datetime.now()
+
+        # Construct experiment
+        run = ExperimentRun(
+            label=phase.label,
+            started_at=started_at,
+            ended_at=ended_at,
+            status=status,
+            results=res,
+            execution_meta=meta,
+        )
+
+        # Update internal history
+        self._history.append(run)
+
+        # Directly return phase results
+        return res
+
+    def run_group(
+        self,
+        group: PhaseGroup,
+        **kwargs,
+    ) -> PhaseGroupResults:
+        """
+        Execute all phases in a PhaseGroup.
+
+        Description:
+            The provided PhaseGroup will be executed regardless
+            of whether it is registered to this Experiment (`execution_plan`),
+            and its outputs will be recorded under `history`.
+            **This will mutate the experiment state**. To run a group without
+            mutating the experiment state, use `preview_group(...)`.
+
+        Args:
+            group (PhaseGroup):
+                The PhaseGroup to execute.
+            **kwargs:
+                Display flags forwarded to each phase's run method.
+
+        Returns:
+            PhaseGroupResults:
+                Results of the executed phase group.
+
+        """
+        # Initiallize run attributes
+        started_at = datetime.now()
+        status = "completed"
+
+        # Run group and record phase-level meta data
+        try:
+            res, meta = self._execute_group_with_meta(
+                group=group,
+                **kwargs,
+            )
+        except Exception:
+            status = "failed"
+            raise
+        finally:
+            ended_at = datetime.now()
+
+        # Construct experiment
+        run = ExperimentRun(
+            label=group.label,
+            started_at=started_at,
+            ended_at=ended_at,
+            status=status,
+            results=res,
+            execution_meta=meta,
+        )
+
+        # Update internal history
+        self._history.append(run)
+
+        # Directly return group results
+        return res
+
+    def run(self, **kwargs) -> PhaseGroupResults:
+        """
+        Run the registered execution plan.
+
+        Description:
+            All phases and phase groups added to this experiment
+            will be executed in the order they were added.
+            Execution history can be viewed via the `history` attribute.
+
+        Args:
+            **kwargs:
+                Additional arguments to be passed to each executed phase.
+
+        Returns:
+            PhaseGroupResults:
+                Results of all executed phases.
+
+        """
+        # ------------------------------------------------
+        # on_experiment_start
+        # - Run experiment callback
+        # - Run experiment checkpointing
+        # ------------------------------------------------
+        for cb in self._exp_callbacks:
+            cb.on_experiment_start(experiment=self)
+        if (
+            self._exp_checkpointing is not None
+        ) and self._exp_checkpointing.should_save("experiment_start"):
+            self._save_experiment_checkpoint(label="START")
+
+        # ------------------------------------------------
+        # run all phases
+        # - callback/checkpointing logic handled internally
+        # ------------------------------------------------
+        try:
+            res = self.run_group(group=self._exec_plan, **kwargs)
+        except BaseException as exc:
+            self._in_callback = True
+            try:
+                for cb in self._exp_callbacks:
+                    cb._on_exception(
+                        experiment=self,
+                        phase=None,
+                        exception=exc,
+                    )
+            finally:
+                self._in_callback = False
+            raise
+
+        # ------------------------------------------------
+        # on_experiment_end
+        # - Run experiment callback
+        # - Run experiment checkpointing
+        # ------------------------------------------------
+        for cb in self._exp_callbacks:
+            cb.on_experiment_end(experiment=self)
+        if (
+            self._exp_checkpointing is not None
+        ) and self._exp_checkpointing.should_save("experiment_end"):
+            self._save_experiment_checkpoint(label="END")
+
+        # Return results
+        return res
+
+    # Preview API
+    @overload
+    def preview_phase(
+        self,
+        phase: TrainPhase,
+        *,
+        show_sampler_progress: bool = True,
+        show_training_progress: bool = True,
+        persist_progress: bool = IN_NOTEBOOK,
+        persist_epoch_progress: bool = IN_NOTEBOOK,
+        val_loss_metric: str = "val_loss",
+    ) -> TrainResults: ...
+
+    @overload
+    def preview_phase(
+        self,
+        phase: EvalPhase,
+        *,
+        show_eval_progress: bool = False,
+        persist_progress: bool = IN_NOTEBOOK,
+    ) -> EvalResults: ...
+
+    def preview_phase(
+        self,
+        phase: ExperimentPhase,
+        **kwargs,
+    ) -> PhaseResults:
+        """
+        Execute a phase without mutating the Experiment state.
+
+        Description:
+            The provided :class:`ExperimentPhase` runs against the current
+            experiment state and any changes are reverted afterward. Execution
+            is not recorded in :attr:`history`. Use :meth:`run_phase` to persist
+            results.
+
+        Args:
+            phase (ExperimentPhase):
+                Phase to run.
+            **kwargs (Any):
+                Display flags forwarded to the phase-specific run method.
+
+        Returns:
+            PhaseResults: Results produced by the previewed phase.
+
+        """
+        # Snapshot state only for phases that mutate model weights
+        needs_restore = _phase_mutates_state(phase)
+        state = self.get_state() if needs_restore else None
+
+        # Execute phase with checkpointing disabled
+        with self.disable_checkpointing():
+            res, _ = self._execute_phase_with_meta(
+                phase=phase,
+                **kwargs,
+            )
+
+        # Restore experiment state
+        if needs_restore:
+            self.set_state(state=state)
+
+        return res
+
+    def preview_group(
+        self,
+        group: PhaseGroup,
+        **kwargs,
+    ) -> PhaseGroupResults:
+        """
+        Executes a given phase group without mutating the Experiment state.
+
+        Description:
+            The provided PhaseGroup will be executed on the current
+            experiment state. Any state changes are reverted after the group
+            is executed. Execution is not recorded in `history`.
+            To run a group with history tracking, use `run_group(...)`.
+
+        Args:
+            group (PhaseGroup):
+                The phase group to run.
+            **kwargs:
+                Display flags forwarded to the phase-specific run method.
+
+        Returns:
+            PhaseGroupResults: Phase group results.
+
+        """
+        # Snapshot state only for groups containing mutating phases
+        needs_restore = _phase_mutates_state(group)
+        state = self.get_state() if needs_restore else None
+
+        # Execute group with checkpointing disabled
+        with self.disable_checkpointing():
+            res, _ = self._execute_group_with_meta(
+                group=group,
+                **kwargs,
+            )
+
+        # Restore experiment state
+        if needs_restore:
+            self.set_state(state=state)
+
+        return res
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Retrieve the configuration details for this experiment.
+
+        This does not contain state information of the underlying model graph.
+        """
+        return {
+            "label": self.label,
+            "registration_policy": self._ctx._policy.value,
+            "execution_plan": self._exec_plan.get_config(),
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> Experiment:
+        """
+        Reconstructs an Experiment from configuration details.
+
+        This does not restore state information.
+
+        Args:
+            config (dict[str, Any]):
+                Configuration payload returned by :meth:`get_config`.
+
+        Returns:
+            Experiment: Newly constructed experiment bound to the active context.
+
+        """
+        active_ctx = ExperimentContext.get_active()
+        exp = cls(
+            label=config["label"],
+            registration_policy=config.get("registration_policy"),
+            ctx=active_ctx,
+        )
+
+        # Rebuild execution plan
+        exec_plan_cfg = config.get("execution_plan")
+        if exec_plan_cfg is not None:
+            exp._exec_plan = PhaseGroup.from_config(exec_plan_cfg)
+        return exp
+
+    # ================================================
+    # Stateful
+    # ================================================
+    def get_state(self) -> dict[str, Any]:
+        """Return a deep copy of mutable experiment state."""
+        return {
+            "ctx": self.ctx.get_state(),
+            "history": deepcopy(self._history),
+            "checkpoints": self._checkpoints.copy(),
+        }
+
+    def set_state(self, state: dict[str, Any]) -> None:
+        """
+        Restore experiment state from :meth:`get_state` output.
+
+        Args:
+            state (dict[str, Any]): Serialized snapshot captured by :meth:`get_state`.
+
+        """
+        # Restore context state
+        self._ctx.set_state(state["ctx"])
+
+        # Restore history
+        self._history = state.get("history", [])
+
+        # Restore recorded checkpoints
+        self._checkpoints = state.get("checkpoints", {})
+
+    # ================================================
+    # Serialization
+    # ================================================
+    def save(self, filepath: Path, *, overwrite: bool = False) -> Path:
+        """
+        Serializes this experiment to the specified filepath.
+
+        Args:
+            filepath (Path):
+                File location to save to. Note that the suffix may be overwritten
+                to enforce the ModularML file extension schema.
+            overwrite (bool, optional):
+                Whether to overwrite any existing file at the save location.
+                Defaults to False.
+
+        Returns:
+            Path: The actual filepath at which the experiment was saved.
+
+        """
+        from modularml.core.io.serialization_policy import SerializationPolicy
+        from modularml.core.io.serializer import serializer
+
+        return serializer.save(
+            self,
+            filepath,
+            policy=SerializationPolicy.BUILTIN,
+            overwrite=overwrite,
+        )
+
+    @classmethod
+    def load(
+        cls,
+        filepath: Path,
+        *,
+        checkpoint_dir: Path | None = None,
+        allow_packaged_code: bool = False,
+        overwrite: bool = False,
+    ) -> Experiment:
+        """
+        Load an Experiment from file.
+
+        Args:
+            filepath (Path):
+                File location of a previously saved Experiment.
+            checkpoint_dir (Path | None, optional):
+                Directory to extract saved checkpoints into. If the
+                serialized experiment contains checkpoint artifacts and
+                this is None, the checkpoints will not be restored and
+                a warning will be emitted. Defaults to None.
+            allow_packaged_code : bool
+                Whether bundled code execution is allowed.
+            overwrite (bool):
+                Whether to replace any colliding node registrations in ExperimentContext
+                If False, new IDs are assigned to the reloaded nodes comprising the
+                graph. Otherwise, any collision are overwritten with the saved nodes.
+                Defaults to False.
+                It is recommended to only reload an Experiment into a new/empty
+                `ExperimentContext`.
+
+        Returns:
+            Experiment: The reloaded Experiment.
+
+        """
+        from modularml.core.io.serializer import _enforce_file_suffix, serializer
+
+        # Append proper suffix only if no suffix is given
+        if Path(filepath).suffix == "":
+            filepath = _enforce_file_suffix(path=filepath, cls=cls)
+
+        return serializer.load(
+            filepath,
+            allow_packaged_code=allow_packaged_code,
+            overwrite=overwrite,
+            extras={"checkpoint_dir": checkpoint_dir}
+            if checkpoint_dir is not None
+            else None,
+        )

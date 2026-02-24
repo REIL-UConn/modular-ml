@@ -1,0 +1,100 @@
+name: Update ROADMAP Progress
+
+on:
+  push:
+    paths:
+      - "ROADMAP.md"
+  workflow_dispatch:
+
+jobs:
+  update-roadmap-progress:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Update progress bars for all vX.Y.Z sections
+        run: |
+          FILE="ROADMAP.md"
+
+          # Extract all section headers matching "## vX.Y.Z"
+          SECTIONS=$(grep -oP '^## v[0-9]+\.[0-9]+\.[0-9]+' "$FILE")
+
+          echo "Detected sections:"
+          echo "$SECTIONS"
+          echo ""
+
+          # Loop over each section
+          while read -r SECTION; do
+            [ -z "$SECTION" ] && continue
+
+            # Escape section title for regex use
+            ESCAPED_SECTION=$(printf '%s\n' "$SECTION" | sed 's/[]\/$*.^|[]/\\&/g')
+
+            # Compute start/end line numbers
+            START_LINE=$(grep -n "^$ESCAPED_SECTION" "$FILE" | cut -d':' -f1)
+
+            # Find next section to mark the end boundary
+            END_LINE=$(awk "NR>$START_LINE && /^## v[0-9]+\.[0-9]+\.[0-9]+/ {print NR; exit}" "$FILE")
+
+            # If no next section, use EOF
+            if [ -z "$END_LINE" ]; then
+              END_LINE=$(wc -l < "$FILE")
+            fi
+
+            echo "Processing section: $SECTION"
+            echo "  Start line: $START_LINE"
+            echo "  End line:   $END_LINE"
+
+            # Count checkboxes inside this section
+            TOTAL=$(awk "NR>$START_LINE && NR<$END_LINE { if (/^- \\[[ x]\\]/) c++ } END{print c+0}" "$FILE")
+            DONE=$(awk  "NR>$START_LINE && NR<$END_LINE { if (/^- \\[x\\]/)  c++ } END{print c+0}" "$FILE")
+
+            if [ "$TOTAL" -gt 0 ]; then
+              PERCENT=$(( 100 * DONE / TOTAL ))
+            else
+              PERCENT=0
+            fi
+
+            echo "  Total tasks:     $TOTAL"
+            echo "  Completed tasks: $DONE"
+            echo "  Percent:         $PERCENT%"
+
+            # Encode percent sign for URL
+            PERCENT_ENCODED=$(printf "%s%%25" "$PERCENT")
+
+            # Choose color
+            if   [ "$PERCENT" -ge 90 ]; then COLOR="brightgreen";
+            elif [ "$PERCENT" -ge 75 ]; then COLOR="green";
+            elif [ "$PERCENT" -ge 50 ]; then COLOR="yellow";
+            elif [ "$PERCENT" -ge 25 ]; then COLOR="orange";
+            else                          COLOR="red"; fi
+
+            BADGE_URL="https://img.shields.io/badge/progress-${PERCENT}%25-${COLOR}"
+
+            # Replace the line immediately after the section header
+            sed -i "$((START_LINE+1))s|https://img.shields.io/badge/progress-[^)]*|${BADGE_URL}|" "$FILE"
+
+            echo "  Updated badge: $BADGE_URL"
+            echo ""
+
+          done <<< "$SECTIONS"
+
+      - name: Commit changes if needed
+        if: ${{ env.ACT != 'true' }}   # <── skip commit when running locally
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add ROADMAP.md
+
+          # Commit only if there are modifications
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git commit -m "Auto-update roadmap progress bars"
+            git push
+          else
+            echo "No changes to commit."
+          fi

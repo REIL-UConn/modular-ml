@@ -1,23 +1,42 @@
-from modularml.utils.backend import Backend
-from modularml.utils.data_format import DataFormat
+from modularml.api import (
+    AppliedLoss,
+    BaseModel,
+    Checkpointing,
+    ConcatNode,
+    CrossValidation,
+    CVBinding,
+    EarlyStopping,
+    EvalLossMetric,
+    EvalPhase,
+    EvalResults,
+    Experiment,
+    ExperimentContext,
+    FeatureSet,
+    FeatureSetView,
+    FitPhase,
+    FitResults,
+    InputBinding,
+    Loss,
+    ModelGraph,
+    ModelNode,
+    Optimizer,
+    PhaseGroup,
+    PhaseGroupResults,
+    ResultRecording,
+    Scaler,
+    SimilarityCondition,
+    TensorflowBaseModel,
+    TorchBaseModel,
+    TrainPhase,
+    TrainResults,
+    supported_scalers,
+)
+from modularml.registry import register_all
 
-from .logger import logger
+register_all()
 
-# Expose core and models as attributes for Sphinx autosummary
-from . import core, models
+# Create a default, empty context immediately
+DEFAULT_EXPERIMENT_CONTEXT = ExperimentContext()
 
-try:
-    from importlib.metadata import version
-
-    __version__ = version("modularml")
-except ImportError:
-    __version__ = "unknown"
-
-
-__all__ = [
-    "Backend",
-    "DataFormat",
-    "core",
-    "logger",
-    "models",
-]
+# Make it the active context
+ExperimentContext._set_active(DEFAULT_EXPERIMENT_CONTEXT)

@@ -40,6 +40,7 @@ dependencies = [
     "numpy",
     "scipy",
     "pandas",
+    "pyarrow",
     "scikit-learn",
     "scikit-optimize",
     "nbformat",
@@ -55,25 +56,32 @@ Issues = "https://github.com/REIL-UConn/modular-ml/issues"
 
 [project.optional-dependencies]
 torch = ["torch"]
-tensorflow = ["tensorflow"]
+tensorflow = [
+    "tensorflow-macos; platform_system == 'Darwin' and platform_machine == 'arm64'",
+    "tensorflow; platform_system == 'Darwin' and platform_machine != 'arm64'",
+]
 optimize = ["optuna"]
+
 docs = [
     "sphinx>=6",
     "sphinx_rtd_theme>=0.5",
     "pydata-sphinx-theme",
     "sphinx_design",
     "sphinx-copybutton",
+    "sphinxcontrib-napoleon",
+    "sphinxcontrib.mermaid",
+    "myst_nb",
     "myst-parser",
     "sphinx-inline-tabs",
     "sphinxcontrib-bibtex",
     "sphinx-autobuild",
     "sphinx-last-updated-by-git",
-    "nbsphinx",
     "ipykernel",
     "ipywidgets",
     "sphinx-gallery",
     "sphinx-docsearch",
 ]
+
 examples = [
     "jupyter",
     "ipykernel",
@@ -91,6 +99,8 @@ dev = [
     "pytest-cov",           # For coverage tests
     "pytest-xdist",         # For parallel test runs
     "pytest-doctestplus",   # For better doctesting
+    "pytest-dependency",    # For pytest dependencies
+    "pytest-order",         # For ordered pytest execution
     "nbmake",               # For testing Jupyter notebooks
     "importlib.metadata",
 ]
