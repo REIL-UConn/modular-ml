@@ -789,16 +789,20 @@ class TrainPhase(ExperimentPhase):
            from its :class:`SampledView`.
 
         3. For each epoch:
+
            a. Generate a step-wise batch schedule using ``_iter_schedule()``
               according to ``self.batch_schedule``.
+
            b. For each schedule step, construct the inputs for *all* head-node
               bindings:
+
               - If a sampler is active in the current step, its corresponding
                 batch is selected.
               - If a sampler is inactive (ALTERNATE policies), its inputs are
                 replaced with a fully masked :class:`BatchView`.
 
         4. Yield an :class:`ExecutionContext` containing:
+
            - Phase label
            - Epoch index
            - Batch index (within the epoch)

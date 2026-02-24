@@ -101,20 +101,24 @@ class ConcatNode(MergeNode):
                 The axis along which to concatenate feature inputs. Does not include
                 the batch dimension. That is, for shape (with batch) of (32,1,16),
                 axis=0 refers to "1". The examples below omit the batch dimension.
-                * axis=0: concat along features. E.g, (1,16) + (1,16) -> (2,16))
-                * axis>1: concat within features. E.g, (1,16,16) + (1,16,8) -> (1,16,24))
-                    All data must have at least `concat_axis` dimensions.
-                * axis=-1: concat along last axis of all data. E.g, (1, 16, 16) +
-                    (1, 16, 8) -> (1, 16, 24).
+
+                - ``axis=0``: concat along features. Example:
+                  ``(1, 16) + (1, 16) -> (2, 16)``.
+                - ``axis > 1``: concat within features. Example:
+                  ``(1, 16, 16) + (1, 16, 8) -> (1, 16, 24)``.
+                  All data must have at least ``concat_axis`` dimensions.
+                - ``axis=-1``: concat along the last axis of all data. Example:
+                  ``(1, 16, 16) + (1, 16, 8) -> (1, 16, 24)``.
 
             concat_axis_targets (int | str | MergeStrategy | ExperimentNodeReference):
                 Strategy for merging the targets domain. Accepts:
-                * int: Concatenate along this axis (same semantics as `concat_axis`).
-                    Defaults to -1 (last axis).
-                * str or MergeStrategy: Apply an aggregation strategy. Supported
-                    values: "first", "last", "mean".
-                * ExperimentNodeReference: Select targets from the upstream input
-                    matching this reference.
+
+                - ``int``: concatenate along this axis (same semantics as
+                  ``concat_axis``). Defaults to ``-1`` (last axis).
+                - ``str`` or ``MergeStrategy``: apply an aggregation strategy.
+                  Supported values are ``"first"``, ``"last"``, and ``"mean"``.
+                - ``ExperimentNodeReference``: select targets from the upstream input
+                  matching this reference.
 
             concat_axis_tags (int | str | MergeStrategy | ExperimentNodeReference):
                 Strategy for merging the tags domain. Same semantics as

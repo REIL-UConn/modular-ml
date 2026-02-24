@@ -993,25 +993,36 @@ class ModelGraph(Configurable, Stateful):
                 Node ID, label, or instance of an existing ModelGraph node
                 to be removed.
 
-        Examples:
-        1. Removing an existing single-input, single-output node.
-            Given: `A -> B -> C`
-            Remove: `B`
-            Result: `A -> C`
+        Example:
+            1. Removing an existing single-input, single-output node.
 
-        2. Removing an existing multi-input, single-output node.
-            Given: `[A, B] -> C -> D`
-            Remove: `C`
-            Result: `[A, B] -> D`
-            Note that `D` must be able to accept multiple inputs or an error
-            will be thrown.
+               Given: `A -> B -> C`
 
-        3. Removing an existing single-input, multi-output node.
-            Given: `A -> B -> [C, D]`
-            Remove: `B`
-            Result: `A -> [C, D]`
-            Note that `A` must be able to accept multiple outputs or an error
-            will be thrown.
+               Remove: `B`
+
+               Result: `A -> C`
+
+            2. Removing an existing multi-input, single-output node.
+
+               Given: `[A, B] -> C -> D`
+
+               Remove: `C`
+
+               Result: `[A, B] -> D`
+
+               Note that `D` must be able to accept multiple inputs or an error
+               will be thrown.
+
+            3. Removing an existing single-input, multi-output node.
+
+               Given: `A -> B -> [C, D]`
+
+               Remove: `B`
+
+               Result: `A -> [C, D]`
+
+               Note that `A` must be able to accept multiple outputs or an error
+               will be thrown.
 
         Returns:
             ModelGraph: self
