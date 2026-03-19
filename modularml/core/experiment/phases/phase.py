@@ -17,6 +17,7 @@ from modularml.visualization.visualizer.visualizer import Visualizer
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
     from modularml.core.data.batch_view import BatchView
     from modularml.core.data.execution_context import ExecutionContext
@@ -819,6 +820,53 @@ class ExperimentPhase(ABC):
 
         msg = f"Unknown ExperimentPhase subclass: {phase_type}."
         raise ValueError(msg)
+
+    # ================================================
+    # YAML
+    # ================================================
+    def to_yaml(self, path: str | Path, *, overwrite: bool = False) -> Path:
+        """
+        Export this phase to a human-readable YAML file.
+
+        Args:
+            path (str | Path): Destination file path. A ``.yaml`` extension
+                is added automatically if not already present.
+            overwrite (bool, optional): Whether to overwrite an existing file
+                at ``path``. Defaults to False.
+
+        Returns:
+            Path: The resolved path the file was written to.
+
+        Raises:
+            FileExistsError: If ``path`` already exists and ``overwrite`` is False.
+
+        """
+        from modularml.core.io.yaml import to_yaml
+
+        return to_yaml(self, path, overwrite=overwrite)
+
+    @classmethod
+    def from_yaml(cls, path: str | Path, *, overwrite: bool = False) -> ExperimentPhase:
+        """
+        Reconstruct a phase from a YAML file.
+
+        All referenced graph nodes and FeatureSets must already exist in
+        the active :class:`ExperimentContext`.
+
+        Args:
+            path (str | Path): Path to the YAML file.
+            overwrite (bool, optional): Passed to node-registering translators.
+                When False (default), raises ValueError if any reconstructed
+                node label conflicts with an existing registration in the active
+                ExperimentContext. Defaults to False.
+
+        Returns:
+            ExperimentPhase: Reconstructed phase.
+
+        """
+        from modularml.core.io.yaml import from_yaml
+
+        return from_yaml(path, overwrite=overwrite)
 
     # ================================================
     # Visualizer

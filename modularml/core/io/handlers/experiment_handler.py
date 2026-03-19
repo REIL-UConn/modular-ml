@@ -122,7 +122,14 @@ class ExperimentHandler(BaseHandler["Experiment"]):
             file_mapping["checkpoints"] = ckpt_entries
 
         # ------------------------------------------------
-        # 4. Save experiment-specific runtime state
+        # 4. Copy disk-backed result stores into the artifact
+        # ------------------------------------------------
+        results_manifest = self._collect_result_files(obj, save_dir)
+        if results_manifest:
+            file_mapping["results"] = results_manifest
+
+        # ------------------------------------------------
+        # 5. Save experiment-specific runtime state
         # ------------------------------------------------
         exp_state = {
             "history": obj._history,
@@ -135,6 +142,104 @@ class ExperimentHandler(BaseHandler["Experiment"]):
         file_mapping["state"] = self.state_rel_path
 
         return file_mapping
+
+    def _collect_result_files(
+        self,
+        obj: Experiment,
+        save_dir: Path,
+    ) -> dict[str, Any]:
+        """Copy disk-backed result stores into the archive and return the manifest."""
+        from modularml.core.experiment.results.group_results import PhaseGroupResults
+
+        manifest: dict[str, dict] = {}
+        for run_idx, run in enumerate(obj._history):
+            if run.results is None:
+                continue
+
+            if isinstance(run.results, PhaseGroupResults):
+                phases = run.results.flatten()
+            else:
+                phases = {run.results.label: run.results}
+
+            for label, pr in phases.items():
+                entry: dict[str, Any] = {}
+                base = save_dir / "results" / str(run_idx) / label
+
+                exec_loc = pr._execution._location
+                if exec_loc is not None and Path(exec_loc).is_dir():
+                    dest = base / "execution_data"
+                    shutil.copytree(exec_loc, dest, dirs_exist_ok=True)
+                    entry["execution_data"] = str(dest.relative_to(save_dir))
+
+                met_loc = pr._metrics._location
+                if met_loc is not None and Path(met_loc).is_dir():
+                    dest = base / "metrics"
+                    shutil.copytree(met_loc, dest, dirs_exist_ok=True)
+                    entry["metrics"] = str(dest.relative_to(save_dir))
+
+                art_loc = pr._artifacts._location
+                if art_loc is not None and Path(art_loc).is_dir():
+                    dest = base / "artifacts"
+                    shutil.copytree(art_loc, dest, dirs_exist_ok=True)
+                    entry["artifacts"] = str(dest.relative_to(save_dir))
+
+                # Collect callback sub-phase results (e.g. Evaluation callbacks)
+                cb_entries = self._collect_callback_result_files(
+                    pr=pr,
+                    base=base / "callbacks",
+                    save_dir=save_dir,
+                )
+                if cb_entries:
+                    entry["callbacks"] = cb_entries
+
+                if entry:
+                    manifest.setdefault(str(run_idx), {})[label] = entry
+
+        return manifest
+
+    def _collect_callback_result_files(
+        self,
+        pr: Any,
+        base: Path,
+        save_dir: Path,
+    ) -> dict[str, Any]:
+        """Copy disk-backed stores from callback sub-phases and return their manifest."""
+        from modularml.callbacks.evaluation import EvaluationCallbackResult
+
+        cb_manifest: dict[str, Any] = {}
+        for cb_res in pr._callbacks:
+            if not isinstance(cb_res, EvaluationCallbackResult):
+                continue
+            eval_res = cb_res.eval_results
+            if eval_res is None:
+                continue
+
+            cb_label = cb_res.callback_label
+            cb_entry: dict[str, str] = {}
+            cb_base = base / cb_label
+
+            exec_loc = eval_res._execution._location
+            if exec_loc is not None and Path(exec_loc).is_dir():
+                dest = cb_base / "execution_data"
+                shutil.copytree(exec_loc, dest, dirs_exist_ok=True)
+                cb_entry["execution_data"] = str(dest.relative_to(save_dir))
+
+            met_loc = eval_res._metrics._location
+            if met_loc is not None and Path(met_loc).is_dir():
+                dest = cb_base / "metrics"
+                shutil.copytree(met_loc, dest, dirs_exist_ok=True)
+                cb_entry["metrics"] = str(dest.relative_to(save_dir))
+
+            art_loc = eval_res._artifacts._location
+            if art_loc is not None and Path(art_loc).is_dir():
+                dest = cb_base / "artifacts"
+                shutil.copytree(art_loc, dest, dirs_exist_ok=True)
+                cb_entry["artifacts"] = str(dest.relative_to(save_dir))
+
+            if cb_entry:
+                cb_manifest[cb_label] = cb_entry
+
+        return cb_manifest
 
     # ================================================
     # Decoding
@@ -243,7 +348,34 @@ class ExperimentHandler(BaseHandler["Experiment"]):
         exp._history = exp_state.get("history", [])
 
         # ------------------------------------------------
-        # 5. Extract checkpoints to user-provided directory
+        # 5. Restore disk-backed result stores
+        # ------------------------------------------------
+        results_manifest: dict[str, Any] = file_mapping.get("results", {})
+        if results_manifest:
+            results_dir: Path | None = ctx.extras.get("results_dir")
+            if results_dir is not None:
+                self._restore_result_files(
+                    exp=exp,
+                    load_dir=load_dir,
+                    results_dir=Path(results_dir),
+                    manifest=results_manifest,
+                )
+            else:
+                from modularml.utils.logging.warnings import warn
+
+                warn(
+                    "The serialized experiment contains disk-backed result stores "
+                    "(execution contexts or artifacts), but no `results_dir` was "
+                    "provided to `Experiment.load()`. These results were not restored.",
+                    hints=[
+                        "Pass `results_dir=Path(...)` to `Experiment.load()` "
+                        "to extract and re-link disk-backed result stores.",
+                    ],
+                    stacklevel=2,
+                )
+
+        # ------------------------------------------------
+        # 6. Extract checkpoints to user-provided directory
         # ------------------------------------------------
         ckpt_entries: dict[str, str] = file_mapping.get("checkpoints", {})
         checkpoint_dir: Path | None = ctx.extras.get("checkpoint_dir")
@@ -290,3 +422,131 @@ class ExperimentHandler(BaseHandler["Experiment"]):
             )
 
         return exp
+
+    def _restore_result_files(
+        self,
+        exp: Experiment,
+        load_dir: Path,
+        results_dir: Path,
+        manifest: dict[str, Any],
+    ) -> None:
+        """Extract archived result files and re-link stores in ``exp._history``."""
+        from modularml.core.experiment.results.artifact_store import ArtifactStore
+        from modularml.core.experiment.results.execution_store import ExecutionStore
+        from modularml.core.experiment.results.group_results import PhaseGroupResults
+        from modularml.core.experiment.results.metric_store import MetricStore
+
+        results_dir.mkdir(parents=True, exist_ok=True)
+
+        for run_idx, run in enumerate(exp._history):
+            run_manifest: dict[str, Any] = manifest.get(str(run_idx), {})
+            if not run_manifest or run.results is None:
+                continue
+
+            if isinstance(run.results, PhaseGroupResults):
+                phases = run.results.flatten()
+            else:
+                phases = {run.results.label: run.results}
+
+            for label, pr in phases.items():
+                phase_manifest: dict[str, Any] = run_manifest.get(label, {})
+                if not phase_manifest:
+                    continue
+
+                base = results_dir / str(run_idx) / label
+
+                exec_rel = phase_manifest.get("execution_data")
+                if exec_rel is not None:
+                    src = load_dir / exec_rel
+                    dest = base / "execution_data"
+                    if src.is_dir():
+                        shutil.copytree(src, dest, dirs_exist_ok=True)
+                        pr._execution = ExecutionStore.from_directory(dest)
+                        pr._execution_dir = dest
+
+                met_rel = phase_manifest.get("metrics")
+                if met_rel is not None:
+                    src = load_dir / met_rel
+                    dest = base / "metrics"
+                    if src.is_dir():
+                        shutil.copytree(src, dest, dirs_exist_ok=True)
+                        pr._metrics = MetricStore.from_directory(dest)
+                        pr._metric_dir = dest
+
+                art_rel = phase_manifest.get("artifacts")
+                if art_rel is not None:
+                    src = load_dir / art_rel
+                    dest = base / "artifacts"
+                    if src.is_dir():
+                        shutil.copytree(src, dest, dirs_exist_ok=True)
+                        pr._artifacts = ArtifactStore.from_directory(dest)
+                        pr._artifact_dir = dest
+
+                # Restore callback sub-phase stores
+                cb_manifest: dict[str, Any] = phase_manifest.get("callbacks", {})
+                if cb_manifest:
+                    self._restore_callback_result_files(
+                        pr=pr,
+                        load_dir=load_dir,
+                        base=base / "callbacks",
+                        cb_manifest=cb_manifest,
+                        artifact_store_cls=ArtifactStore,
+                        execution_store_cls=ExecutionStore,
+                        metric_store_cls=MetricStore,
+                    )
+
+                pr._series_cache.clear()
+
+    def _restore_callback_result_files(
+        self,
+        pr: Any,
+        load_dir: Path,
+        base: Path,
+        cb_manifest: dict[str, Any],
+        *,
+        artifact_store_cls: type,
+        execution_store_cls: type,
+        metric_store_cls: type,
+    ) -> None:
+        """Re-link disk-backed stores for callback sub-phase results."""
+        from modularml.callbacks.evaluation import EvaluationCallbackResult
+
+        for cb_res in pr._callbacks:
+            if not isinstance(cb_res, EvaluationCallbackResult):
+                continue
+            cb_label = cb_res.callback_label
+            cb_entry: dict[str, str] = cb_manifest.get(cb_label, {})
+            if not cb_entry or cb_res.eval_results is None:
+                continue
+
+            eval_res = cb_res.eval_results
+            cb_base = base / cb_label
+
+            exec_rel = cb_entry.get("execution_data")
+            if exec_rel is not None:
+                src = load_dir / exec_rel
+                dest = cb_base / "execution_data"
+                if src.is_dir():
+                    shutil.copytree(src, dest, dirs_exist_ok=True)
+                    eval_res._execution = execution_store_cls.from_directory(dest)
+                    eval_res._execution_dir = dest
+
+            met_rel = cb_entry.get("metrics")
+            if met_rel is not None:
+                src = load_dir / met_rel
+                dest = cb_base / "metrics"
+                if src.is_dir():
+                    shutil.copytree(src, dest, dirs_exist_ok=True)
+                    eval_res._metrics = metric_store_cls.from_directory(dest)
+                    eval_res._metric_dir = dest
+
+            art_rel = cb_entry.get("artifacts")
+            if art_rel is not None:
+                src = load_dir / art_rel
+                dest = cb_base / "artifacts"
+                if src.is_dir():
+                    shutil.copytree(src, dest, dirs_exist_ok=True)
+                    eval_res._artifacts = artifact_store_cls.from_directory(dest)
+                    eval_res._artifact_dir = dest
+
+            eval_res._series_cache.clear()

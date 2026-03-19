@@ -310,6 +310,22 @@ class ModelGraph(Configurable, Stateful):
             effective = ModelNode._normalize_accelerator(resolved) or cpu_acc
             node._ensure_node_on_device(effective)
 
+        # Also migrate graph-level optimizer state
+        if (
+            phase_accelerator is not None
+            and self._optimizer is not None
+            and self._optimizer.is_built
+            and self._optimizer.backend == Backend.TORCH
+            and torch is not None
+        ):
+            phase_acc = ModelNode._normalize_accelerator(phase_accelerator)
+            if phase_acc is not None:
+                target = phase_acc.torch_device_str()
+                for param_state in self._optimizer.instance.state.values():
+                    for k, v in param_state.items():
+                        if isinstance(v, torch.Tensor) and str(v.device) != target:
+                            param_state[k] = v.to(target)
+
     __hash__ = None
 
     @property
@@ -1596,6 +1612,23 @@ class ModelGraph(Configurable, Stateful):
                 continue
             n.unfreeze()
 
+    def reset_state(self) -> None:
+        """
+        Reset all learned state in this graph.
+
+        Re-initializes the weights of every :class:`ModelNode`, unfreezes
+        all nodes, and rebuilds the graph-level optimizer (if present).
+        After this call the graph is in the same state as a freshly-built
+        graph with no training history.
+        """
+        for node in self._nodes.values():
+            if isinstance(node, ModelNode):
+                node.reset_weights()
+
+        # Rebuild the graph-level optimizer over all (now-unfrozen) nodes
+        if self._optimizer is not None:
+            self._build_optimizer(force=True)
+
     def _train_step_torch(
         self,
         ctx: ExecutionContext,
@@ -2266,6 +2299,60 @@ class ModelGraph(Configurable, Stateful):
             allow_packaged_code=allow_packaged_code,
             overwrite=overwrite,
         )
+
+    def to_yaml(self, path: str | Path, *, overwrite: bool = False) -> Path:
+        """
+        Export this ModelGraph to a human-readable YAML file.
+
+        The YAML file captures architecture and hyperparameters only (no
+        learned weights). Use :meth:`save` to persist full model state.
+
+        Args:
+            path (str | Path): Destination file path. A ``.yaml`` extension
+                is added automatically if not already present.
+            overwrite (bool, optional): Whether to overwrite an existing file
+                at ``path``. Defaults to False.
+
+        Returns:
+            Path: The resolved path the file was written to.
+
+        Raises:
+            FileExistsError: If ``path`` already exists and ``overwrite`` is False.
+
+        """
+        from modularml.core.io.yaml import to_yaml
+
+        return to_yaml(self, path, overwrite=overwrite)
+
+    @classmethod
+    def from_yaml(cls, path: str | Path, *, overwrite: bool = False) -> ModelGraph:
+        """
+        Reconstruct a ModelGraph from a YAML file.
+
+        Nodes are created and registered into the active
+        :class:`ExperimentContext` in declaration order (upstream nodes
+        must appear before downstream nodes).
+
+        Args:
+            path (str | Path): Path to the YAML file.
+            overwrite (bool, optional): Whether to overwrite conflicting node
+                registrations already present in the active
+                :class:`ExperimentContext`. When ``False`` (default) a
+                :exc:`ValueError` is raised on any label collision. When
+                ``True`` the existing registration is replaced.
+                Defaults to False.
+
+        Returns:
+            ModelGraph: Reconstructed graph (config only, no weights).
+
+        Raises:
+            ValueError: If a node label conflict is detected and
+                ``overwrite`` is False.
+
+        """
+        from modularml.core.io.yaml import from_yaml
+
+        return from_yaml(path, kind="model_graph", overwrite=overwrite)
 
     # ================================================
     # Checkpointing

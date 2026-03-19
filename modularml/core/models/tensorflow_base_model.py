@@ -58,6 +58,26 @@ class TensorflowBaseModel(BaseModel, ABC):
                 raise ValueError(msg)
             var_map[name].assign(value)
 
+    def reset_weights(self) -> None:
+        """Re-initialize all Keras layer weights using their stored initializers."""
+        if not self.is_built:
+            return
+        model = self._get_keras_model()
+        for layer in model.layers:
+            if (
+                hasattr(layer, "kernel_initializer")
+                and hasattr(layer, "kernel")
+                and layer.kernel is not None
+            ):
+                layer.kernel.assign(layer.kernel_initializer(layer.kernel.shape))
+            if (
+                hasattr(layer, "bias_initializer")
+                and hasattr(layer, "bias")
+                and layer.bias is not None
+                and getattr(layer, "use_bias", True)
+            ):
+                layer.bias.assign(layer.bias_initializer(layer.bias.shape))
+
     def _get_keras_model(self):
         """
         Return the underlying Keras model for weight access.

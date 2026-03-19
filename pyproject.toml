@@ -48,6 +48,7 @@ dependencies = [
     "typing-extensions",
     "matplotlib",
     "rich",
+    "pyyaml",
 ]
 
 [project.urls]

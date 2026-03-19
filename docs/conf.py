@@ -7,6 +7,7 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 import importlib.metadata
+import os
 import sys
 from pathlib import Path
 
@@ -14,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 project = "ModularML"
-copyright = "2025, The ModularML Team"
+copyright = "2026, The ModularML Team"
 author = "The ModularML Team"
 version = importlib.metadata.version("modularml")
 release = version
@@ -65,7 +66,10 @@ myst_enable_extensions = [
 ]
 myst_fence_as_directive = ["mermaid"]
 nb_execution_timeout = 120
-nb_execution_mode = "cache"
+# On ReadTheDocs, render pre-saved outputs instead of re-executing notebooks.
+# RTD only installs [docs] extras (no torch/tensorflow), so execution would fail.
+# Locally, use "cache" so notebooks re-execute when changed.
+nb_execution_mode = "off" if os.environ.get("READTHEDOCS") else "cache"
 nb_execution_cache_path = str(ROOT / ".jupyter_cache")
 
 autodoc_default_options = {

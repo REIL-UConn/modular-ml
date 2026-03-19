@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, TypeVar, overload
 
 import numpy as np
 
@@ -12,6 +12,11 @@ from modularml.core.data.execution_context import ExecutionContext
 from modularml.core.data.schema_constants import ROLE_DEFAULT
 from modularml.core.experiment.callbacks.callback import CallbackResult
 from modularml.core.experiment.experiment_context import ExperimentContext
+from modularml.core.experiment.results.artifact_store import (
+    ArtifactDataSeries,
+    ArtifactStore,
+)
+from modularml.core.experiment.results.execution_store import ExecutionStore
 from modularml.core.experiment.results.metric_store import MetricDataSeries, MetricStore
 from modularml.core.references.execution_reference import TensorLike
 from modularml.core.topology.graph_node import GraphNode
@@ -23,10 +28,15 @@ from modularml.utils.topology.graph_search_utils import find_upstream_featureset
 
 if TYPE_CHECKING:
     from collections.abc import Hashable
+    from pathlib import Path
 
+    from modularml.callbacks.artifact_result import ArtifactResult
+    from modularml.callbacks.evaluation import EvaluationCallbackResult
+    from modularml.callbacks.metric import MetricResult
     from modularml.core.data.featureset import FeatureSet
     from modularml.core.data.featureset_view import FeatureSetView
     from modularml.core.data.sample_data import SampleData
+    from modularml.core.experiment.callbacks.callback_result import PayloadResult
 
 T = TypeVar("T")
 
@@ -225,23 +235,28 @@ class PhaseResults:
 
     Attributes:
         label (str): Phase label.
-        _execution (list[ExecutionContext]): Ordered execution contexts.
+        _execution (ExecutionStore): Ordered execution contexts; stored in memory
+            or as on-disk pickle files depending on ``_execution_dir``.
         _callbacks (list[CallbackResult]): Recorded callback outputs.
-        _metrics (MetricStore): Store of scalar metrics logged during execution.
+        _metrics (MetricStore): Store of scalar metrics logged during execution;
+            stored in memory or on disk depending on ``_metric_dir``.
         _series_cache (dict[tuple, Any]): Cache of memoized AxisSeries queries.
 
     """
 
     label: str
 
-    # Phase contexts ordered by execution time
-    _execution: list[ExecutionContext] = field(default_factory=list, repr=False)
-
     # Results produced by callbacks; keyed by callback label
     _callbacks: list[CallbackResult] = field(default_factory=list, repr=False)
 
-    # Named scalar metrics recorded during execution
-    _metrics: MetricStore = field(default_factory=MetricStore, repr=False)
+    # Directory for on-disk execution context storage; None = keep in memory
+    _execution_dir: Path | None = field(default=None, repr=False)
+
+    # Directory for on-disk metric storage; None = keep in memory
+    _metric_dir: Path | None = field(default=None, repr=False)
+
+    # Directory for on-disk artifact storage; None = keep in memory
+    _artifact_dir: Path | None = field(default=None, repr=False)
 
     # Memoized AxisSeries objects (invalidated on mutation)
     _series_cache: dict[tuple[Hashable, ...], Any] = field(
@@ -249,6 +264,14 @@ class PhaseResults:
         init=False,
         repr=False,
     )
+
+    def __post_init__(self) -> None:
+        # ArtifactStore, ExecutionStore, and MetricStore are computed fields,
+        # not dataclass fields. Initialized here from their resolved storage
+        # directories
+        self._artifacts: ArtifactStore = ArtifactStore(location=self._artifact_dir)
+        self._execution: ExecutionStore = ExecutionStore(location=self._execution_dir)
+        self._metrics: MetricStore = MetricStore(location=self._metric_dir)
 
     # ================================================
     # Runtime Modifiers
@@ -317,6 +340,137 @@ class PhaseResults:
         return (
             f"PhaseResults(label='{self.label}', executions={n_exec}, callbacks={n_cb})"
         )
+
+    # ================================================
+    # Source Data Access
+    # ================================================
+    def source_views(
+        self,
+        node: str | GraphNode,
+        *,
+        role: str = ROLE_DEFAULT,
+        epoch: int | None = None,
+        batch: int | None = None,
+    ) -> dict[str, FeatureSetView]:
+        """
+        Get the source FeatureSetViews that contributed data to the given node.
+
+        Description:
+            Traces the node back to its upstream FeatureSets, collects all
+            unique sample UUIDs from execution results, and returns a view
+            of each upstream FeatureSet filtered to only the samples used.
+
+            When no `epoch` or `batch` is specified, only a single epoch
+            is scanned since all epochs draw from the same sample pool.
+
+            Note that the returned views contain only unique sample UUIDs used
+            in generating these phase results. They are not a 1-to-1 mapping
+            of result sample to source sample. Use `tensors()` to get exact
+            execution data.
+
+        Args:
+            node (str | GraphNode):
+                The node to trace upstream from. Can be the node instance,
+                its ID, or its label.
+            role (str, optional):
+                Restrict to samples from this role only. Defaults to `ROLE_DEFAULT`.
+            epoch (int | None, optional):
+                Restrict to samples from this epoch only.
+            batch (int | None, optional):
+                Restrict to samples from this batch only.
+
+        Returns:
+            dict[str, FeatureSetView]:
+                A mapping of FeatureSet label to FeatureSetView containing
+                only the samples used during execution.
+
+        """
+        graph_node = self._resolve_node(node=node)
+
+        # Determine which context to concat
+        if epoch is None and batch is None:
+            # All epochs use same samples -> scan only 1st epoch
+            first_epoch = next(iter(self._execution)).epoch_idx
+            ctxs = self.execution_contexts().select(epoch=first_epoch)
+        elif epoch is not None and batch is None:
+            ctxs = self.execution_contexts().select(epoch=epoch)
+        elif epoch is None and batch is not None:
+            ctxs = self.execution_contexts().select(batch=batch)
+        else:
+            ctxs = self.execution_contexts().select(epoch=epoch, batch=batch)
+
+        # Collect unique sample ids from matching contexts
+        all_uuids: set[str] = set()
+        for ctx in ctxs:
+            batch_uuids = (
+                ctx.outputs[graph_node.node_id].get_data(role=role).sample_uuids
+            )
+            all_uuids.update(np.asarray(batch_uuids).flatten().tolist())
+
+        # Trace upstream FeatureSets and create filtered views
+        upstream_refs = find_upstream_featuresets(node=graph_node)
+        exp_ctx = ExperimentContext.get_active()
+
+        views: dict[str, FeatureSetView] = {}
+        uuid_list = list(all_uuids)
+        for ref in upstream_refs:
+            fs: FeatureSet = exp_ctx.get_node(
+                node_id=ref.node_id,
+                enforce_type="FeatureSet",
+            )
+            views[fs.label] = fs.take_sample_uuids(uuid_list)
+
+        return views
+
+    def source_view(
+        self,
+        node: str | GraphNode,
+        *,
+        role: str = "default",
+        epoch: int | None = None,
+        batch: int | None = None,
+    ) -> FeatureSetView:
+        """
+        Get the single source FeatureSetView for the given node.
+
+        Description:
+            Convenience method for the common case where a node has exactly
+            one upstream FeatureSet. Raises `ValueError` if multiple
+            upstream FeatureSets exist.
+
+            Note that the returned views contain only unique sample UUIDs used
+            in generating these phase results. They are not a 1-to-1 mapping
+            of result sample to source sample. Use `tensors()` to get exact
+            execution data.
+
+        Args:
+            node (str | GraphNode):
+                The node to trace upstream from.
+            role (str, optional):
+                Restrict to samples from this role only. Defaults to "default".
+            epoch (int | None, optional):
+                Restrict to samples from this epoch only.
+            batch (int | None, optional):
+                Restrict to samples from this batch only.
+
+        Returns:
+            FeatureSetView:
+                A view of the single upstream FeatureSet filtered to only
+                the samples used during execution.
+
+        Raises:
+            ValueError:
+                If the node has multiple upstream FeatureSets.
+
+        """
+        views = self.source_views(node=node, role=role, epoch=epoch, batch=batch)
+        if len(views) != 1:
+            msg = (
+                f"Node has {len(views)} upstream FeatureSets: "
+                f"{list(views.keys())}. Use source_views() instead."
+            )
+            raise ValueError(msg)
+        return next(iter(views.values()))
 
     # ================================================
     # Execution Data & Loss Querying
@@ -501,152 +655,53 @@ class PhaseResults:
         )
 
     # ================================================
-    # Source Data Access
+    # Artifact Querying
     # ================================================
-    def source_views(
-        self,
-        node: str | GraphNode,
-        *,
-        role: str = ROLE_DEFAULT,
-        epoch: int | None = None,
-        batch: int | None = None,
-    ) -> dict[str, FeatureSetView]:
+    def artifacts(self) -> ArtifactDataSeries:
         """
-        Get the source FeatureSetViews that contributed data to the given node.
-
-        Description:
-            Traces the node back to its upstream FeatureSets, collects all
-            unique sample UUIDs from execution results, and returns a view
-            of each upstream FeatureSet filtered to only the samples used.
-
-            When no `epoch` or `batch` is specified, only a single epoch
-            is scanned since all epochs draw from the same sample pool.
-
-            Note that the returned views contain only unique sample UUIDs used
-            in generating these phase results. They are not a 1-to-1 mapping
-            of result sample to source sample. Use `tensors()` to get exact
-            execution data.
-
-        Args:
-            node (str | GraphNode):
-                The node to trace upstream from. Can be the node instance,
-                its ID, or its label.
-            role (str, optional):
-                Restrict to samples from this role only. Defaults to `ROLE_DEFAULT`.
-            epoch (int | None, optional):
-                Restrict to samples from this epoch only.
-            batch (int | None, optional):
-                Restrict to samples from this batch only.
+        Get all artifact entries.
 
         Returns:
-            dict[str, FeatureSetView]:
-                A mapping of FeatureSet label to FeatureSetView containing
-                only the samples used during execution.
+            ArtifactDataSeries:
+                Entries keyed by ``(name, epoch, batch)``.
+                Epoch-level entries have ``batch=None``.
 
         """
-        graph_node = self._resolve_node(node=node)
+        return self._artifacts.entries()
 
-        # Determine which context to concat
-        if epoch is None and batch is None:
-            # All epochs use same samples -> scan only 1st epoch
-            first_epoch = self._execution[0].epoch_idx
-            ctxs = self.execution_contexts().select(epoch=first_epoch)
-        elif epoch is not None and batch is None:
-            ctxs = self.execution_contexts().select(epoch=epoch)
-        elif epoch is None and batch is not None:
-            ctxs = self.execution_contexts().select(batch=batch)
-        else:
-            ctxs = self.execution_contexts().select(epoch=epoch, batch=batch)
+    def artifact_names(self) -> list[str]:
+        """All unique artifact names recorded in these results."""
+        return self._artifacts.names
 
-        # Collect unique sample ids from matching contexts
-        all_uuids: set[str] = set()
-        for ctx in ctxs:
-            batch_uuids = (
-                ctx.outputs[graph_node.node_id].get_data(role=role).sample_uuids
-            )
-            all_uuids.update(np.asarray(batch_uuids).flatten().tolist())
-
-        # Trace upstream FeatureSets and create filtered views
-        upstream_refs = find_upstream_featuresets(node=graph_node)
-        exp_ctx = ExperimentContext.get_active()
-
-        views: dict[str, FeatureSetView] = {}
-        uuid_list = list(all_uuids)
-        for ref in upstream_refs:
-            fs: FeatureSet = exp_ctx.get_node(
-                node_id=ref.node_id,
-                enforce_type="FeatureSet",
-            )
-            views[fs.label] = fs.take_sample_uuids(uuid_list)
-
-        return views
-
-    def source_view(
-        self,
-        node: str | GraphNode,
-        *,
-        role: str = "default",
-        epoch: int | None = None,
-        batch: int | None = None,
-    ) -> FeatureSetView:
+    # ================================================
+    # Metric Querying
+    # ================================================
+    def metrics(self) -> MetricDataSeries:
         """
-        Get the single source FeatureSetView for the given node.
-
-        Description:
-            Convenience method for the common case where a node has exactly
-            one upstream FeatureSet. Raises `ValueError` if multiple
-            upstream FeatureSets exist.
-
-            Note that the returned views contain only unique sample UUIDs used
-            in generating these phase results. They are not a 1-to-1 mapping
-            of result sample to source sample. Use `tensors()` to get exact
-            execution data.
-
-        Args:
-            node (str | GraphNode):
-                The node to trace upstream from.
-            role (str, optional):
-                Restrict to samples from this role only. Defaults to "default".
-            epoch (int | None, optional):
-                Restrict to samples from this epoch only.
-            batch (int | None, optional):
-                Restrict to samples from this batch only.
+        Get all metric entries.
 
         Returns:
-            FeatureSetView:
-                A view of the single upstream FeatureSet filtered to only
-                the samples used during execution.
-
-        Raises:
-            ValueError:
-                If the node has multiple upstream FeatureSets.
+            MetricDataSeries:
+                Entries keyed by `(name, epoch, batch)`.
+                Epoch-level entries have `batch=None`.
 
         """
-        views = self.source_views(node=node, role=role, epoch=epoch, batch=batch)
-        if len(views) != 1:
-            msg = (
-                f"Node has {len(views)} upstream FeatureSets: "
-                f"{list(views.keys())}. Use source_views() instead."
-            )
-            raise ValueError(msg)
-        return next(iter(views.values()))
+        return self._metrics.entries()
+
+    def metric_names(self) -> list[str]:
+        """All unique metric names recorded in these results."""
+        return self.metrics().axis_values(axis="name")
 
     # ================================================
-    # Callback & Metric Querying
+    # Callback Querying
     # ================================================
-    def callbacks(self) -> CallbackDataSeries:
-        """
-        Returns a query interface for callback results.
-
-        Data is keyed by `(kind, label, epoch, batch, edge)`.
-        """
-        # Check cache
+    def _build_callbacks_series(self) -> CallbackDataSeries:
+        """Build and cache the full CallbackDataSeries from recorded results."""
         cache_key = ("callbacks",)
         cached = self._cache_get(cache_key)
         if cached is not None:
             return cached
 
-        # Key callbacks by label and kind
         keyed_data: dict[tuple, CallbackResult] = {}
         for cb_res in self._callbacks:
             key = (
@@ -669,18 +724,51 @@ class PhaseResults:
             ),
         )
 
-    def metrics(self) -> MetricDataSeries:
+    @overload
+    def callbacks(
+        self,
+        *,
+        kind: Literal["evaluation"],
+    ) -> AxisSeries[EvaluationCallbackResult]: ...
+
+    @overload
+    def callbacks(self, *, kind: Literal["metric"]) -> AxisSeries[MetricResult]: ...
+
+    @overload
+    def callbacks(self, *, kind: Literal["artifact"]) -> AxisSeries[ArtifactResult]: ...
+
+    @overload
+    def callbacks(self, *, kind: Literal["payload"]) -> AxisSeries[PayloadResult]: ...
+
+    @overload
+    def callbacks(self, *, kind: None = ...) -> CallbackDataSeries: ...
+
+    def callbacks(self, *, kind: str | None = None) -> CallbackDataSeries | AxisSeries:
         """
-        Get all metric entries.
+        Returns a query interface for callback results.
+
+        Data is keyed by ``(kind, label, epoch, batch, edge)``.
+
+        Args:
+            kind (str | None, optional):
+                Filter to a specific callback result kind. When provided, the
+                returned series is type-narrowed to the corresponding result
+                class so IDE autocompletion and type checkers work correctly.
+                Supported values: ``"evaluation"``, ``"metric"``,
+                ``"artifact"``, ``"payload"``. Defaults to ``None`` (all kinds).
 
         Returns:
-            MetricDataSeries:
-                Entries keyed by `(name, epoch, batch)`.
-                Epoch-level entries have `batch=None`.
+            CallbackDataSeries | AxisSeries:
+                Full series when ``kind=None``; kind-filtered series otherwise.
+
+        Example:
+            Typed access to evaluation callback results::
+
+                cb = train_results.callbacks(kind="evaluation").where(epoch=3).one()
+                pred = cb.stacked_tensors(node="MLP", domain="outputs")
 
         """
-        return self._metrics.entries()
-
-    def metric_names(self) -> list[str]:
-        """All unique metric names recorded in these results."""
-        return self.metrics().axis_values(axis="name")
+        series = self._build_callbacks_series()
+        if kind is not None:
+            return series.where(kind=kind)
+        return series

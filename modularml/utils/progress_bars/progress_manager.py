@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import time
 from typing import TYPE_CHECKING, ClassVar
 
 from rich.console import Console, Group
@@ -76,6 +77,11 @@ class ProgressManager:
             style_spinner.name: style_spinner,
         }
 
+        # Manual refresh control
+        self._refresh_interval = 0.2  # seconds
+        self._last_refresh_time = 0.0
+        self._dirty = False
+
     # ================================================
     # Scope Managemenet
     # ================================================
@@ -133,21 +139,36 @@ class ProgressManager:
             return
 
         self._live = Live(
-            self._render_group(),
             console=self._console,
-            refresh_per_second=10,
+            get_renderable=self._render_group,
+            auto_refresh=False,
             transient=not IN_NOTEBOOK,
+            redirect_stderr=False,
+            redirect_stdout=False,
         )
-        self._live.start()
+        self._live.start(refresh=False)
 
     def _refresh_layout(self):
         self._ensure_live()
-        if self._live is not None:
-            self._live.update(self._render_group(), refresh=True)
+        if self._live is None:
+            return
+
+        self._live.refresh()
+        self._last_refresh_time = time.monotonic()
+        self._dirty = False
+
+    def _request_refresh(self, *, force: bool = False):
+        self._dirty = True
+        now = time.monotonic()
+        if force or (now - self._last_refresh_time >= self._refresh_interval):
+            self._refresh_layout()
 
     def _shutdown(self):
         if self._live is None:
             return
+
+        if self._dirty:
+            self._refresh_layout()
 
         self._live.stop()
         self._live = None
@@ -190,23 +211,17 @@ class ProgressManager:
             self._next_indent_level += 1
         self._progress_indent[key] = self._style_indent[group]
 
-        self._progress[key] = Progress(
-            *style.columns,
-            auto_refresh=False,
-        )
-
-        self._ensure_live()
-
-        progress = self._progress[key]
+        progress = Progress(*style.columns, auto_refresh=False)
+        self._progress[key] = progress
         task._task_id = progress.add_task(
             task.description,
             total=task.total,
             **base_fields,
         )
         task._progress_key = key
-
         self._active_tasks.add(task)
-        self._refresh_layout()
+
+        self._request_refresh()
 
     def _mark_task_finished(self, task: ProgressTask):
         self._active_tasks.discard(task)
@@ -218,7 +233,7 @@ class ProgressManager:
             del self._progress[task._progress_key]
             self._progress_indent.pop(task._progress_key, None)
 
-        self._refresh_layout()
+        self._request_refresh(force=True)
 
         # If nothing is running anymore, shut down
         if not self._active_tasks and not IN_NOTEBOOK:

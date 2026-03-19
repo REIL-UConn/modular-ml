@@ -113,6 +113,17 @@ class Callback(ABC):
                 batch_idx=cb_res.batch_idx,
             )
 
+        # If this is an ArtifactResult, also log to the ArtifactStore
+        from modularml.callbacks.artifact_result import ArtifactResult
+
+        if isinstance(cb_res, ArtifactResult):
+            results._artifacts.log(
+                name=cb_res.artifact_name,
+                artifact=cb_res.artifact,
+                epoch_idx=cb_res.epoch_idx,
+                batch_idx=cb_res.batch_idx,
+            )
+
     # ================================================
     # Internal Lifecycle Hooks
     # ================================================

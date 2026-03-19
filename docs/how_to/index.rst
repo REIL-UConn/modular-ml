@@ -16,3 +16,5 @@ These provide a more detailed view of available API for specific classes.
    05_create_experiment
    06_create_scalers
    07_use_hardware_acceleration
+   08_use_callbacks
+   09_use_cross_validation

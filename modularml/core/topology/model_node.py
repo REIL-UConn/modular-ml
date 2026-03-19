@@ -241,13 +241,9 @@ class ModelNode(ComputeNode):
         """
         Move the PyTorch model and optimizer state to the accelerator device.
 
-        This is a no-op when ``accelerator`` is ``None``, the backend is not
-        PyTorch, or the model is already on the target device. TensorFlow
-        placement is handled by the caller via :meth:`Accelerator.tf_device_scope`.
-
-        When the model moves to a new device the optimizer's momentum/variance
-        buffers are also migrated so that the next ``optimizer.step()`` does not
-        raise a device-mismatch error.
+        This is a no-op when ``accelerator`` is ``None`` or the backend is not
+        PyTorch. TensorFlow placement is handled by the caller via
+        :meth:`Accelerator.tf_device_scope`.
 
         Args:
             accelerator (Accelerator | None):
@@ -267,16 +263,17 @@ class ModelNode(ComputeNode):
         )
         if not already_on_device:
             torch_module.to(target)
-            # Migrate optimizer state tensors to avoid device mismatch on .step()
-            if (
-                self._optimizer is not None
-                and self._optimizer.is_built
-                and self._optimizer.backend == Backend.TORCH
-            ):
-                for param_state in self._optimizer.instance.state.values():
-                    for k, v in param_state.items():
-                        if isinstance(v, torch.Tensor):
-                            param_state[k] = v.to(target)
+
+        # Migrate optimizer state tensors
+        if (
+            self._optimizer is not None
+            and self._optimizer.is_built
+            and self._optimizer.backend == Backend.TORCH
+        ):
+            for param_state in self._optimizer.instance.state.values():
+                for k, v in param_state.items():
+                    if isinstance(v, torch.Tensor) and str(v.device) != target:
+                        param_state[k] = v.to(target)
 
     def _build_optimizer(self, *, force: bool = False):
         """
@@ -718,6 +715,19 @@ class ModelNode(ComputeNode):
             self.model.train()
         elif self.backend == Backend.TENSORFLOW:
             self.model.trainable = True
+
+    def reset_weights(self) -> None:
+        """
+        Re-initialize model weights and reset training state.
+
+        Re-initializes all underlying model weights to their original
+        (randomly sampled) state, unfreezes the node, and rebuilds the
+        node-level optimizer (if one exists).
+        """
+        self._model.reset_weights()
+        self.unfreeze()
+        if self._optimizer is not None:
+            self._build_optimizer(force=True)
 
     def _get_input_batch(
         self,

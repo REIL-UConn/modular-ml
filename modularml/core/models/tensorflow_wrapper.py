@@ -393,3 +393,22 @@ class TensorflowModelWrapper(BaseModel):
                 )
                 raise ValueError(msg)
             var_map[name].assign(value)
+
+    def reset_weights(self) -> None:
+        """Re-initialize all Keras layer weights using their stored initializers."""
+        if self.model is None:
+            return
+        for layer in self.model.layers:
+            if (
+                hasattr(layer, "kernel_initializer")
+                and hasattr(layer, "kernel")
+                and layer.kernel is not None
+            ):
+                layer.kernel.assign(layer.kernel_initializer(layer.kernel.shape))
+            if (
+                hasattr(layer, "bias_initializer")
+                and hasattr(layer, "bias")
+                and layer.bias is not None
+                and getattr(layer, "use_bias", True)
+            ):
+                layer.bias.assign(layer.bias_initializer(layer.bias.shape))

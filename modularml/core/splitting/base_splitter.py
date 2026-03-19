@@ -165,6 +165,35 @@ class BaseSplitter(ABC):
         splitter_cls: BaseSplitter = splitter_registry.get(config["splitter_name"])
         return splitter_cls.from_config(config)
 
+    def to_yaml(self, path: str | Path) -> None:
+        """
+        Export this splitter to a human-readable YAML file.
+
+        Args:
+            path (str | Path): Destination file path. A ``.yaml`` extension
+                is added automatically if not already present.
+
+        """
+        from modularml.core.io.yaml import to_yaml
+
+        to_yaml(self, path)
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> BaseSplitter:
+        """
+        Reconstruct a splitter from a YAML file.
+
+        Args:
+            path (str | Path): Path to the YAML file.
+
+        Returns:
+            BaseSplitter: Reconstructed splitter instance.
+
+        """
+        from modularml.core.io.yaml import from_yaml
+
+        return from_yaml(path, kind="splitter")
+
     # ================================================
     # Serialization
     # ================================================

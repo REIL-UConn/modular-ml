@@ -7,11 +7,34 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from modularml.core.splitting.base_splitter import BaseSplitter
+from modularml.predicates import Lambda, Predicate, _extract_lambda_source
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
     from modularml.core.data.featureset_view import FeatureSetView
+
+
+# ================================================
+# Condition serialization helpers
+# ================================================
+def _serialize_condition(cond: Any) -> Any:
+    """Convert a single condition value to a JSON-serializable form."""
+    if isinstance(cond, Predicate):
+        return {"__predicate__": cond.to_dict()}
+    if callable(cond):
+        # Raw lambda or named function — extract source automatically
+        source = _extract_lambda_source(cond)
+        return {"__predicate__": Lambda(source).to_dict()}
+    # Literal value or list — already JSON-safe
+    return cond
+
+
+def _deserialize_condition(val: Any) -> Any:
+    """Restore a condition from its serialized form."""
+    if isinstance(val, dict) and "__predicate__" in val:
+        return Predicate.from_dict(val["__predicate__"])
+    return val
 
 
 class ConditionSplitter(BaseSplitter):
@@ -103,13 +126,24 @@ class ConditionSplitter(BaseSplitter):
         """
         Return configuration required to reconstruct this splitter.
 
+        Description:
+            Callable conditions (lambdas, :class:`Predicate` instances) are
+            converted to JSON-serializable dicts so that the containing
+            :class:`FeatureSet` can be saved without errors.
+
         Returns:
-            dict[str, Any]: Serializable splitter configuration (sources excluded).
+            dict[str, Any]: Serializable splitter configuration.
 
         """
+        serializable_conditions = {
+            subset_label: {
+                field: _serialize_condition(cond) for field, cond in sub_conds.items()
+            }
+            for subset_label, sub_conds in self.conditions.items()
+        }
         return {
             "splitter_name": "ConditionSplitter",
-            "conditions": self.conditions,
+            "conditions": serializable_conditions,
         }
 
     @classmethod
@@ -121,7 +155,14 @@ class ConditionSplitter(BaseSplitter):
             config (dict[str, Any]): Serialized splitter configuration.
 
         Returns:
-            BaseSplitter: Unbound splitter instance.
+            ConditionSplitter: Unbound splitter instance.
 
         """
-        return cls(conditions=config["conditions"])
+        raw_conditions: dict[str, Any] = config["conditions"]
+        conditions = {
+            subset_label: {
+                field: _deserialize_condition(val) for field, val in sub_conds.items()
+            }
+            for subset_label, sub_conds in raw_conditions.items()
+        }
+        return cls(**conditions)

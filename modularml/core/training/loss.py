@@ -286,7 +286,7 @@ class Loss:
         """
         if self._backend is None:
             raise LossError("Loss backend has not been resolved.")
-        return self._backend
+        return normalize_backend(self._backend)
 
     @property
     def is_built(self) -> bool:

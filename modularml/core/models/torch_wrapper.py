@@ -388,3 +388,14 @@ class TorchModelWrapper(BaseModel, TorchModuleBase):
 
         torch_state = {k: torch.as_tensor(v) for k, v in weights.items()}
         self.model.load_state_dict(torch_state, strict=True)
+
+    def reset_weights(self) -> None:
+        """Re-initialize all model weights using each layer's default initializer."""
+        if self.model is None:
+            return
+
+        def _reset(m: TorchModuleBase) -> None:
+            if hasattr(m, "reset_parameters") and callable(m.reset_parameters):
+                m.reset_parameters()
+
+        self.model.apply(_reset)

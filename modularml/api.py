@@ -2,19 +2,22 @@
 # Experiment & Phases
 # ================================================
 from modularml.core.experiment.experiment import Experiment
-from modularml.core.experiment.experiment_context import ExperimentContext
+from modularml.core.experiment.experiment_context import (
+    ExperimentContext,
+    RegistrationPolicy,
+)
 from modularml.core.experiment.phases.phase_group import PhaseGroup
 from modularml.core.experiment.results.group_results import PhaseGroupResults
 from modularml.core.experiment.phases.eval_phase import EvalPhase
 from modularml.core.experiment.results.eval_results import EvalResults
 from modularml.core.experiment.phases.train_phase import TrainPhase
+from modularml.core.experiment.results.results_config import ResultsConfig
 from modularml.core.experiment.results.train_results import TrainResults
 from modularml.core.experiment.phases.phase import InputBinding
 from modularml.core.experiment.phases.fit_phase import FitPhase
 from modularml.core.experiment.results.fit_results import FitResults
 from modularml.core.experiment.checkpointing import Checkpointing
 from modularml.core.experiment.phases.train_phase import ResultRecording
-
 
 # ================================================
 # Execution Strategies
@@ -119,7 +122,9 @@ __all__ = [
     "Optimizer",
     "PhaseGroup",
     "PhaseGroupResults",
+    "RegistrationPolicy",
     "ResultRecording",
+    "ResultsConfig",
     "Scaler",
     "SimilarityCondition",
     "TensorflowBaseModel",

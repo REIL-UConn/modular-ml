@@ -162,6 +162,17 @@ class BaseModel(Configurable, Stateful, ABC):
 
         """
 
+    @abstractmethod
+    def reset_weights(self) -> None:
+        """
+        Re-initialize all model weights to their original (random) state.
+
+        Resets the model to an untrained state, as if it had just been
+        constructed. For gradient-based backends this re-initializes
+        all parameters; for scikit-learn estimators it returns the
+        estimator to its unfitted state.
+        """
+
     def get_init_args(self) -> dict[str, Any]:
         """
         Return keyword arguments needed to reconstruct this model.

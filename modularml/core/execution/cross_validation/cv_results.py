@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from modularml.core.experiment.results.group_results import PhaseGroupResults
 from modularml.core.experiment.results.train_results import TrainResults
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from modularml.core.topology.graph_node import GraphNode
-    from modularml.core.training.loss_record import LossCollection
+    from modularml.core.training.loss_record import LossRecord
 
 T = TypeVar("T")
 
@@ -23,11 +23,9 @@ class CVResults(PhaseGroupResults):
     """
     Results container for cross-validation.
 
-    Description:
-        :class:`CVResults` extends :class:`PhaseGroupResults` to provide
-        cross-fold querying. Each top-level entry is a fold's
-        :class:`PhaseGroupResults` containing :class:`TrainResults`,
-        :class:`EvalResults`, etc.
+    Extends :class:`PhaseGroupResults` to provide cross-fold querying.
+    Each top-level entry is a fold's :class:`PhaseGroupResults` containing
+    :class:`TrainResults`, :class:`EvalResults`, etc.
 
     Structure:
         ```
@@ -48,20 +46,19 @@ class CVResults(PhaseGroupResults):
     Example:
         Accessing CVResults after a CrossValidation run:
 
-        >>> cv_results = cv.run()  # doctest: +SKIP
-        >>> # Cross-fold epoch losses (convenience method)
-        >>> losses = cv_results.epoch_losses(node="output")  # doctest: +SKIP
-        >>> losses.where(epoch=3)  # all folds at epoch 3 # doctest: +SKIP
-        >>> losses.collapse(  # doctest: +SKIP
-        ...     "fold", reducer="mean"
-        ... )  # mean across folds
+        ```python
+        cv_results = cv.run()
 
-        >>> # Generic collect
-        >>> cv_results.collect(  # doctest: +SKIP
-        ...     lambda fold: fold.get_eval_result("eval").aggregated_losses(
-        ...         node="output"
-        ...     )
-        ... )
+        # Cross-fold losses keyed by (fold, epoch, batch, label)
+        losses = cv_results.losses(node="output")
+        _ = losses.where(fold="fold_0", epoch=3)  # filter losses to fold_0, epoch 3
+        _ = losses.collapse("batch", reducer="mean")  # mean across batches
+
+        # Generic collect
+        cv_results.collect(
+            lambda fold: fold.get_eval_result("eval").aggregated_losses(node="output")
+        )
+        ```
 
     """
 
@@ -117,17 +114,15 @@ class CVResults(PhaseGroupResults):
         """
         Apply an extractor to each fold and merge into one :class:`AxisSeries`.
 
-        Description:
-            The extractor receives each fold's :class:`PhaseGroupResults`. The return
-            value determines how results are keyed:
+        The extractor receives each fold's :class:`PhaseGroupResults`. The return
+        value determines how results are keyed:
 
-            - If the extractor returns an :class:`AxisSeries`, its axes are
-              preserved and `fold` is prepended as the first axis.
-              For example, an :class:`AxisSeries` of :class:`LossCollection`
-              `(epoch,)` becomes keyed by `(fold, epoch)`.
+        - If the extractor returns an :class:`AxisSeries`, its axes are
+          preserved and ``fold`` is prepended as the first axis.
+          For example, a series keyed by ``(epoch,)`` becomes ``(fold, epoch)``.
 
-            - If the extractor returns a **scalar value**, the result is
-              an :class:`AxisSeries` keyed by `(fold,)` only.
+        - If the extractor returns a scalar value, the result is
+          an :class:`AxisSeries` keyed by ``(fold,)`` only.
 
         Args:
             extractor (Callable[[PhaseGroupResults], AxisSeries[T] | T]):
@@ -194,15 +189,14 @@ class CVResults(PhaseGroupResults):
 
         return train_labels[0]
 
-    def epoch_losses(
+    def losses(
         self,
         node: str | GraphNode,
         *,
         phase: str | None = None,
-        reducer: Literal["sum", "mean"] = "mean",
-    ) -> AxisSeries[LossCollection]:
+    ) -> AxisSeries[LossRecord]:
         """
-        Training losses per fold per epoch.
+        Training losses per fold, keyed by ``(fold, epoch, batch, label)``.
 
         Args:
             node (str | GraphNode):
@@ -210,57 +204,13 @@ class CVResults(PhaseGroupResults):
             phase (str | None, optional):
                 Training phase label. If None and only one :class:`TrainResults`
                 exists per fold, it is auto-detected. Defaults to None.
-            reducer (Literal["sum", "mean"], optional):
-                How to aggregate losses within each epoch.
-                Defaults to "mean".
 
         Returns:
-            AxisSeries[LossCollection]:
-                Losses keyed by `(fold, epoch)`.
+            AxisSeries[LossRecord]:
+                Losses keyed by ``(fold, epoch, batch, label)``.
 
         """
         phase_label = self._resolve_train_phase(phase)
         return self.collect(
-            lambda fold, _p=phase_label, _n=node, _r=reducer: (
-                fold.get_train_result(_p).epoch_losses(node=_n, reducer=_r)
-            ),
-        )
-
-    def validation_losses(
-        self,
-        node: str | GraphNode,
-        *,
-        phase: str | None = None,
-        label: str | None = None,
-        reducer: Literal["sum", "mean"] = "mean",
-    ) -> AxisSeries[LossCollection]:
-        """
-        Validation losses per fold per epoch.
-
-        Args:
-            node (str | GraphNode):
-                The node to retrieve validation losses for.
-            phase (str | None, optional):
-                Training phase label. Auto-detected if omitted.
-            label (str | None, optional):
-                Validation callback label. Required if multiple validation
-                callbacks exist.
-            reducer (Literal["sum", "mean"], optional):
-                How to aggregate losses across validation batches.
-                Defaults to "mean".
-
-        Returns:
-            AxisSeries[LossCollection]:
-                Validation losses keyed by `(fold, epoch)`.
-
-        """
-        phase_label = self._resolve_train_phase(phase)
-        return self.collect(
-            lambda fold, _p=phase_label, _n=node, _l=label, _r=reducer: (
-                fold.get_train_result(_p).validation_losses(
-                    node=_n,
-                    label=_l,
-                    reducer=_r,
-                )
-            ),
+            lambda fold, _p=phase_label, _n=node: fold.get_train_result(_p).losses(_n),
         )

@@ -502,6 +502,35 @@ class BaseSampler(Configurable, Stateful, ABC):
         sampler_cls: BaseSampler = sampler_registry[str(config["sampler_name"])]
         return sampler_cls.from_config(config)
 
+    def to_yaml(self, path: str | Path) -> None:
+        """
+        Export this sampler to a human-readable YAML file.
+
+        Args:
+            path (str | Path): Destination file path. A ``.yaml`` extension
+                is added automatically if not already present.
+
+        """
+        from modularml.core.io.yaml import to_yaml
+
+        to_yaml(self, path)
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> BaseSampler:
+        """
+        Reconstruct a sampler from a YAML file.
+
+        Args:
+            path (str | Path): Path to the YAML file.
+
+        Returns:
+            BaseSampler: Reconstructed sampler instance.
+
+        """
+        from modularml.core.io.yaml import from_yaml
+
+        return from_yaml(path, kind="sampler")
+
     # ================================================
     # Stateful
     # ================================================

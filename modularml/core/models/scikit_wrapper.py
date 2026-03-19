@@ -302,6 +302,16 @@ class ScikitModelWrapper(BaseModel):
             self.model = pickle.loads(weights["model_pickle"])
             self._is_fitted = weights.get("is_fitted", False)
 
+    def reset_weights(self) -> None:
+        """Return the estimator to its unfitted state using :func:`sklearn.base.clone`."""
+        try:
+            from sklearn.base import clone
+
+            self.model = clone(self.model)
+        except ImportError:
+            pass
+        self._is_fitted = False
+
     # ================================================
     # Configurable
     # ================================================

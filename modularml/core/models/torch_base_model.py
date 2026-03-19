@@ -64,3 +64,12 @@ class TorchBaseModel(BaseModel, TorchModuleBase, ABC):
             return
         torch_state = {k: torch.as_tensor(v) for k, v in weights.items()}
         self.load_state_dict(torch_state, strict=True)
+
+    def reset_weights(self) -> None:
+        """Re-initialize all model weights using each layer's default initializer."""
+
+        def _reset(m: TorchModuleBase) -> None:
+            if hasattr(m, "reset_parameters") and callable(m.reset_parameters):
+                m.reset_parameters()
+
+        self.apply(_reset)

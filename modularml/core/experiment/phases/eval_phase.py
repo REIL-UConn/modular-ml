@@ -8,7 +8,6 @@ import numpy as np
 
 from modularml.core.data.batch_view import BatchView
 from modularml.core.data.execution_context import ExecutionContext
-from modularml.core.data.featureset_view import FeatureSetView
 from modularml.core.data.schema_constants import ROLE_DEFAULT
 from modularml.core.experiment.callbacks.callback import Callback
 from modularml.core.experiment.experiment_context import ExperimentContext
@@ -24,6 +23,7 @@ if TYPE_CHECKING:
 
     from modularml.core.data.batch import Batch
     from modularml.core.data.featureset import FeatureSet
+    from modularml.core.data.featureset_view import FeatureSetView
     from modularml.core.experiment.results.eval_results import EvalResults
     from modularml.core.references.featureset_reference import FeatureSetReference
     from modularml.core.topology.graph_node import GraphNode
@@ -237,10 +237,10 @@ class EvalPhase(ExperimentPhase):
                 `ModelGraph.eval_step(ctx)`.
 
         """
-        # Validate input view
-        if not isinstance(self._inp_fsv, FeatureSetView):
-            msg = f"Failed to resolve input view for EvaluationPhase '{self.label}'."
-            raise TypeError(msg)
+        # Re-resolve the input view from the current active context so that
+        # context swaps (e.g. during cross-validation) are respected at
+        # execution time, not just at phase creation time
+        self._validate_single_featureset()
 
         # Determine max number of samples in a execution context
         n = len(self._inp_fsv)
