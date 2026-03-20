@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import pickle
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -48,7 +47,7 @@ class ExecutionStore:
     def _save_to_disk(self, ctx: ExecutionContext) -> Path:
         # input_views holds lazy BatchView references that don't survive pickle;
         # strip them from the copy before serializing
-        filename = f"ctx_e{ctx.epoch_idx}_b{ctx.batch_idx}.pkl"
+        filename = f"{len(self._items)}.pkl"
         filepath = Path(self._location) / filename  # type: ignore[arg-type]
         filepath.parent.mkdir(parents=True, exist_ok=True)
 
@@ -138,12 +137,11 @@ class ExecutionStore:
 
         """
         store = cls(location=location)
-        pattern = re.compile(r"ctx_e(\d+)_b(\d+)\.pkl$")
-        files = [
-            p for p in Path(location).glob("ctx_e*_b*.pkl") if pattern.search(p.name)
-        ]
-        files.sort(key=lambda p: tuple(int(x) for x in pattern.search(p.name).groups()))
-        store._items = files  # type: ignore[assignment]
+        files = sorted(
+            Path(location).glob("*.pkl"),
+            key=lambda p: int(p.stem),
+        )
+        store._items = files
         return store
 
     # ================================================
@@ -151,7 +149,6 @@ class ExecutionStore:
     # ================================================
     @staticmethod
     def _load(item: ExecutionContext | Path) -> ExecutionContext:
-        # Internal helper used by __iter__, snapshot(), and to_memory().
         if isinstance(item, Path):
             with item.open("rb") as f:
                 return pickle.load(f)

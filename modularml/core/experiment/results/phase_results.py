@@ -16,6 +16,7 @@ from modularml.core.experiment.results.artifact_store import (
     ArtifactDataSeries,
     ArtifactStore,
 )
+from modularml.core.experiment.results.callback_store import CallbackStore
 from modularml.core.experiment.results.execution_store import ExecutionStore
 from modularml.core.experiment.results.metric_store import MetricDataSeries, MetricStore
 from modularml.core.references.execution_reference import TensorLike
@@ -237,7 +238,8 @@ class PhaseResults:
         label (str): Phase label.
         _execution (ExecutionStore): Ordered execution contexts; stored in memory
             or as on-disk pickle files depending on ``_execution_dir``.
-        _callbacks (list[CallbackResult]): Recorded callback outputs.
+        _callback_store (CallbackStore): Recorded callback outputs; stored in memory
+            or as on-disk pickle files depending on ``_callback_dir``.
         _metrics (MetricStore): Store of scalar metrics logged during execution;
             stored in memory or on disk depending on ``_metric_dir``.
         _series_cache (dict[tuple, Any]): Cache of memoized AxisSeries queries.
@@ -246,8 +248,8 @@ class PhaseResults:
 
     label: str
 
-    # Results produced by callbacks; keyed by callback label
-    _callbacks: list[CallbackResult] = field(default_factory=list, repr=False)
+    # Directory for on-disk callback result storage; None = keep in memory
+    _callback_dir: Path | None = field(default=None, repr=False)
 
     # Directory for on-disk execution context storage; None = keep in memory
     _execution_dir: Path | None = field(default=None, repr=False)
@@ -266,10 +268,11 @@ class PhaseResults:
     )
 
     def __post_init__(self) -> None:
-        # ArtifactStore, ExecutionStore, and MetricStore are computed fields,
-        # not dataclass fields. Initialized here from their resolved storage
+        # ArtifactStore, CallbackStore, ExecutionStore, and MetricStore are computed
+        # fields, not dataclass fields. Initialized here from their resolved storage
         # directories
         self._artifacts: ArtifactStore = ArtifactStore(location=self._artifact_dir)
+        self._callback_store: CallbackStore = CallbackStore(location=self._callback_dir)
         self._execution: ExecutionStore = ExecutionStore(location=self._execution_dir)
         self._metrics: MetricStore = MetricStore(location=self._metric_dir)
 
@@ -304,7 +307,7 @@ class PhaseResults:
             cb_res (CallbackResult): Result emitted by a callback.
 
         """
-        self._callbacks.append(cb_res)
+        self._callback_store.append(cb_res)
         self._series_cache.clear()
 
     # ================================================
@@ -336,7 +339,7 @@ class PhaseResults:
     # ================================================
     def __repr__(self):
         n_exec = len(self._execution)
-        n_cb = len(self._callbacks)
+        n_cb = len(self._callback_store)
         return (
             f"PhaseResults(label='{self.label}', executions={n_exec}, callbacks={n_cb})"
         )
@@ -703,7 +706,7 @@ class PhaseResults:
             return cached
 
         keyed_data: dict[tuple, CallbackResult] = {}
-        for cb_res in self._callbacks:
+        for cb_res in self._callback_store:
             key = (
                 cb_res.kind,
                 cb_res.callback_label,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import re
+import pickle
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
@@ -40,10 +40,15 @@ class ArtifactEntry:
     def artifact(self) -> Any:
         """The artifact object. Transparently loads from disk if serialized as a Path."""
         if isinstance(self._artifact, Path):
-            import pickle
-
             with self._artifact.open("rb") as f:
-                return pickle.load(f)
+                payload = pickle.load(f)
+
+            # New format: dict payload containing the artifact under "artifact" key
+            if isinstance(payload, dict) and "artifact" in payload:
+                return payload["artifact"]
+
+            # Legacy format: file contained just the artifact object
+            return payload
         return self._artifact
 
     def __repr__(self) -> str:
@@ -85,6 +90,7 @@ class ArtifactStore:
     def __init__(self, location: Path | None = None) -> None:
         self._location = location
         self._entries: dict[str, list[ArtifactEntry]] = {}
+        self._count: int = 0
 
     # ================================================
     # Writing
@@ -109,17 +115,18 @@ class ArtifactStore:
                 The batch index. Defaults to None (epoch-level artifact).
 
         """
-        stored = artifact
         if self._location is not None:
-            stored = self._save_to_disk(
+            artifact_value = self._save_to_disk(
                 name=name,
                 artifact=artifact,
                 epoch_idx=epoch_idx,
                 batch_idx=batch_idx,
             )
+        else:
+            artifact_value = artifact
         entry = ArtifactEntry(
             name=name,
-            artifact=stored,
+            artifact=artifact_value,
             epoch_idx=epoch_idx,
             batch_idx=batch_idx,
         )
@@ -135,15 +142,20 @@ class ArtifactStore:
         epoch_idx: int,
         batch_idx: int | None,
     ) -> Path:
-        """Serialize ``artifact`` to disk and return the file path."""
+        """Serialize artifact and metadata to disk, returning the file path."""
         import pickle
 
-        batch_str = f"_b{batch_idx}" if batch_idx is not None else ""
-        filename = f"{name}_e{epoch_idx}{batch_str}.pkl"
-        filepath = Path(self._location) / filename  # type: ignore[arg-type]
+        filepath = Path(self._location) / f"{self._count}.pkl"  # type: ignore[arg-type]
         filepath.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "name": name,
+            "epoch_idx": epoch_idx,
+            "batch_idx": batch_idx,
+            "artifact": artifact,
+        }
         with filepath.open("wb") as f:
-            pickle.dump(artifact, f)
+            pickle.dump(payload, f)
+        self._count += 1
         return filepath
 
     # ================================================
@@ -202,9 +214,6 @@ class ArtifactStore:
         """
         Reconstruct a store index from existing pickle files in ``location``.
 
-        Globs for ``*.pkl`` files and parses ``{name}_e{epoch}`` or
-        ``{name}_e{epoch}_b{batch}`` from filenames.
-
         Args:
             location (Path): Directory containing serialized artifact files.
 
@@ -212,25 +221,24 @@ class ArtifactStore:
             ArtifactStore: Store with ``_entries`` populated as ``Path`` references.
 
         """
+        import pickle
+
         store = cls(location=location)
-        # Matches: {name}_e{epoch}.pkl  or  {name}_e{epoch}_b{batch}.pkl
-        pattern = re.compile(r"^(.+)_e(\d+)(?:_b(\d+))?\.pkl$")
-        for filepath in sorted(Path(location).glob("*.pkl")):
-            m = pattern.match(filepath.name)
-            if m is None:
-                continue
-            name = m.group(1)
-            epoch_idx = int(m.group(2))
-            batch_idx = int(m.group(3)) if m.group(3) is not None else None
+        pkl_files = sorted(Path(location).glob("*.pkl"), key=lambda p: int(p.stem))
+        for filepath in pkl_files:
+            with filepath.open("rb") as f:
+                payload = pickle.load(f)
+            name = payload["name"]
             entry = ArtifactEntry(
                 name=name,
-                artifact=filepath,
-                epoch_idx=epoch_idx,
-                batch_idx=batch_idx,
+                artifact=filepath,  # lazy-load
+                epoch_idx=payload["epoch_idx"],
+                batch_idx=payload["batch_idx"],
             )
             if name not in store._entries:
                 store._entries[name] = []
             store._entries[name].append(entry)
+        store._count = len(pkl_files)
         return store
 
     # ================================================

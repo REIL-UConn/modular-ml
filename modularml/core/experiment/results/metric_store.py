@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pickle
-import re
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -149,13 +148,10 @@ class MetricStore:
     result sets do not exhaust RAM.
     """
 
-    _FILENAME_PATTERN: re.Pattern = re.compile(
-        r"^(.+)_e(\d+)(?:_b(\d+))?\.pkl$",
-    )
-
     def __init__(self, location: Path | None = None) -> None:
         self._location: Path | None = location
         self._entries: dict[str, list[MetricEntry]] = defaultdict(list)
+        self._count: int = 0
 
     # ================================================
     # Writing
@@ -195,14 +191,11 @@ class MetricStore:
 
     def _save_to_disk(self, entry: MetricEntry) -> None:
         """Pickle a single :class:`MetricEntry` to ``_location``."""
-        if entry.batch_idx is not None:
-            filename = f"{entry.name}_e{entry.epoch_idx}_b{entry.batch_idx}.pkl"
-        else:
-            filename = f"{entry.name}_e{entry.epoch_idx}.pkl"
-        filepath = Path(self._location) / filename
+        filepath = Path(self._location) / f"{self._count}.pkl"
         filepath.parent.mkdir(parents=True, exist_ok=True)
         with filepath.open("wb") as f:
             pickle.dump(entry, f, protocol=pickle.HIGHEST_PROTOCOL)
+        self._count += 1
 
     # ================================================
     # Reading
@@ -253,9 +246,6 @@ class MetricStore:
         """
         Reconstruct a :class:`MetricStore` from pickle files in ``location``.
 
-        Files must follow the naming convention
-        ``{name}_e{epoch}[_b{batch}].pkl``.
-
         Args:
             location (Path): Directory containing ``*.pkl`` metric files.
 
@@ -265,14 +255,12 @@ class MetricStore:
         """
         location = Path(location)
         store = cls(location=location)
-        pkl_files = sorted(location.glob("*.pkl"))
+        pkl_files = sorted(location.glob("*.pkl"), key=lambda p: int(p.stem))
         for pkl_file in pkl_files:
-            m = cls._FILENAME_PATTERN.match(pkl_file.name)
-            if m is None:
-                continue
             with pkl_file.open("rb") as f:
                 entry: MetricEntry = pickle.load(f)
             store._entries[entry.name].append(entry)
+        store._count = len(pkl_files)
         return store
 
     # ================================================

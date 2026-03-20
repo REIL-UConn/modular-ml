@@ -569,6 +569,7 @@ class Experiment:
         phase: TrainPhase,
         *,
         _artifact_dir: Path | None = None,
+        _callback_dir: Path | None = None,
         _execution_dir: Path | None = None,
         _metric_dir: Path | None = None,
         show_sampler_progress: bool = True,
@@ -620,6 +621,7 @@ class Experiment:
         res = TrainResults(
             label=phase.label,
             _artifact_dir=_artifact_dir,
+            _callback_dir=_callback_dir,
             _execution_dir=_execution_dir,
             _metric_dir=_metric_dir,
         )
@@ -684,6 +686,7 @@ class Experiment:
         phase: EvalPhase,
         *,
         _artifact_dir: Path | None = None,
+        _callback_dir: Path | None = None,
         _execution_dir: Path | None = None,
         _metric_dir: Path | None = None,
         show_eval_progress: bool = False,
@@ -719,6 +722,7 @@ class Experiment:
         res = EvalResults(
             label=phase.label,
             _artifact_dir=_artifact_dir,
+            _callback_dir=_callback_dir,
             _execution_dir=_execution_dir,
             _metric_dir=_metric_dir,
         )
@@ -742,6 +746,7 @@ class Experiment:
         phase: FitPhase,
         *,
         _artifact_dir: Path | None = None,
+        _callback_dir: Path | None = None,
         _execution_dir: Path | None = None,
         _metric_dir: Path | None = None,
     ) -> FitResults:
@@ -765,6 +770,7 @@ class Experiment:
         res = FitResults(
             label=phase.label,
             _artifact_dir=_artifact_dir,
+            _callback_dir=_callback_dir,
             _execution_dir=_execution_dir,
             _metric_dir=_metric_dir,
         )
@@ -784,8 +790,7 @@ class Experiment:
         self,
         phase: TrainPhase | EvalPhase | FitPhase,
         *,
-        _path_suffix: Path | None = None,
-        _run_idx: int | None = None,
+        phase_dir: Path | None = None,
         **kwargs,
     ) -> tuple[PhaseResults, PhaseExecutionMeta]:
         """
@@ -808,9 +813,9 @@ class Experiment:
             if exp_dir is None and self._exp_checkpointing is not None:
                 exp_dir = self._exp_checkpointing.directory
             if exp_dir is not None:
-                phase_dir = exp_dir / phase.label
-                phase_dir.mkdir(parents=True, exist_ok=True)
-                phase.checkpointing._directory = phase_dir
+                ckpt_dir = exp_dir / phase.label
+                ckpt_dir.mkdir(parents=True, exist_ok=True)
+                phase.checkpointing._directory = ckpt_dir
 
         # Skip callbacks and checkpointing when inside a callback
         run_hooks = not self._in_callback
@@ -837,23 +842,8 @@ class Experiment:
             self._save_experiment_checkpoint(label=phase.label)
 
         # ------------------------------------------------
-        # Compute phase-specific storage directories
+        # Compute phase-specific storage directories from the caller-supplied phase_dir
         # ------------------------------------------------
-        if _path_suffix is not None:
-            # Called from within a group; suffix already contains the run prefix
-            phase_dir = self._results_config.phase_dir(_path_suffix / phase.label)
-        elif _run_idx is not None:
-            # Top-level call from run_phase; prefix with run index for stable ordering
-            phase_dir = self._results_config.phase_dir(f"{_run_idx}_{phase.label}")
-        elif (
-            self._active_phase_dir is not None
-            and self._results_config.results_dir is not None
-        ):
-            # Called from preview_phase during callback execution → nest under callbacks/
-            phase_dir = self._active_phase_dir / "callbacks" / phase.label
-        else:
-            phase_dir = None  # pure preview with no disk storage
-
         cfg = self._results_config
         phase_execution_dir = (
             phase_dir / "execution_data"
@@ -868,6 +858,11 @@ class Experiment:
         phase_artifact_dir = (
             phase_dir / "artifacts"
             if phase_dir is not None and cfg.save_artifacts
+            else None
+        )
+        phase_callback_dir = (
+            phase_dir / "callbacks"
+            if phase_dir is not None and cfg.save_execution
             else None
         )
 
@@ -892,6 +887,7 @@ class Experiment:
                 phase_res: TrainResults = self._execute_training(
                     phase,
                     _artifact_dir=phase_artifact_dir,
+                    _callback_dir=phase_callback_dir,
                     _execution_dir=phase_execution_dir,
                     _metric_dir=phase_metric_dir,
                     **{k: v for k, v in kwargs.items() if k in train_keys},
@@ -901,6 +897,7 @@ class Experiment:
                 phase_res: EvalResults = self._execute_evaluation(
                     phase,
                     _artifact_dir=phase_artifact_dir,
+                    _callback_dir=phase_callback_dir,
                     _execution_dir=phase_execution_dir,
                     _metric_dir=phase_metric_dir,
                     **{k: v for k, v in kwargs.items() if k in eval_keys},
@@ -909,6 +906,7 @@ class Experiment:
                 phase_res: FitResults = self._execute_fit(
                     phase,
                     _artifact_dir=phase_artifact_dir,
+                    _callback_dir=phase_callback_dir,
                     _execution_dir=phase_execution_dir,
                     _metric_dir=phase_metric_dir,
                 )
@@ -957,8 +955,7 @@ class Experiment:
         self,
         group: PhaseGroup,
         *,
-        _path_suffix: Path | None = None,
-        _run_idx: int | None = None,
+        group_dir: Path | None = None,
         **kwargs,
     ) -> tuple[PhaseGroupResults, PhaseGroupExecutionMeta]:
         """
@@ -1001,15 +998,6 @@ class Experiment:
         # - construct result container
         # - run each phase in order
         # ------------------------------------------------
-        if _path_suffix is not None:
-            # Nested group; suffix already contains the run prefix
-            group_suffix = _path_suffix / group.label
-        elif _run_idx is not None:
-            # Top-level call from run_group; prefix with run index for stable ordering
-            group_suffix = Path(f"{_run_idx}_{group.label}")
-        else:
-            group_suffix = Path(group.label)
-
         group_results = PhaseGroupResults(label=group.label)
         group_meta = PhaseGroupExecutionMeta(
             label=group.label,
@@ -1019,9 +1007,12 @@ class Experiment:
         for element in group.all:
             if isinstance(element, ExperimentPhase):
                 # Run phase with meta tracking
+                element_dir = (
+                    group_dir / element.label if group_dir is not None else None
+                )
                 phase_res, phase_meta = self._execute_phase_with_meta(
                     phase=element,
-                    _path_suffix=group_suffix,
+                    phase_dir=element_dir,
                     **kwargs,
                 )
 
@@ -1032,9 +1023,10 @@ class Experiment:
 
             elif isinstance(element, PhaseGroup):
                 # Run group with meta tracking
+                sub_dir = group_dir / element.label if group_dir is not None else None
                 sub_res, sub_meta = self._execute_group_with_meta(
                     group=element,
-                    _path_suffix=group_suffix,
+                    group_dir=sub_dir,
                     **kwargs,
                 )
 
@@ -1137,9 +1129,12 @@ class Experiment:
 
         # Run phase and record phase-level meta data
         try:
+            run_dir = self._results_config.phase_dir(
+                f"{len(self._history)}_{phase.label}",
+            )
             res, meta = self._execute_phase_with_meta(
                 phase=phase,
-                _run_idx=len(self._history),
+                phase_dir=run_dir,
                 **kwargs,
             )
         except Exception:
@@ -1196,9 +1191,12 @@ class Experiment:
 
         # Run group and record phase-level meta data
         try:
+            run_dir = self._results_config.phase_dir(
+                f"{len(self._history)}_{group.label}",
+            )
             res, meta = self._execute_group_with_meta(
                 group=group,
-                _run_idx=len(self._history),
+                group_dir=run_dir,
                 **kwargs,
             )
         except Exception:
@@ -1344,10 +1342,11 @@ class Experiment:
         needs_restore = _phase_mutates_state(phase)
         state = self.get_state() if needs_restore else None
 
-        # Execute phase with checkpointing disabled
+        # Execute phase with checkpointing disabled (no disk storage for previews)
         with self.disable_checkpointing():
             res, _ = self._execute_phase_with_meta(
                 phase=phase,
+                phase_dir=None,
                 **kwargs,
             )
 
@@ -1385,10 +1384,11 @@ class Experiment:
         needs_restore = _phase_mutates_state(group)
         state = self.get_state() if needs_restore else None
 
-        # Execute group with checkpointing disabled
+        # Execute group with checkpointing disabled (no disk storage for previews)
         with self.disable_checkpointing():
             res, _ = self._execute_group_with_meta(
                 group=group,
+                group_dir=None,
                 **kwargs,
             )
 

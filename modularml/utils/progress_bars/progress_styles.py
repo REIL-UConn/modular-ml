@@ -39,6 +39,8 @@ class ProgressStyle:
         name (str): Unique style identifier.
         columns (list[ProgressColumn]): Rich column layout for the progress bar.
         default_fields (dict[str, object]): Optional default task fields.
+        needs_auto_refresh (bool): Whether tasks using this style require a
+            background refresh loop (e.g. spinner tasks that never call tick).
 
     """
 
@@ -46,6 +48,7 @@ class ProgressStyle:
     columns: list[ProgressColumn]
     indent_group: int = 0
     default_fields: dict[str, object] = None
+    needs_auto_refresh: bool = False
 
 
 style_sampling = ProgressStyle(
@@ -132,6 +135,7 @@ style_cv = ProgressStyle(
 style_spinner = ProgressStyle(
     name="spinner",
     indent_group=1,
+    needs_auto_refresh=True,
     columns=(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),

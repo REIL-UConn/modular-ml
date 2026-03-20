@@ -19,16 +19,17 @@ class ResultsConfig:
 
     On disk, each phase produces the following layout::
 
-        results_dir/
+        results_dir/                         # must be empty or non-existent
           {run_idx}_{phase_label}/
             execution_data/   # ExecutionContext pickle files (if save_execution)
+              0.pkl, 1.pkl, ...
             metrics/          # MetricEntry pickle files     (if save_metrics)
+              0.pkl, 1.pkl, ...
             artifacts/        # Artifact pickle files        (if save_artifacts)
-            callbacks/
-              {callback_label}/   # sub-phase results from callbacks like Evaluation
-                execution_data/
-                metrics/
-                artifacts/
+              0.pkl, 1.pkl, ...
+            callbacks/        # CallbackResult pickle files  (if save_execution)
+              {callback_label}/
+                0.pkl, 1.pkl, ...
 
     Attributes:
         results_dir (Path | None):
@@ -81,6 +82,16 @@ class ResultsConfig:
     save_execution: bool = True
     save_metrics: bool = False
     save_artifacts: bool = True
+
+    def __post_init__(self) -> None:
+        if self.results_dir is not None:
+            p = Path(self.results_dir)
+            if p.exists() and any(p.iterdir()):
+                msg = (
+                    f"`results_dir` must be empty or non-existent at the start of an "
+                    f"experiment, but {p!r} already contains files."
+                )
+                raise ValueError(msg)
 
     def phase_dir(self, phase_suffix: str | Path) -> Path | None:
         """

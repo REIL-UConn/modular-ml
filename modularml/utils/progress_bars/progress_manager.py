@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import threading
 import time
 from typing import TYPE_CHECKING, ClassVar
 
@@ -78,9 +79,14 @@ class ProgressManager:
         }
 
         # Manual refresh control
-        self._refresh_interval = 0.2  # seconds
+        self._refresh_interval = 0.1  # seconds
         self._last_refresh_time = 0.0
         self._dirty = False
+
+        # Background refresh thread for styles that need continuous animation
+        self._auto_refresh_count: int = 0
+        self._auto_refresh_stop = threading.Event()
+        self._auto_refresh_thread: threading.Thread | None = None
 
     # ================================================
     # Scope Managemenet
@@ -116,6 +122,29 @@ class ProgressManager:
             msg = f"Style name '{style.name}' already registered."
             raise ValueError(msg)
         self._styles[style.name] = style
+
+    # ================================================
+    # Background Auto-Refresh (for spinner-style tasks)
+    # ================================================
+    def _start_auto_refresh_thread(self):
+        if (
+            self._auto_refresh_thread is not None
+            and self._auto_refresh_thread.is_alive()
+        ):
+            return
+        self._auto_refresh_stop.clear()
+        self._auto_refresh_thread = threading.Thread(
+            target=self._auto_refresh_loop,
+            daemon=True,
+        )
+        self._auto_refresh_thread.start()
+
+    def _auto_refresh_loop(self):
+        while not self._auto_refresh_stop.is_set() and self._auto_refresh_count > 0:
+            self._auto_refresh_stop.wait(timeout=self._refresh_interval)
+            if self._auto_refresh_stop.is_set() or self._auto_refresh_count <= 0:
+                break
+            self._request_refresh(force=True)
 
     # ================================================
     # Rich.live Control
@@ -164,6 +193,9 @@ class ProgressManager:
             self._refresh_layout()
 
     def _shutdown(self):
+        self._auto_refresh_stop.set()
+        self._auto_refresh_count = 0
+
         if self._live is None:
             return
 
@@ -181,6 +213,10 @@ class ProgressManager:
     # Task Registration
     # ================================================
     def _reset_for_new_cell(self):
+        # Stop background refresh thread
+        self._auto_refresh_stop.set()
+        self._auto_refresh_count = 0
+
         # Stop any existing Live display
         if self._live is not None:
             with contextlib.suppress(Exception):
@@ -221,10 +257,18 @@ class ProgressManager:
         task._progress_key = key
         self._active_tasks.add(task)
 
-        self._request_refresh()
+        if style.needs_auto_refresh:
+            self._auto_refresh_count += 1
+            self._start_auto_refresh_thread()
+
+        self._request_refresh(force=True)
 
     def _mark_task_finished(self, task: ProgressTask):
         self._active_tasks.discard(task)
+
+        style = self._styles[task.style_name]
+        if style.needs_auto_refresh and self._auto_refresh_count > 0:
+            self._auto_refresh_count -= 1
 
         progress = self._progress[task._progress_key]
 
