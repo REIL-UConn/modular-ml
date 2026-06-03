@@ -10,7 +10,7 @@ authors:
   - name: Ben Nowacki
     orcid: 0009-0000-6723-3085
     affiliation: "1"
-  - name: Tingkai Li            # TODO: add orcID
+  - name: Tingkai Li
     orcid: 0000-0003-1934-1000
     affiliation: "1"
   - name: Sina Navidi           # TODO: add orcID
