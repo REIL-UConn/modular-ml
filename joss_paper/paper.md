@@ -21,11 +21,12 @@ authors:
     affiliation: "1"
   - name: Fei Miao              # TODO: add orcID
     affiliation: "1"
-  - name: Chao Hu               # TODO: add orcID
+  - name: Chao Hu
+    orcid: 0000-0001-9228-7675
     affiliation: "1"
     corresponding: true
 affiliations:
- - name: University of Connecticut, United States
+ - name: School of Mechanical, Aerospace, and Manufacturing Engineering, University of Connecticut, Storrs, CT 06269, USA
    index: 1
 date: 2 June 2026
 bibliography: paper.bib
@@ -81,7 +82,7 @@ This separation enables rapid experimentation with data pipelines, model archite
 
 A `modularml.FeatureSet` organizes data into three intent-driven domains---features, targets, and tags---reflecting the core design philosophy of the data abstraction.
 Features represent model inputs (what the model learns from), targets represent model outputs (what the model is trained to predict or reproduce), and tags store optional metadata associated with each sample.
-Each sample, defined by its feature, target, and tag attributes, is assigned a globally unique identifier to ensure explicit traceability throughout the entire lifecycle of an experiment.
+Each sample, defined by its feature, target, and tag attributes, is assigned a globally unique identifier to ensure explicit traceability throughout the entire life cycle of an experiment.
 This identifier propagates through splitting, sampling, batching, model execution, and evaluation, enabling transparent lineage tracking and reproducible analysis.
 
 Data within a `modularml.FeatureSet` is stored in backend-agnostic containers supporting `NumPy` [@numpy] arrays, `Pandas` [@pandas] dataframes, `PyTorch` tensors, and `TensorFlow` [@tensorflow] tensors.
@@ -91,12 +92,12 @@ This design makes split definitions explicit and inspectable, reduces memory ove
 ## Sampling
 All subclasses of `modularml.Sampler` consume a `modularml.FeatureSet`, or subset views of one, and emit aligned batches, supporting stratification, grouping, and multi-role sampling needed for contrastive or paired training schemes.
 By separating sampling logic from model execution, `ModularML` makes data selection strategies explicit and reproducible rather than embedding them within custom training loops.
-This design allows researchers to experiment with different batching and sampling approaches without modifying model or training code.
+This design allows researchers to experiment with different batching and sampling approaches without modifying the model or training code.
 
 ## ModelGraph
 The full experiment model is represented as a DAG of interconnected `modularml.ModelNode`s.
 Each node wraps a user-defined or built-in ML model and exposes standardized interfaces for construction, optimization, and freezing.
-Specialized node types, such as `modularml.MergeNode`, extend this functionality by supporting multiple inputs and configurable merge operations including concatenation, aggregation, and padding.
+Specialized node types, such as `modularml.MergeNode`, extend this functionality by supporting multiple inputs and configurable merge operations, including concatenation, aggregation, and padding.
 Together, these nodes form a `modularml.ModelGraph`, which manages dependency resolution and executes forward and backward passes in topological order.
 This graph-based design separates model topology from training logic, enabling rapid experimentation with branching architectures, multi-stage pipelines, and hybrid systems that combine learned and classical ML components.
 
@@ -109,7 +110,7 @@ Each phase defines a reproducible unit of execution, including data sampling, lo
 Built-in phase types include iterative training (`modularml.TrainPhase`), single-pass fitting workflows (`modularml.FitPhase`), and inference-only evaluation (`modularml.EvalPhase`), providing a consistent interface for constructing complex multi-phase ML workflows.
 
 ## Experiment orchestration
-The `modularml.Experiment` class serves as the top-level container for a ML workflow, binding together one or more `modularml.FeatureSet`s, a `modularml.ModelGraph`, and a sequence of execution phases.
+The `modularml.Experiment` class serves as the top-level container for an ML workflow, binding together one or more `modularml.FeatureSet`s, a `modularml.ModelGraph`, and a sequence of execution phases.
 By explicitly separating experiment definition from execution, `ModularML` supports workflows such as pretraining, fine-tuning, and evaluation while retaining all information required to reproduce each stage.
 The `modularml.Experiment` also provides serialization, checkpointing, and execution tracking, allowing complete experiments to be exported, shared, and reloaded as self-contained artifacts.
 
