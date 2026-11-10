@@ -1251,7 +1251,7 @@ class ModelNode(ComputeNode):
         if self.is_frozen:
             msg = f"Cannot fit a frozen node '{self.label}'."
             raise RuntimeError(msg)
-        if not hasattr(self, "fit"):
+        if not hasattr(self._model, "fit"):
             msg = f"Node `{self.label}` does not implement a `.fit()` method."
             raise AttributeError(msg)
 
