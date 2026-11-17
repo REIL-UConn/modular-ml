@@ -5,6 +5,7 @@ import pytest
 
 from modularml.core.data.batch import Batch
 from modularml.core.data.batch_view import BatchView
+from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.featureset_view import FeatureSetView
 from modularml.utils.data.data_format import DataFormat
 from tests.conftest import generate_dummy_featureset
@@ -186,6 +187,73 @@ def test_materialize_batch_numpy(single_role_bv):
     assert isinstance(batch, Batch)
     assert batch.batch_size == 4
     assert batch.features is not None
+
+
+@pytest.mark.unit
+def test_materialize_batch_includes_tags(single_role_bv, simple_featureset):
+    """Test materialize_batch carries tags as a (batch, n_tags) numpy array."""
+    batch = single_role_bv.materialize_batch(fmt=DataFormat.NUMPY)
+
+    assert isinstance(batch.tags, np.ndarray)
+    assert batch.tags.shape == (4, 1)
+
+    expected = simple_featureset.get_tags(fmt=DataFormat.NUMPY)[:4]
+    np.testing.assert_array_equal(batch.tags, expected)
+
+
+@pytest.mark.unit
+def test_materialize_batch_tags_numpy_for_torch_fmt(single_role_bv):
+    """Test tags stay numpy even when features are cast to another format."""
+    pytest.importorskip("torch")
+
+    batch = single_role_bv.materialize_batch(fmt=DataFormat.TORCH)
+    assert isinstance(batch.tags, np.ndarray)
+
+
+@pytest.mark.unit
+def test_materialize_batch_multiple_tags_sorted_columns():
+    """Test multiple tags are stacked as columns in sorted key order."""
+    fs = generate_dummy_featureset(
+        n_samples=10,
+        feature_shape_map={"X": (3,)},
+        target_shape_map={"Y": (1,)},
+        tag_type_map={"b_tag": "str", "a_tag": "float"},
+        label="MultiTagFS",
+    )
+    bv = BatchView(source=fs, role_indices={"default": np.arange(5)})
+    batch = bv.materialize_batch(fmt=DataFormat.NUMPY)
+
+    assert batch.tags.shape == (5, 2)
+    # a_tag (float, cast to str) comes first, then b_tag
+    a_vals = fs.get_tags(fmt=DataFormat.DICT_NUMPY)["a_tag"][:5]
+    b_vals = fs.get_tags(fmt=DataFormat.DICT_NUMPY)["b_tag"][:5]
+    np.testing.assert_array_equal(batch.tags[:, 0].astype(float), a_vals)
+    np.testing.assert_array_equal(batch.tags[:, 1], b_vals)
+
+
+@pytest.mark.unit
+def test_materialize_batch_tags_follow_role_indices(simple_featureset):
+    """Test tags are selected by the same (possibly shuffled) indices as features."""
+    idxs = np.array([5, 2, 9])
+    bv = BatchView(source=simple_featureset, role_indices={"default": idxs})
+    batch = bv.materialize_batch(fmt=DataFormat.NUMPY)
+
+    expected = simple_featureset.get_tags(fmt=DataFormat.NUMPY)[idxs]
+    np.testing.assert_array_equal(batch.tags, expected)
+
+
+@pytest.mark.unit
+def test_materialize_batch_without_tags_returns_none():
+    """Test batches from a FeatureSet with no tags have no tag data."""
+    fs = FeatureSet.from_dict(
+        label="NoTagFS",
+        data={"X": np.random.rand(10, 3), "Y": np.random.rand(10, 1)},  # noqa: NPY002
+        feature_keys=["X"],
+        target_keys=["Y"],
+    )
+    bv = BatchView(source=fs, role_indices={"default": np.arange(4)})
+    batch = bv.materialize_batch(fmt=DataFormat.NUMPY)
+    assert batch.tags is None
 
 
 @pytest.mark.unit

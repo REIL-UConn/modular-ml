@@ -657,12 +657,24 @@ class SplitMixin:
 
         # Get rel indices of subsamples
         take_sids = np.asarray(list(sample_uuids), dtype=str)
-        matches = all_sids[:, None] == take_sids
-        if not np.all(matches.any(axis=0)):
-            missing = take_sids[~matches.any(axis=0)]
+        pos = {sid: i for i, sid in enumerate(all_sids)}
+
+        missing_mask = np.fromiter(
+            (sid not in pos for sid in take_sids),
+            dtype=bool,
+            count=take_sids.size,
+        )
+        if missing_mask.any():
+            missing = take_sids[missing_mask]
             msg = f"Sample UUIDs not found in collection: {missing.tolist()}."
             raise ValueError(msg)
-        rel_idxs = np.where(matches)[0]
+        # Map sample UUIDs to relative indices
+        rel_idxs = np.fromiter(
+            (pos[sid] for sid in take_sids),
+            dtype=int,
+            count=take_sids.size,
+        )
+        # Return in requested order
         return self.take(rel_indices=rel_idxs, label=label)
 
     # ================================================
