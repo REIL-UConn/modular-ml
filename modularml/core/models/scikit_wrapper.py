@@ -168,6 +168,13 @@ class ScikitModelWrapper(BaseModel):
     # ================================================
     # Forward Pass
     # ================================================
+
+    @staticmethod
+    def _as_2d(x):
+        x = np.asarray(x)
+        # sklearn expects 2D arrays for features
+        return x.reshape(x.shape[0], -1) if x.ndim > 2 else x
+
     def _resolve_output_method(self) -> str:
         """Resolve which prediction method to use."""
         if self._output_method != "auto":
@@ -201,7 +208,7 @@ class ScikitModelWrapper(BaseModel):
 
         method_name = self._resolve_output_method()
         method = getattr(self.model, method_name)
-        out = method(x)
+        out = method(self._as_2d(x))
 
         # Ensure 2D output: sklearn .predict() returns 1D for single-output models
         if isinstance(out, np.ndarray) and out.ndim == 1:
@@ -233,7 +240,7 @@ class ScikitModelWrapper(BaseModel):
                 Training targets. Shape depends on the estimator.
 
         """
-        self.model.fit(x, y)
+        self.model.fit(self._as_2d(x), y)
         self._is_fitted = True
 
         # Infer shapes after fitting
@@ -264,7 +271,7 @@ class ScikitModelWrapper(BaseModel):
 
         # Merge stored kwargs with call-time kwargs (call-time takes priority)
         merged_kwargs = {**self._partial_fit_kwargs, **kwargs}
-        self.model.partial_fit(x, y, **merged_kwargs)
+        self.model.partial_fit(self._as_2d(x), y, **merged_kwargs)
         self._is_fitted = True
 
         # Infer shapes after first partial_fit
