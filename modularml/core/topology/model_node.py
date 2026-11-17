@@ -1185,7 +1185,7 @@ class ModelNode(ComputeNode):
 
         """
         # If stage is not frozen, raise error
-        if self.is_frozen:
+        if not self.is_frozen:
             msg = "Cannot evaluate an unfrozen node. Either freeze or use `train_step`."
             raise RuntimeError(msg)
 
