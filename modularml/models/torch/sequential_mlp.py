@@ -176,7 +176,7 @@ class SequentialMLP(TorchBaseModel):
                 and (not force)
             ):
                 msg = (
-                    f"Build called with `output_shape={output_shape}` but output shape is already defined"
+                    f"Build called with `output_shape={output_shape}` but output shape"
                     f"is already defined with value `{self._output_shape}`. To override "
                     "the existing shape, set `force=True`."
                 )
