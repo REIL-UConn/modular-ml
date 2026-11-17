@@ -1442,7 +1442,11 @@ class ModelGraph(Configurable, Stateful, Summarizable):
             out_shape: tuple[int, ...] | None = None
             if node_id in self.tail_nodes and is_single_input:
                 declared = getattr(node, "output_shape", None)
-                out_shape = declared if declared is not None else next(iter(in_target_shapes.values()))
+                out_shape = (
+                    declared
+                    if declared is not None
+                    else next(iter(in_target_shapes.values()))
+                )
 
             # ------------------------------------------------
             # Build the node

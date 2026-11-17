@@ -658,7 +658,7 @@ class SplitMixin:
         # Get rel indices of subsamples
         take_sids = np.asarray(list(sample_uuids), dtype=str)
         pos = {sid: i for i, sid in enumerate(all_sids)}
-        
+
         missing_mask = np.fromiter(
             (sid not in pos for sid in take_sids),
             dtype=bool,
