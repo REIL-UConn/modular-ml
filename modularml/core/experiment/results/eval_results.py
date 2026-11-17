@@ -118,7 +118,11 @@ class EvalResults(PhaseResults):
                 The domain of data to return:
                 - outputs: the tensors produced by the node forward pass
                 - targets: the expected output tensors (only for tail nodes)
-                - tags: any tracked tags during the node's forward pass
+                - tags: the tag values of each sample, as a NumPy array of
+                  shape `(n_samples, n_tags)`. Columns are ordered
+                  alphabetically by tag column name. If the tags have mixed
+                  dtypes (e.g., strings and numbers), values are cast to a
+                  common dtype (typically strings).
                 - sample_uuids: the sample identifiers
             role (str, optional):
                 If multi-role data, specifies which role to return.

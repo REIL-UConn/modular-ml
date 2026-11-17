@@ -337,11 +337,25 @@ class BatchView(Summarizable):
             )
             uuids = fsv.get_sample_uuids()
 
+            # Tags are always numpy (never cast to `fmt`), shape (n_samples, n_tags)
+            # Columns are sorted alphabetically by tag column name
+            tags = (
+                fsv.get_tags(
+                    fmt=DataFormat.NUMPY,
+                    rep=None,
+                    include_domain_prefix=True,
+                    include_rep_suffix=True,
+                )
+                if selected[DOMAIN_TAGS]
+                else None
+            )
+
             # Build SampleData for this role
             role_data[role] = SampleData(
                 sample_uuids=uuids,
                 features=features,
                 targets=targets,
+                tags=tags,
                 kind="input",
             )
 
