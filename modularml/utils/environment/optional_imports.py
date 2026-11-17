@@ -1,8 +1,16 @@
 """Helpers for optional third-party dependencies."""
 
+from functools import cache
 
+
+@cache
 def check_jax():
-    """Attempt to import JAX, returning None if missing."""
+    """
+    Attempt to import JAX, returning None if missing.
+
+    The result is cached: a failed import is not stored by Python, so without
+    caching every call would re-scan `sys.path` for the missing package.
+    """
     try:
         import jax
     except ImportError:
@@ -39,8 +47,9 @@ def ensure_torch():
     return torch
 
 
+@cache
 def check_torch():
-    """Attempt to import torch, returning None if missing."""
+    """Attempt to import torch, returning None if missing (result is cached)."""
     try:
         import torch
     except ImportError:
@@ -58,8 +67,9 @@ def ensure_tensorflow():
     return tf
 
 
+@cache
 def check_tensorflow():
-    """Attempt to import tensorflow, returning None if missing."""
+    """Attempt to import tensorflow, returning None if missing (result is cached)."""
     try:
         import tensorflow as tf
     except ImportError:

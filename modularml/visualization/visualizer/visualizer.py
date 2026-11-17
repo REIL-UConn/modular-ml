@@ -10,6 +10,9 @@ from IPython.display import Markdown, display
 from modularml.visualization.visualizer.internal_representation import GraphIR
 
 if TYPE_CHECKING:
+    from modularml.visualization.visualizer.internal_representation import (
+        MermaidSyntax,
+    )
     from modularml.visualization.visualizer.styling import DisplayOptions
 
 
@@ -79,22 +82,32 @@ class Visualizer:
 
         return self._graph
 
-    def get_mermaid_str(self) -> str:
+    def get_mermaid_str(self, syntax: MermaidSyntax = "v11") -> str:
         """
         Generates the Mermaid string from the internal graph object.
+
+        Args:
+            syntax (MermaidSyntax): Mermaid syntax to emit. "v11" (default)
+                uses `id@{ ... }` node declarations and edge ids, which only
+                render on Mermaid >= 11.5. Use "classic" for output that renders
+                on all Mermaid versions from 9.x onward (e.g., GitHub-rendered
+                Markdown, whose bundled Mermaid version is not published).
+                "classic" omits the dash animation on edges.
 
         Returns:
             str: Mermaid diagram as string.
 
         """
-        return self._build_graph().to_mermaid()
+        return self._build_graph().to_mermaid(syntax=syntax)
 
-    def mermaid_to_mmd(self, filepath: str) -> str:
+    def mermaid_to_mmd(self, filepath: str, syntax: MermaidSyntax = "v11") -> str:
         """
         Writes the Mermaid string to a `.mmd` markdown file.
 
         Args:
             filepath (str or Path): Path to output file (suffix `.mmd` auto-added).
+            syntax (MermaidSyntax): Mermaid syntax to emit ("v11" or "classic").
+                See :meth:`get_mermaid_str`. Defaults to "v11".
 
         Returns:
             str: Full path to the written file.
@@ -104,7 +117,7 @@ class Visualizer:
         filepath = filepath.with_suffix(".mmd")
 
         with Path.open(filepath, "w", encoding="utf-8") as f:
-            f.write(self.get_mermaid_str())
+            f.write(self.get_mermaid_str(syntax=syntax))
 
         return str(filepath)
 

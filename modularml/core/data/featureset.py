@@ -54,6 +54,26 @@ if TYPE_CHECKING:
     from modularml.core.data.sample_schema import SampleSchema
 
 
+def _series_to_numpy(col: pd.Series) -> np.ndarray:
+    """
+    Convert a whole pandas column into a numpy array Arrow can ingest.
+
+    Numeric, boolean, and datetime columns are converted directly. Columns of
+    plain strings (including categorical and pandas string dtypes) become numpy
+    string arrays, since Arrow rejects numpy object arrays. Any other object
+    column (e.g., array-valued cells, or missing values mixed with strings) is
+    converted cell-by-cell.
+    """
+    import pandas as pd
+
+    values = col.to_numpy()
+    if values.dtype != object:
+        return values
+    if pd.api.types.infer_dtype(values, skipna=False) == "string":
+        return np.asarray(values, dtype=str)
+    return to_numpy(list(values))
+
+
 class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
     """
     Unified :class:`FeatureSet` backed by a single :class:`SampleCollection`.
@@ -270,40 +290,44 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
         group_by = ensure_list(group_by)
         sort_by = ensure_list(sort_by) if sort_by is not None else []
 
-        # 2. Apply grouping, if defined
-        if group_by:
-            grouped = df.groupby(group_by, sort=False)
+        if not group_by:
+            # 2. No grouping: each row is its own sample, so convert whole
+            #    columns at once (no per-row Python loops)
+            feature_data = {c: _series_to_numpy(df[c]) for c in feature_cols}
+            target_data = {c: _series_to_numpy(df[c]) for c in target_cols}
+            tag_data = {c: _series_to_numpy(df[c]) for c in tag_cols}
+
         else:
-            # Each row is a separate sample -> pseudo group by index
-            df = df.copy()
-            df["_temp_index"] = df.index
-            grouped = df.groupby("_temp_index", sort=False)
+            # 2. Group rows; each group is aggregated into a single sample
+            grouped = df.groupby(group_by, sort=False)
 
-        # 3. Aggregate each group into one “row”
-        feature_data: dict[str, list] = {c: [] for c in feature_cols}
-        target_data: dict[str, list] = {c: [] for c in target_cols}
-        tag_data: dict[str, list] = {c: [] for c in tag_cols}
+            # 3. Aggregate each group into one “row”
+            feature_data: dict[str, list] = {c: [] for c in feature_cols}
+            target_data: dict[str, list] = {c: [] for c in target_cols}
+            tag_data: dict[str, list] = {c: [] for c in tag_cols}
 
-        for _, df_gb in grouped:
-            # Sort rows within this group if requested
-            df_group = df_gb.sort_values(by=sort_by) if sort_by else df_gb
-            # Convert grouped columns into arrays or scalars
-            for c in feature_cols:
-                vals = df_group[c].to_numpy()
-                feature_data[c].append(vals if len(vals) > 1 else vals[0])
-            for c in target_cols:
-                vals = df_group[c].to_numpy()
-                target_data[c].append(vals if len(vals) > 1 else vals[0])
-            for c in tag_cols:
-                unique_vals = df_group[c].unique()
-                tag_data[c].append(
-                    unique_vals[0] if len(unique_vals) == 1 else unique_vals.tolist(),
-                )
+            for _, df_gb in grouped:
+                # Sort rows within this group if requested
+                df_group = df_gb.sort_values(by=sort_by) if sort_by else df_gb
+                # Convert grouped columns into arrays or scalars
+                for c in feature_cols:
+                    vals = df_group[c].to_numpy()
+                    feature_data[c].append(vals if len(vals) > 1 else vals[0])
+                for c in target_cols:
+                    vals = df_group[c].to_numpy()
+                    target_data[c].append(vals if len(vals) > 1 else vals[0])
+                for c in tag_cols:
+                    unique_vals = df_group[c].unique()
+                    tag_data[c].append(
+                        unique_vals[0]
+                        if len(unique_vals) == 1
+                        else unique_vals.tolist(),
+                    )
 
-        # 4. Ensure data is a np.ndarray for table construction
-        feature_data = {k: to_numpy(v) for k, v in feature_data.items()}
-        target_data = {k: to_numpy(v) for k, v in target_data.items()}
-        tag_data = {k: to_numpy(v) for k, v in tag_data.items()}
+            # 4. Ensure data is a np.ndarray for table construction
+            feature_data = {k: to_numpy(v) for k, v in feature_data.items()}
+            target_data = {k: to_numpy(v) for k, v in target_data.items()}
+            tag_data = {k: to_numpy(v) for k, v in tag_data.items()}
 
         # 5. Build table
         table = build_sample_schema_table(
