@@ -328,6 +328,8 @@ class RandomSplitter(BaseSplitter):
 
         # Split groups on ratios
         group_keys = list(buckets.keys())
+        # Shuffle the group keys to randomize the order
+        group_keys = [group_keys[i] for i in self.rng.permutation(len(group_keys))]
         boundaries = self._compute_split_boundaries(len(group_keys))
         split_indices: dict[str, list[int]] = {}
         for split_lbl, (start, end) in boundaries.items():
