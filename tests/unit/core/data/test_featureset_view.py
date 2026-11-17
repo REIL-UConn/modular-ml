@@ -332,3 +332,73 @@ def test_featureset_view_repr(subset_view):
     assert "FeatureSetView" in repr_str
     assert "TestFS" in repr_str
     assert "n_samples=5" in repr_str
+
+
+# ---------------------------------------------------------------------
+# Column tracking tests (views created before a transform)
+# ---------------------------------------------------------------------
+@pytest.fixture
+def split_featureset(simple_featureset):
+    """FeatureSet with a registered `train` split, not yet transformed."""
+    simple_featureset.split_random(ratios={"train": 0.7, "test": 0.3}, seed=0)
+    return simple_featureset
+
+
+def _transform_features(fs):
+    fs.fit_transform(scaler="StandardScaler", domain="features", fit_to_split="train")
+
+
+@pytest.mark.unit
+def test_full_width_view_sees_columns_added_after_creation(split_featureset):
+    """Test a view held across `fit_transform` sees the new transformed columns."""
+    view = split_featureset.get_split("train")
+    assert "features.X.transformed" not in view.columns
+
+    _transform_features(split_featureset)
+
+    assert "features.X.transformed" in view.columns
+    assert view.columns == split_featureset.get_all_keys()
+
+
+@pytest.mark.unit
+def test_stale_view_can_read_transformed_representation(split_featureset):
+    """Test a view held across `fit_transform` can read the transformed data."""
+    view = split_featureset.get_split("train")
+    _transform_features(split_featureset)
+
+    feats = view.get_features(rep="transformed")
+    assert "X" in feats
+    assert len(feats["X"]) == len(view)
+
+    fresh = split_featureset.get_split("train").get_features(rep="transformed")
+    np.testing.assert_array_equal(feats["X"], fresh["X"])
+
+
+@pytest.mark.unit
+def test_view_derived_from_tracking_view_keeps_tracking(split_featureset):
+    """Test views derived (e.g. via take) from a full-width view also track."""
+    view = split_featureset.get_split("train")
+    child = view.take(np.array([0, 1]), label="child")
+
+    _transform_features(split_featureset)
+
+    assert "features.X.transformed" in child.columns
+
+
+@pytest.mark.unit
+def test_subset_view_keeps_fixed_columns(split_featureset):
+    """Test a view created over explicit columns is not widened by new columns."""
+    columns = ["features.X.raw", "targets.Y.raw"]
+    view = FeatureSetView.from_featureset(split_featureset, columns=columns)
+
+    _transform_features(split_featureset)
+
+    assert "features.X.transformed" not in view.columns
+    assert set(view.columns) >= set(columns)
+
+
+@pytest.mark.unit
+def test_missing_representation_raises_informative_keyerror(basic_view):
+    """Test requesting a rep that does not exist raises a clear KeyError."""
+    with pytest.raises(KeyError, match="transformed"):
+        basic_view.get_features(rep="transformed")

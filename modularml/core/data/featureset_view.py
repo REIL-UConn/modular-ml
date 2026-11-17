@@ -27,12 +27,20 @@ if TYPE_CHECKING:
     from modularml.core.data.sample_collection import SampleCollection
 
 
-@dataclass
+@dataclass(init=False)
 class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurable):
     """
     Immutable row and column projection of a :class:`FeatureSet`.
 
     Intended for inspection, export, and analysis.
+
+    Description:
+        A view that includes every column of its source when it is created
+        keeps tracking the source's columns. Columns added to the source
+        afterwards (e.g., `<key>.transformed` columns created by
+        :meth:`FeatureSet.fit_transform`) therefore appear in the view without
+        needing to re-fetch it. A view created over an explicit subset of
+        columns keeps that fixed projection.
 
     Attributes:
         source (FeatureSet): The parent :class:`FeatureSet` this view projects.
@@ -44,8 +52,45 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
 
     source: FeatureSet
     indices: NDArray[np.int64]
-    columns: list[str]
     label: str | None = None
+
+    def __init__(
+        self,
+        source: FeatureSet,
+        indices: NDArray[np.int64],
+        columns: list[str],
+        label: str | None = None,
+    ):
+        self.source = source
+        self.indices = indices
+        self.label = label
+        self._columns = list(columns)
+
+        # Views spanning all source columns follow the source as it gains columns
+        self._tracks_source_columns = set(self._columns) == set(
+            self._get_source_columns(),
+        )
+
+    def _get_source_columns(self) -> list[str]:
+        """Current column names of the source :class:`FeatureSet`."""
+        return self.source.collection.get_all_keys(
+            include_domain_prefix=True,
+            include_rep_suffix=True,
+        )
+
+    @property
+    def columns(self) -> list[str]:
+        """Column names included in this view."""
+        if self._tracks_source_columns:
+            current = self._get_source_columns()
+            if set(current) != set(self._columns):
+                self._columns = current
+        return self._columns
+
+    @columns.setter
+    def columns(self, value: list[str]):  # noqa: ARG002
+        msg = "Cannot reassign frozen attribute 'columns'"
+        raise AttributeError(msg)
 
     @classmethod
     def from_featureset(
@@ -103,7 +148,8 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
 
     def __setattr__(self, name, value):
         # Overrriding __setattr__ to make all attributes frozen except label
-        frozen_attrs = ["source", "indices", "columns"]
+        # (`columns` is frozen via its property, which has no real setter)
+        frozen_attrs = ["source", "indices"]
 
         # Check if attr is frozen and if it's already set (to allow init)
         if name in frozen_attrs and name in self.__dict__:
