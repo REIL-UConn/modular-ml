@@ -110,6 +110,11 @@ class EvalResults(PhaseResults):
             This is the primary method for retrieving complete evaluation outputs
             or targets in a single tensor.
 
+            Tags are returned as a NumPy array of shape `(n_samples, n_tags)`,
+            with columns ordered alphabetically by tag column name. If the tags
+            have mixed dtypes (e.g., strings and numbers), values are cast to a
+            common dtype (typically strings).
+
         Args:
             node (str | GraphNode):
                 The node to retrieve tensors for. Can be the node instance,
@@ -118,11 +123,7 @@ class EvalResults(PhaseResults):
                 The domain of data to return:
                 - outputs: the tensors produced by the node forward pass
                 - targets: the expected output tensors (only for tail nodes)
-                - tags: the tag values of each sample, as a NumPy array of
-                  shape `(n_samples, n_tags)`. Columns are ordered
-                  alphabetically by tag column name. If the tags have mixed
-                  dtypes (e.g., strings and numbers), values are cast to a
-                  common dtype (typically strings).
+                - tags: the tag values of each sample (see note on tags above)
                 - sample_uuids: the sample identifiers
             role (str, optional):
                 If multi-role data, specifies which role to return.
