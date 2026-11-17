@@ -35,16 +35,6 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
 ]
 
-torch = [
-    "torch",
-    "numpy<2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
-]
-
-tensorflow = [
-    "tensorflow; platform_system == 'Darwin'",
-    "numpy<2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
-]
-
 dependencies = [
     "numpy",
     "scipy",
@@ -67,10 +57,13 @@ Issues = "https://github.com/REIL-UConn/modular-ml/issues"
 
 
 [project.optional-dependencies]
-torch = ["torch"]
+torch = [
+    "torch",
+    "numpy<2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+]
 tensorflow = [
-    "tensorflow-macos; platform_system == 'Darwin' and platform_machine == 'arm64'",
-    "tensorflow; platform_system == 'Darwin' and platform_machine != 'arm64'",
+    "tensorflow; platform_system == 'Darwin'",
+    "numpy<2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
 ]
 optimize = ["optuna"]
 
