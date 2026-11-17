@@ -32,6 +32,8 @@ jax = pytest.importorskip("jax")
 pytest.importorskip("optax")
 jnp = jax.numpy
 
+pytestmark = pytest.mark.unit
+
 
 def linear(params, x):
     return x @ params["w"] + params["b"]
