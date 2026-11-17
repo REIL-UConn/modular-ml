@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from modularml.utils.errors.error_handling import ErrorMode
 from modularml.utils.topology.graph_search_utils import is_head_node, is_tail_node
@@ -193,6 +194,34 @@ def _format_data_block_label(
 
 
 # ================================================
+# Mermaid syntax variants
+# ================================================
+MermaidSyntax = Literal["v11", "classic"]
+"""
+Mermaid syntax to emit.
+
+- `"v11"`: uses `id@{ label: ..., shape: ... }` node declarations and edge ids
+  (`n0 e0@--> n1`). Only parsed by Mermaid >= 11.5.
+- `"classic"`: uses `id["label"]` node declarations and no edge ids. Parsed by
+  all Mermaid versions from 9.x onward (including the version bundled with
+  GitHub, which is not published). Edge animation styling is omitted.
+"""
+
+_CLASSIC_NODE_BRACKETS: dict[str, tuple[str, str]] = {
+    "rect": ('["', '"]'),
+    "stadium": ('(["', '"])'),
+    "circle": ('(("', '"))'),
+}
+
+
+def _validate_syntax(syntax: str) -> None:
+    """Raises a ValueError if `syntax` is not a supported Mermaid syntax."""
+    if syntax not in ("v11", "classic"):
+        msg = f"Unknown Mermaid syntax '{syntax}'. Must be 'v11' or 'classic'."
+        raise ValueError(msg)
+
+
+# ================================================
 # Internal representation: nodes, edges, graph
 # ================================================
 @dataclass
@@ -222,14 +251,35 @@ class NodeIR:
         # Legacy: compose from spec header + label
         return f"{self.spec.header}<br>'{self.label}'"
 
-    def get_tag_line(self) -> str:
-        """Returns Mermaid tag line for node shape and label."""
-        return (
-            f'{self.id}@{{ label: "{self.get_label()!s}", shape: {self.spec.shape} }}'
-        )
+    def get_tag_line(self, syntax: MermaidSyntax = "v11") -> str:
+        """
+        Returns Mermaid tag line for node shape and label.
 
-    def get_link_line(self) -> str:
-        """Returns Mermaid class link line (e.g., `n1:::FeatureSet`)."""
+        Args:
+            syntax (MermaidSyntax): Mermaid syntax to emit. Defaults to "v11".
+
+        """
+        _validate_syntax(syntax)
+        label = self.get_label()
+        if syntax == "classic":
+            if self.spec.shape not in _CLASSIC_NODE_BRACKETS:
+                msg = f"No classic Mermaid syntax for node shape '{self.spec.shape}'."
+                raise ValueError(msg)
+            left, right = _CLASSIC_NODE_BRACKETS[self.spec.shape]
+            return f"{self.id}{left}{label!s}{right}"
+        return f'{self.id}@{{ label: "{label!s}", shape: {self.spec.shape} }}'
+
+    def get_link_line(self, syntax: MermaidSyntax = "v11") -> str:
+        """
+        Returns Mermaid class link line (e.g., `n1:::FeatureSet`).
+
+        Args:
+            syntax (MermaidSyntax): Mermaid syntax to emit. Defaults to "v11".
+
+        """
+        _validate_syntax(syntax)
+        if syntax == "classic":
+            return f"class {self.id} {self.spec.class_name}"
         return f"{self.id}:::{self.spec.class_name}"
 
 
@@ -253,11 +303,20 @@ class EdgeIR:
     conn_spec: EdgeConnectionSpec
     anim_spec: EdgeAnimationSpec
 
-    def get_connection(self) -> str:
-        """Returns the Mermaid line for connecting two nodes."""
-        return (
-            f"{self.src.id} {self.id}@{self.conn_spec.get_connection()} {self.dst.id}"
-        )
+    def get_connection(self, syntax: MermaidSyntax = "v11") -> str:
+        """
+        Returns the Mermaid line for connecting two nodes.
+
+        Args:
+            syntax (MermaidSyntax): Mermaid syntax to emit. Defaults to "v11".
+                The "classic" syntax has no edge ids.
+
+        """
+        _validate_syntax(syntax)
+        conn = self.conn_spec.get_connection()
+        if syntax == "classic":
+            return f"{self.src.id} {conn} {self.dst.id}"
+        return f"{self.src.id} {self.id}@{conn} {self.dst.id}"
 
     def get_link_line(self) -> str:
         """Returns the class assignment line for this edge."""
@@ -1036,14 +1095,23 @@ class GraphIR:
     # ------------------------------------------------
     # Mermaid rendering
     # ------------------------------------------------
-    def to_mermaid(self) -> str:
+    def to_mermaid(self, syntax: MermaidSyntax = "v11") -> str:
         """
         Converts the full GraphIR into a Mermaid.js-compatible string.
+
+        Args:
+            syntax (MermaidSyntax): Mermaid syntax to emit. "v11" (default)
+                requires Mermaid >= 11.5 to render. "classic" renders on all
+                Mermaid versions from 9.x onward, but omits edge animation
+                styling (dashed-line animation on edges).
 
         Returns:
             str: Mermaid flowchart syntax.
 
         """
+        _validate_syntax(syntax)
+        classic = syntax == "classic"
+
         connections: list[str] = []  # connections statments (eg, 'n1 e1@-> n2')
         node_class_link: list[
             str
@@ -1057,19 +1125,24 @@ class GraphIR:
 
         # Add nodes classes & links
         for n in self.nodes:
-            node_class_link.append(n.get_link_line())
-            node_tags.append(n.get_tag_line())
-            node_class_defs.append(n.spec.to_class_def())
+            node_class_link.append(n.get_link_line(syntax))
+            node_tags.append(n.get_tag_line(syntax))
+            class_def = n.spec.to_class_def()
+            if classic:
+                # Older parsers reject spaces around ':' / ',' and the trailing ';'
+                class_def = re.sub(r"\s*([:,])\s*", r"\1", class_def).rstrip(";")
+            node_class_defs.append(class_def)
 
-        # Add edge classes & links
+        # Add edge classes & links (edge ids only exist in v11 syntax)
         for e in self.edges:
-            connections.append(e.get_connection())
-            edge_class_link.append(e.get_link_line())
-            anim_class_defs.append(e.anim_spec.to_class_def())
+            connections.append(e.get_connection(syntax))
+            if not classic:
+                edge_class_link.append(e.get_link_line())
+                anim_class_defs.append(e.anim_spec.to_class_def())
 
         # Remove repeated node and animation classDefs
-        node_class_defs = list(set(node_class_defs))
-        anim_class_defs = list(set(anim_class_defs))
+        node_class_defs = list(dict.fromkeys(node_class_defs))
+        anim_class_defs = list(dict.fromkeys(anim_class_defs))
 
         # Build full mermaid text:
         nl = "\n\t"  # newline + tab
