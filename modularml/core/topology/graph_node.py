@@ -148,6 +148,7 @@ class GraphNode(ABC, ExperimentNode):
                     resolved_node = r.resolve(ctx=exp_ctx)
                 except ResolutionError:
                     failed.append(r)
+                    continue
 
                 # Since a reference can exist with only one of label or node_id set,
                 # ensure both are set after validating connection
