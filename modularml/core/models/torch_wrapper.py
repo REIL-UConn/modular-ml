@@ -199,7 +199,7 @@ class TorchModelWrapper(BaseModel, TorchModuleBase):
                 raise ValueError(msg)
             self._input_shape = input_shape
 
-        # Set input shape (check for mismatch)
+        # Set output shape (check for mismatch)
         if output_shape:
             output_shape = ensure_tuple_shape(
                 shape=output_shape,
@@ -213,7 +213,7 @@ class TorchModelWrapper(BaseModel, TorchModuleBase):
                 and (not force)
             ):
                 msg = (
-                    f"Build called with `output_shape={output_shape}` but input shape is already defined "
+                    f"Build called with `output_shape={output_shape}` but output shape is already defined "
                     f"with value `{self._output_shape}`. To override the existing shape, set `force=True`."
                 )
                 raise ValueError(msg)
