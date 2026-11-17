@@ -58,7 +58,7 @@ def eval_setup():
 @pytest.mark.integration
 def test_stacked_tensors_tags_shape_and_order(eval_setup):
     """Test tags stack across batches as (n_samples, n_tags), sorted by key."""
-    fs, node, ev = eval_setup
+    _, node, ev = eval_setup
 
     tags = ev.stacked_tensors(node, domain="tags")
     uuids = ev.stacked_tensors(node, domain="sample_uuids")
