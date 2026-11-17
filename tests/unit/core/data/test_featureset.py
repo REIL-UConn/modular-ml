@@ -270,3 +270,157 @@ def test_equality(simple_featureset):
     copy = simple_featureset.copy()
     # Same data, should compare as equal via SampleCollection
     assert simple_featureset.collection == copy.collection
+
+
+# ---------------------------------------------------------------------
+# from_pandas tests
+# ---------------------------------------------------------------------
+@pytest.fixture
+def mixed_df():
+    """DataFrame with numeric, bool, string, and categorical columns."""
+    rng = np.random.default_rng(0)
+    n = 30
+    return pd.DataFrame(
+        {
+            "f_float": rng.normal(size=n),
+            "f_int": rng.integers(0, 9, n),
+            "f_bool": rng.random(n) > 0.5,
+            "y": rng.normal(size=n),
+            "t_str": rng.choice(["a", "b", "c"], n),
+            "t_cat": pd.Categorical(rng.choice(["u", "v"], n)),
+        },
+    )
+
+
+@pytest.mark.unit
+def test_from_pandas_matches_from_dict(mixed_df):
+    """Test from_pandas (no group_by) gives the same data as an equivalent from_dict."""
+    kwargs = {
+        "feature_cols": ["f_float", "f_int", "f_bool"],
+        "target_cols": "y",
+        "tag_cols": ["t_str", "t_cat"],
+    }
+    fs_pd = FeatureSet.from_pandas("from_pd", mixed_df, **kwargs)
+
+    data = {c: mixed_df[c].to_numpy() for c in ["f_float", "f_int", "f_bool", "y"]}
+    data["t_str"] = np.asarray(mixed_df["t_str"], dtype=str)
+    data["t_cat"] = np.asarray(mixed_df["t_cat"].astype(str), dtype=str)
+    fs_dict = FeatureSet.from_dict(
+        "from_dict",
+        data,
+        feature_keys=["f_float", "f_int", "f_bool"],
+        target_keys="y",
+        tag_keys=["t_str", "t_cat"],
+    )
+
+    # Sample UUIDs are random, so compare everything else
+    assert fs_pd.n_samples == fs_dict.n_samples == len(mixed_df)
+    assert fs_pd.get_all_keys() == fs_dict.get_all_keys()
+    for getter in ("get_features", "get_targets", "get_tags"):
+        got, expected = getattr(fs_pd, getter)(), getattr(fs_dict, getter)()
+        assert got.keys() == expected.keys()
+        for k in expected:
+            np.testing.assert_array_equal(got[k], expected[k])
+
+
+@pytest.mark.unit
+def test_from_pandas_preserves_row_order(mixed_df):
+    """Test samples keep the DataFrame row order, even with a shuffled index."""
+    shuffled = mixed_df.sample(frac=1, random_state=1)
+    fs = FeatureSet.from_pandas(
+        "shuffled",
+        shuffled,
+        feature_cols="f_float",
+        target_cols="y",
+    )
+    np.testing.assert_array_equal(
+        fs.get_features()["f_float"],
+        shuffled["f_float"].to_numpy(),
+    )
+
+
+@pytest.mark.unit
+def test_from_pandas_string_columns_become_string_arrays(mixed_df):
+    """Test string and categorical columns are stored as strings (not objects)."""
+    fs = FeatureSet.from_pandas(
+        "strings",
+        mixed_df,
+        feature_cols="f_float",
+        target_cols="y",
+        tag_cols=["t_str", "t_cat"],
+    )
+    tags = fs.get_tags()
+    assert tags["t_str"].dtype.kind == "U"
+    assert tags["t_cat"].dtype.kind == "U"
+    np.testing.assert_array_equal(tags["t_str"], mixed_df["t_str"].to_numpy())
+
+
+@pytest.mark.unit
+def test_from_pandas_array_valued_cells_still_supported():
+    """Test cells holding sequences (one array per row) are kept as feature arrays."""
+    df = pd.DataFrame(
+        {
+            "seq": [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+            "y": [0.1, 0.2],
+        },
+    )
+    fs = FeatureSet.from_pandas("arrays", df, feature_cols="seq", target_cols="y")
+    np.testing.assert_array_equal(
+        fs.get_features()["seq"],
+        np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
+    )
+
+
+@pytest.mark.unit
+def test_from_pandas_does_not_convert_cell_by_cell(mixed_df, monkeypatch):
+    """
+    Test without group_by, columns are converted whole (not once per cell).
+
+    This guards the performance regression where every cell went through the
+    recursive `to_numpy`, making construction ~100x slower than `from_dict`.
+    """
+    import modularml.utils.data.conversion as conversion_module
+
+    # `to_numpy` recurses through its own module-level name, so patching it here
+    # counts every per-element conversion
+    calls = []
+    real_to_numpy = conversion_module.to_numpy
+
+    def counting_to_numpy(*args, **kwargs):
+        calls.append(1)
+        return real_to_numpy(*args, **kwargs)
+
+    monkeypatch.setattr(conversion_module, "to_numpy", counting_to_numpy)
+
+    FeatureSet.from_pandas(
+        "no_cells",
+        mixed_df,
+        feature_cols=["f_float", "f_int"],
+        target_cols="y",
+        tag_cols="t_str",
+    )
+    assert len(calls) < len(mixed_df)
+
+
+@pytest.mark.unit
+def test_from_pandas_group_by_aggregates_rows():
+    """Test group_by still aggregates each group into a single sample."""
+    df = pd.DataFrame(
+        {
+            "g": ["a", "a", "b", "b"],
+            "x": [1.0, 2.0, 3.0, 4.0],
+            "y": [0.0, 0.0, 1.0, 1.0],
+        },
+    )
+    fs = FeatureSet.from_pandas(
+        "grouped",
+        df,
+        feature_cols="x",
+        target_cols="y",
+        group_by="g",
+    )
+    assert fs.n_samples == 2
+    np.testing.assert_array_equal(
+        fs.get_features()["x"],
+        np.array([[1.0, 2.0], [3.0, 4.0]]),
+    )
