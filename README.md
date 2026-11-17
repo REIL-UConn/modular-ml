@@ -82,44 +82,6 @@ pip install git+https://github.com/REIL-UConn/modular-ml.git
 ```
 
 
-### JAX models
-
-Install the optional backend with `pip install "modularml[jax]"`. Wrap a pure
-`apply(params, x)` function using `JaxModelWrapper`, or subclass `JaxBaseModel`
-and keep trainable parameters in `self.params`.
-
-```python
-import jax.numpy as jnp
-from modularml import JaxModelWrapper, Loss, Optimizer
-
-
-def apply(params, x):
-    return x @ params["weights"] + params["bias"]
-
-
-model = JaxModelWrapper(
-    apply,
-    params={"weights": jnp.zeros((4, 1)), "bias": jnp.zeros((1,))},
-)
-optimizer = Optimizer("adam", backend="jax", opt_kwargs={"learning_rate": 1e-3})
-loss = Loss("mse", backend="jax")
-```
-
-Use the model, optimizer, and loss in `ModelNode`, `AppliedLoss`, and phases as
-with other backends. Both node optimizers and a shared `ModelGraph` optimizer
-are supported, including frozen nodes and checkpointed Optax state. Named losses
-use Optax functions (for example, `squared_error` or `softmax_cross_entropy`);
-`mse` and `mae` are aliases. Custom loss functions should use JAX operations.
-
-For lazy initialization, pass `init_fn(key, dummy_batch)` and a `seed` to the
-wrapper. Stateless Flax Linen modules exposing `init`/`apply` can also be wrapped
-or passed directly to a `ModelNode`; install Flax separately. Mutable Flax
-collections, dropout RNG management, and Flax NNX need a custom adapter.
-Graph traversal runs eagerly with JAX automatic differentiation; individual
-pure model functions can be compiled with `jax.jit`. `Accelerator("cpu")` and
-GPU aliases select JAX devices; GPU execution requires an appropriate JAX install.
-
-
 ## Explore More
 - **[Explanation](https://modular-ml.readthedocs.io/en/latest/explanation/index.html)** – Conceptual material that explains why ModularML is structured the way it is.
 - **[How-To](https://modular-ml.readthedocs.io/en/latest/how_to/index.html)** – Deep dive on core components of the ModularML framework.
