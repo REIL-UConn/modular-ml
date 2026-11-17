@@ -103,7 +103,7 @@ class Visualizer:
         filepath: Path = Path(filepath)
         filepath = filepath.with_suffix(".mmd")
 
-        with Path.open(filepath, "w") as f:
+        with Path.open(filepath, "w", encoding="utf-8") as f:
             f.write(self.get_mermaid_str())
 
         return str(filepath)

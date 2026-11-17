@@ -1185,7 +1185,7 @@ class ModelNode(ComputeNode):
 
         """
         # If stage is not frozen, raise error
-        if self.is_frozen:
+        if not self.is_frozen:
             msg = "Cannot evaluate an unfrozen node. Either freeze or use `train_step`."
             raise RuntimeError(msg)
 
@@ -1251,7 +1251,7 @@ class ModelNode(ComputeNode):
         if self.is_frozen:
             msg = f"Cannot fit a frozen node '{self.label}'."
             raise RuntimeError(msg)
-        if not hasattr(self, "fit"):
+        if not hasattr(self._model, "fit"):
             msg = f"Node `{self.label}` does not implement a `.fit()` method."
             raise AttributeError(msg)
 
