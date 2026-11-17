@@ -4,7 +4,11 @@ from enum import Enum
 
 import numpy as np
 
-from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
+from modularml.utils.environment.optional_imports import (
+    check_jax,
+    check_tensorflow,
+    check_torch,
+)
 from modularml.utils.nn.backend import Backend
 
 
@@ -19,9 +23,14 @@ class DataFormat(Enum):
     LIST = "list"
     TORCH = "torch.tensor"
     TENSORFLOW = "tensorflow.tensor"
+    JAX = "jax.array"
+    DICT_JAX = "dict_jax"
 
 
 _FORMAT_ALIASES = {
+    "jax": DataFormat.JAX,
+    "jax.array": DataFormat.JAX,
+    "dict_jax": DataFormat.DICT_JAX,
     "pandas": DataFormat.PANDAS,
     "pd": DataFormat.PANDAS,
     "df": DataFormat.PANDAS,
@@ -41,6 +50,7 @@ _FORMAT_ALIASES = {
 }
 
 _TENSORLIKE_FORMATS = (
+    DataFormat.JAX,
     DataFormat.NUMPY,
     DataFormat.TORCH,
     DataFormat.TENSORFLOW,
@@ -81,7 +91,7 @@ def format_requires_compatible_shapes(fmt: DataFormat) -> bool:
         bool: True if tensors must share shapes (NumPy, Torch, TensorFlow).
 
     """
-    return fmt in [DataFormat.NUMPY, DataFormat.TORCH, DataFormat.TENSORFLOW]
+    return fmt in _TENSORLIKE_FORMATS
 
 
 def format_is_tensorlike(fmt: DataFormat) -> bool:
@@ -137,6 +147,10 @@ def infer_data_type(obj) -> str:
             return "string"
         return "unknown"
 
+    jax = check_jax()
+    if jax is not None and isinstance(obj, jax.Array):
+        obj = np.asarray(obj)
+
     # NumPy
     if isinstance(obj, np.ndarray) or np.isscalar(obj):
         if np.issubdtype(np.asarray(obj).dtype, np.floating):
@@ -182,6 +196,8 @@ def get_data_format_for_backend(backend: str | Backend) -> DataFormat:
     if isinstance(backend, str):
         backend = Backend(backend)
 
+    if backend == Backend.JAX:
+        return DataFormat.JAX
     if backend == Backend.TORCH:
         return DataFormat.TORCH
     if backend == Backend.TENSORFLOW:

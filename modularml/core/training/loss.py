@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from modularml.utils.data.comparators import deep_equal
-from modularml.utils.environment.optional_imports import ensure_tensorflow, ensure_torch
+from modularml.utils.environment.optional_imports import (
+    ensure_optax,
+    ensure_tensorflow,
+    ensure_torch,
+)
 from modularml.utils.errors.exceptions import BackendNotSupportedError, LossError
 from modularml.utils.nn.backend import Backend, infer_backend, normalize_backend
 
@@ -205,6 +209,19 @@ class Loss:
 
         name_lc = self.name.lower()
 
+        if self.backend == Backend.JAX:
+            aliases = {
+                "mse": "squared_error",
+                "mseloss": "squared_error",
+                "mae": "absolute_error",
+                "l1": "absolute_error",
+            }
+            fn = getattr(ensure_optax(), aliases.get(name_lc, name_lc), None)
+            if not callable(fn):
+                msg = f"Unknown Optax loss: {self.name}"
+                raise LossError(msg)
+            return fn
+
         # Resolve backend optimizer module
         if self.backend == Backend.TORCH:
             torch = ensure_torch()
@@ -354,7 +371,11 @@ class Loss:
 
         # Cases 1-2: resolved class
         if self.cls is not None:
-            if self.backend == Backend.TORCH:  # noqa: SIM114
+            if self.backend == Backend.JAX:
+                import functools
+
+                self._callable = functools.partial(self.cls, **self.kwargs)
+            elif self.backend == Backend.TORCH:  # noqa: SIM114
                 self._callable = self.cls(reduction=self.reduction, **self.kwargs)
             elif self.backend == Backend.TENSORFLOW:
                 self._callable = self.cls(reduction=self.reduction, **self.kwargs)
@@ -399,10 +420,18 @@ class Loss:
             self.build()
 
         try:
-            return self._callable(*args, **kwargs)
+            value = self._callable(*args, **kwargs)
         except Exception as e:
             msg = f"Loss execution failed: {e}"
             raise LossError(msg) from e
+        if self.backend == Backend.JAX and self.cls is not None:
+            if self.reduction == "mean":
+                return value.mean()
+            if self.reduction == "sum":
+                return value.sum()
+            if self.reduction != "none":
+                raise LossError("JAX loss reduction must be none, mean, or sum.")
+        return value
 
     # ================================================
     # Configurable

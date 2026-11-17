@@ -6,6 +6,8 @@ from modularml.core.io.conventions import SerializationKind, kind_registry
 from modularml.models import model_naming_fn, model_registry
 
 from .base_model import BaseModel
+from .jax_base_model import JaxBaseModel
+from .jax_wrapper import JaxModelWrapper
 from .torch_base_model import TorchBaseModel
 from .torch_wrapper import TorchModelWrapper
 
@@ -24,6 +26,9 @@ def register_builtin():
         key="TorchModelWrapper",
         cls=TorchModelWrapper,
     )
+
+    symbol_registry.register_builtin_class(key="JaxBaseModel", cls=JaxBaseModel)
+    symbol_registry.register_builtin_class(key="JaxModelWrapper", cls=JaxModelWrapper)
 
     # Register registries
     symbol_registry.register_builtin_registry(

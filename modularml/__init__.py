@@ -2,6 +2,8 @@ from modularml.api import (
     Accelerator,
     AppliedLoss,
     BaseModel,
+    JaxBaseModel,
+    JaxModelWrapper,
     CVBinding,
     CVResults,
     Checkpointing,

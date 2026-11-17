@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from modularml.utils.environment.optional_imports import (
+    check_jax,
     check_tensorflow,
     check_torch,
 )
@@ -105,6 +106,10 @@ def get_shape(x) -> ShapeLike:
     # --- None or scalars ---
     if x is None or isinstance(x, (int, float, complex, bool, str, bytes)):
         return ()
+
+    jax = check_jax()
+    if jax is not None and isinstance(x, (jax.Array, jax.core.Tracer)):
+        return tuple(x.shape)
 
     # --- NumPy ---
     if isinstance(x, np.ndarray):

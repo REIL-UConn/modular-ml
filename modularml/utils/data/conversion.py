@@ -11,8 +11,10 @@ from modularml.utils.data.data_format import (
     normalize_format,
 )
 from modularml.utils.environment.optional_imports import (
+    check_jax,
     check_tensorflow,
     check_torch,
+    ensure_jax,
     ensure_tensorflow,
     ensure_torch,
 )
@@ -202,6 +204,9 @@ def align_ranks(arr1: Any, arr2: Any, backend: Backend | None = None) -> tuple:
         """
         if arr_backend is None:
             arr_backend = infer_backend(arr)
+
+        if arr_backend == Backend.JAX:
+            return ensure_jax().numpy.expand_dims(arr, axis=tuple(singleton_idxs))
 
         if arr_backend == Backend.TORCH:
             if torch is None:
@@ -567,6 +572,8 @@ def convert_dict_to_format(
         return {k: to_numpy(v, errors=errors) for k, v in data.items()}
     if fmt == DataFormat.DICT_TORCH:
         return {k: to_torch(v, errors=errors) for k, v in data.items()}
+    if fmt == DataFormat.DICT_JAX:
+        return {k: to_jax(v, errors=errors) for k, v in data.items()}
     if fmt == DataFormat.DICT_TENSORFLOW:
         return {k: to_tensorflow(v, errors=errors) for k, v in data.items()}
 
@@ -583,6 +590,8 @@ def convert_dict_to_format(
             align_singletons=align_singletons,
         )
 
+        if fmt == DataFormat.JAX:
+            return to_jax(np_merged)
         if fmt == DataFormat.NUMPY:
             return np_merged
         if fmt == DataFormat.TORCH:
@@ -653,6 +662,10 @@ def to_python(obj):
         if np_obj.ndim == 0:
             return np_obj.item()
         return np_obj.tolist()
+
+    jax = check_jax()
+    if jax is not None and isinstance(obj, jax.Array):
+        return np.asarray(obj).tolist()
 
     # Containers
     if isinstance(obj, dict):
@@ -739,6 +752,10 @@ def to_numpy(
     # If it's already a numpy array, just return
     if isinstance(obj, np.ndarray):
         return obj
+
+    jax = check_jax()
+    if jax is not None and isinstance(obj, jax.Array):
+        return np.asarray(obj)
 
     # tensors
     torch = check_torch()
@@ -888,6 +905,9 @@ def convert_to_format(
             "Use the `convert_dict_to_format` method for conversion of dict-like data.",
         )
 
+    if fmt == DataFormat.JAX:
+        return to_jax(data, errors=errors)
+
     if fmt == DataFormat.NUMPY:
         return to_numpy(data, errors=errors)
 
@@ -906,3 +926,16 @@ def convert_to_format(
 
     msg = f"Unsupported data format: {fmt}"
     raise ValueError(msg)
+
+
+def to_jax(obj: Any, errors: ErrorMode = ErrorMode.RAISE):
+    """Convert numeric data to a JAX array, preserving differentiation."""
+    jax = ensure_jax()
+    try:
+        if isinstance(obj, (jax.Array, jax.core.Tracer)):
+            return obj
+        return jax.numpy.asarray(to_numpy(obj, errors=errors))
+    except (TypeError, ValueError):
+        if errors == ErrorMode.IGNORE:
+            return obj
+        raise
