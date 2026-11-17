@@ -1,6 +1,34 @@
 """Helpers for optional third-party dependencies."""
 
 
+def check_jax():
+    """Attempt to import JAX, returning None if missing."""
+    try:
+        import jax
+    except ImportError:
+        return None
+    return jax
+
+
+def ensure_jax():
+    """Import JAX, raising an actionable error if unavailable."""
+    jax = check_jax()
+    if jax is None:
+        raise ImportError("JAX is required. Install modularml[jax] to continue.")
+    return jax
+
+
+def ensure_optax():
+    """Import Optax for JAX optimizers and named losses."""
+    try:
+        import optax
+    except ImportError as exc:
+        raise ImportError(
+            "Optax is required. Install modularml[jax] to continue.",
+        ) from exc
+    return optax
+
+
 def ensure_torch():
     """Import torch, raising a helpful error if unavailable."""
     try:

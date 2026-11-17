@@ -122,6 +122,14 @@ Modeling
    :members:
    :show-inheritance:
 
+.. autoclass:: JaxBaseModel
+   :members:
+   :show-inheritance:
+
+.. autoclass:: JaxModelWrapper
+   :members:
+   :show-inheritance:
+
 .. autoclass:: TensorflowBaseModel
    :members:
    :show-inheritance:

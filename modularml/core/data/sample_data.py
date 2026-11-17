@@ -361,6 +361,10 @@ class SampleData(Summarizable):
                 torch = ensure_torch()
 
                 new_data[domain] = torch.cat(vals, dim=0)
+            elif backend == Backend.JAX:
+                from modularml.utils.environment.optional_imports import ensure_jax
+
+                new_data[domain] = ensure_jax().numpy.concatenate(vals, axis=0)
             elif backend == Backend.TENSORFLOW:
                 tf = ensure_tensorflow()
 

@@ -154,7 +154,7 @@ class ConcatNode(MergeNode):
         self.pad_mode = pad_mode if isinstance(pad_mode, PadMode) else PadMode(pad_mode)
         self.pad_value = pad_value
 
-        if self.pad_mode not in [PadMode.CONSTANT]:
+        if self.pad_mode != PadMode.CONSTANT:
             msg = f"Pad mode is not supported yet: {self.pad_mode}"
             raise NotImplementedError(msg)
 
@@ -303,6 +303,17 @@ class ConcatNode(MergeNode):
                 )
                 padded.append(p)
 
+            elif fmt == DataFormat.JAX:
+                from modularml.utils.environment.optional_imports import ensure_jax
+
+                padded.append(
+                    ensure_jax().numpy.pad(
+                        v,
+                        pad_width,
+                        mode="constant",
+                        constant_values=self.pad_value,
+                    ),
+                )
             elif fmt == DataFormat.TENSORFLOW:
                 # Verify that tf is installed
                 tf = ensure_tensorflow()
@@ -461,6 +472,11 @@ class ConcatNode(MergeNode):
 
             return tf.concat(values=values, axis=effective_axis)
 
+        if fmt == DataFormat.JAX:
+            from modularml.utils.environment.optional_imports import ensure_jax
+
+            return ensure_jax().numpy.concatenate(values, axis=effective_axis)
+
         # Default: numpy concatenation
         return np.concatenate(values, axis=effective_axis)
 
@@ -522,6 +538,11 @@ class ConcatNode(MergeNode):
             torch = ensure_torch()
             return torch.stack(values).mean(dim=0)
 
+        if fmt == DataFormat.JAX:
+            from modularml.utils.environment.optional_imports import ensure_jax
+
+            jnp = ensure_jax().numpy
+            return jnp.mean(jnp.stack(values), axis=0)
         if fmt == DataFormat.TENSORFLOW:
             tf = ensure_tensorflow()
             return tf.reduce_mean(tf.stack(values), axis=0)

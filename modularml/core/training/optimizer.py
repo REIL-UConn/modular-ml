@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING, Any
 
 from modularml.core.io.protocols import Configurable, Stateful
 from modularml.utils.data.comparators import deep_equal
-from modularml.utils.environment.optional_imports import ensure_tensorflow, ensure_torch
+from modularml.utils.environment.optional_imports import (
+    ensure_jax,
+    ensure_optax,
+    ensure_tensorflow,
+    ensure_torch,
+)
 from modularml.utils.errors.exceptions import (
     BackendNotSupportedError,
     OptimizerError,
@@ -262,6 +267,13 @@ class Optimizer(Configurable, Stateful):
 
         name_lc = self.name.lower()
 
+        if self.backend == Backend.JAX:
+            opt = getattr(ensure_optax(), name_lc, None)
+            if not callable(opt):
+                msg = f"Unknown Optax optimizer: {self.name}"
+                raise OptimizerError(msg)
+            return opt
+
         # Resolve backend optimizer module
         if self.backend == Backend.TORCH:
             torch = ensure_torch()
@@ -400,6 +412,8 @@ class Optimizer(Configurable, Stateful):
                 self.parameters = parameters
                 self.instance = self.cls(self.parameters, **self.kwargs)
 
+            elif self.backend == Backend.JAX:
+                self.instance = self.cls(**self.kwargs)
             elif self.backend == Backend.TENSORFLOW:
                 self.parameters = None  # TF doesn't need parameters at construction
                 self.instance = self.cls(**self.kwargs)
@@ -417,6 +431,8 @@ class Optimizer(Configurable, Stateful):
                     raise ValueError("Torch optimizer factory requires parameters.")
                 self.instance = self._factory(parameters)
 
+            elif self.backend == Backend.JAX:
+                self.instance = self._factory(parameters)
             elif self.backend == Backend.TENSORFLOW:
                 self.instance = self._factory(None)
 
@@ -431,6 +447,12 @@ class Optimizer(Configurable, Stateful):
 
         else:
             raise RuntimeError("Unsupported initiatization state.")
+
+        if self.backend == Backend.JAX:
+            if parameters is None:
+                raise ValueError("JAX optimizers require a parameter pytree.")
+            self.parameters = parameters
+            self._jax_state = self.instance.init(parameters)
 
         # If we have a pending internal state (from from_state), restore it now
         if self._pending_state is not None:
@@ -458,6 +480,21 @@ class Optimizer(Configurable, Stateful):
         """
         self._check_optimizer()
 
+        if self._backend == Backend.JAX:
+            if grads is None or variables is None:
+                raise ValueError("JAX requires gradients and a parameter pytree.")
+            jax = ensure_jax()
+            leaves = jax.tree_util.tree_leaves(variables)
+            if leaves:
+                self._jax_state = jax.device_put(self._jax_state, leaves[0].device)
+            updates, self._jax_state = self.instance.update(
+                grads,
+                self._jax_state,
+                variables,
+            )
+            self.parameters = ensure_optax().apply_updates(variables, updates)
+            return self.parameters
+
         if self._backend == Backend.TORCH:
             self.instance.step()
 
@@ -476,6 +513,8 @@ class Optimizer(Configurable, Stateful):
                 method="Optimizer.step()",
             )
 
+        return None
+
     def zero_grad(self):
         """
         Reset accumulated gradients on the backend optimizer.
@@ -486,6 +525,9 @@ class Optimizer(Configurable, Stateful):
 
         """
         self._check_optimizer()
+
+        if self._backend == Backend.JAX:
+            return  # JAX gradients are explicit; optimizer moments must be retained.
 
         if self._backend == Backend.TORCH:
             self.instance.zero_grad()
@@ -513,6 +555,13 @@ class Optimizer(Configurable, Stateful):
                 Dictionary capturing optimizer definition for reconstruction.
 
         """
+        if self.backend == Backend.JAX and self._factory is not None:
+            return {
+                "factory": self._factory,
+                "backend": self.backend.value,
+                "opt_kwargs": self.kwargs,
+            }
+
         # Prefer to return only cls (str name) + kwargs
         if self.is_built:
             return {
@@ -591,6 +640,13 @@ class Optimizer(Configurable, Stateful):
         if not self.is_built:
             return None
 
+        if self._backend == Backend.JAX:
+            return {
+                "optax_leaves": ensure_jax().tree_util.tree_leaves(
+                    ensure_jax().device_get(self._jax_state),
+                ),
+            }
+
         if self._backend == Backend.TORCH:
             return {"state_dict": self.instance.state_dict()}
 
@@ -618,7 +674,14 @@ class Optimizer(Configurable, Stateful):
         if not self.is_built or state is None:
             return
 
-        if self._backend == Backend.TORCH:
+        if self._backend == Backend.JAX:
+            jax = ensure_jax()
+            structure = jax.tree_util.tree_structure(self._jax_state)
+            self._jax_state = jax.tree_util.tree_unflatten(
+                structure,
+                [jax.numpy.asarray(x) for x in state["optax_leaves"]],
+            )
+        elif self._backend == Backend.TORCH:
             d_state = state.get("state_dict")
             if d_state is not None:
                 self.instance.load_state_dict(d_state)

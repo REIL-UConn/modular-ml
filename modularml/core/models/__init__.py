@@ -4,6 +4,8 @@ from modularml.core.models.base_model import BaseModel
 from modularml.utils.environment.optional_imports import ensure_tensorflow, ensure_torch
 from modularml.utils.nn.backend import Backend, infer_backend
 
+from .jax_base_model import JaxBaseModel
+from .jax_wrapper import JaxModelWrapper
 from .scikit_wrapper import ScikitModelWrapper
 from .tensorflow_base_model import TensorflowBaseModel
 from .tensorflow_wrapper import TensorflowModelWrapper
@@ -74,6 +76,9 @@ def wrap_model(model: Any) -> BaseModel:
             "of `tf.keras.Model`."
         )
         raise ValueError(msg)
+
+    if backend == Backend.JAX:
+        return JaxModelWrapper(model=model)
 
     if backend == Backend.SCIKIT:
         from sklearn.base import BaseEstimator

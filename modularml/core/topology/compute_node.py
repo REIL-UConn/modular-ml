@@ -257,6 +257,35 @@ class ComputeNode(GraphNode):
         else:
             converted = data.to_format(fmt=fmt) if hasattr(data, "to_format") else data
 
+        if acc is not None and backend == Backend.JAX:
+            from dataclasses import replace
+
+            from modularml.utils.environment.optional_imports import ensure_jax
+
+            jax = ensure_jax()
+            device = acc.jax_device()
+
+            def move(obj):
+                if isinstance(obj, SampleData):
+                    return SampleData(
+                        data={
+                            k: jax.device_put(v, device)
+                            if k in (DOMAIN_FEATURES, DOMAIN_TARGETS) and v is not None
+                            else v
+                            for k, v in obj.data.items()
+                        },
+                        kind=obj._kind,
+                    )
+                if isinstance(obj, RoleData):
+                    return RoleData({role: move(sd) for role, sd in obj.items()})
+                if isinstance(obj, Batch):
+                    return replace(obj, role_data=move(obj.role_data))
+                if isinstance(obj, (jax.Array, jax.core.Tracer)):
+                    return jax.device_put(obj, device)
+                return obj
+
+            return move(converted)
+
         # Move torch tensors to the requested device only when needed.
         if (
             acc is not None

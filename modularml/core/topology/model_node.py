@@ -253,6 +253,18 @@ class ModelNode(ComputeNode):
         """
         if accelerator is None:
             return
+        if self.backend == Backend.JAX:
+            from modularml.utils.environment.optional_imports import ensure_jax
+
+            jax = ensure_jax()
+            device = accelerator.jax_device()
+            self._model.params = jax.device_put(self._model.params, device)
+            if self._optimizer is not None and self._optimizer.is_built:
+                self._optimizer._jax_state = jax.device_put(
+                    self._optimizer._jax_state,
+                    device,
+                )
+            return
         torch_module = self._get_torch_module()
         if torch_module is None:
             return
@@ -295,6 +307,12 @@ class ModelNode(ComputeNode):
         if self.backend == Backend.TORCH:
             self._optimizer.build(
                 parameters=self._model.parameters(),
+                backend=self.backend,
+                force_rebuild=force,
+            )
+        elif self.backend == Backend.JAX:
+            self._optimizer.build(
+                parameters=self._model.params,
                 backend=self.backend,
                 force_rebuild=force,
             )
@@ -537,6 +555,10 @@ class ModelNode(ComputeNode):
             )
         except (ValueError, AttributeError):
             pass
+
+        if self.backend == Backend.JAX and isinstance(eff_accelerator, Accelerator):
+            with eff_accelerator.jax_device_scope():
+                return self.forward_single(x, **kwargs)
 
         if self.backend == Backend.TENSORFLOW and isinstance(
             eff_accelerator,
@@ -886,6 +908,28 @@ class ModelNode(ComputeNode):
         # Record loss collection
         ctx.add_losses(lc)
 
+    def _train_step_jax(self, ctx, losses, accelerator=None):
+        """Differentiate the forward pass and losses over an explicit parameter tree."""
+        from modularml.utils.nn.jax_training import train_jax
+
+        def forward():
+            batch = self._get_input_batch(ctx=ctx, accelerator=accelerator)
+            return {
+                self.node_id: self.forward(
+                    inputs={self.upstream_ref: batch},
+                    accelerator=accelerator,
+                ),
+            }
+
+        train_jax(
+            {self.node_id: self},
+            self._optimizer,
+            ctx,
+            losses or [],
+            forward,
+            node_optimizer=True,
+        )
+
     def _train_step_scikit(
         self,
         ctx: ExecutionContext,
@@ -1015,6 +1059,9 @@ class ModelNode(ComputeNode):
                 losses=valid_losses,
                 accelerator=accelerator,
             )
+
+        if self.backend == Backend.JAX:
+            return self._train_step_jax(ctx, valid_losses, accelerator)
 
         if self.backend == Backend.SCIKIT:
             return self._train_step_scikit(
@@ -1205,6 +1252,13 @@ class ModelNode(ComputeNode):
 
         if self.backend == Backend.TENSORFLOW:
             return self._eval_step_tensorflow(
+                ctx=ctx,
+                losses=valid_losses,
+                accelerator=accelerator,
+            )
+
+        if self.backend == Backend.JAX:
+            return self._eval_step_scikit(
                 ctx=ctx,
                 losses=valid_losses,
                 accelerator=accelerator,

@@ -7,7 +7,11 @@ from typing import TYPE_CHECKING, Any, TypeAlias
 
 import numpy as np
 
-from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
+from modularml.utils.environment.optional_imports import (
+    check_jax,
+    check_tensorflow,
+    check_torch,
+)
 
 if TYPE_CHECKING:
     from modularml.core.topology.model_graph import ModelGraph
@@ -57,6 +61,10 @@ def detach_tensor(t: TensorLike):
     # Tensorflow
     if (tf is not None) and isinstance(t, tf.Tensor):
         return tf.identity(t)
+
+    jax = check_jax()
+    if jax is not None and isinstance(t, (jax.Array, jax.core.Tracer)):
+        return jax.lax.stop_gradient(t)
 
     # NumPy
     if isinstance(t, np.ndarray):
