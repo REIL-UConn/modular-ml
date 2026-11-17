@@ -572,6 +572,8 @@ class SampleCollectionMixin:
                 selected: dict[str, set[str]] = defaultdict(list)
 
                 # Use references to resolve any string to a qualified column name
+                # (copy so the caller's list is never mutated)
+                columns = list(ensure_list(columns))
                 include_sample_uuid = False
                 if DOMAIN_SAMPLE_UUIDS in columns:
                     include_sample_uuid = True
@@ -603,7 +605,8 @@ class SampleCollectionMixin:
             except BaseException as e2:
                 msg = f"Failed to resolve selectors using Reference alignment. {e2}"
                 logger.debug(msg)
-                raise
+                # Surface the original (more informative) selector error
+                raise e1 from e2
 
         # Order and flatten columns: features -> targets -> tags
         sel_cols: list[str] = []
