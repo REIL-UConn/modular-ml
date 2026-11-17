@@ -403,6 +403,14 @@ class AppliedLoss(Summarizable):
             w = tf.convert_to_tensor(weights, dtype=raw_loss.dtype)
             return tf.reduce_sum(raw_loss * w) * self.weight / len(raw_loss)
 
+        if self.backend == Backend.JAX:
+            from modularml.utils.environment.optional_imports import ensure_jax
+
+            jnp = ensure_jax().numpy
+            raw_loss = jnp.reshape(raw_loss, (len(weights), -1)).mean(axis=1)
+            w = jnp.asarray(weights, dtype=raw_loss.dtype).reshape(-1)
+            return jnp.mean(raw_loss * w) * self.weight
+
         # Assume NumPy
         raw_loss = np.reshape(raw_loss, (-1,))
         w = np.reshape(weights, (-1,))

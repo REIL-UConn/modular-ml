@@ -2,7 +2,11 @@
 
 import numpy as np
 
-from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
+from modularml.utils.environment.optional_imports import (
+    check_jax,
+    check_tensorflow,
+    check_torch,
+)
 from modularml.utils.nn.backend import Backend
 
 torch = check_torch()
@@ -61,6 +65,10 @@ def deep_equal(a, b):
         )
     if tf is not None and isinstance(a, tf.Tensor) and isinstance(b, tf.Tensor):
         return arrays_equal(a.numpy(), b.numpy(), rtol=1e-6, atol=1e-8)
+
+    jax = check_jax()
+    if jax is not None and isinstance(a, jax.Array) and isinstance(b, jax.Array):
+        return arrays_equal(np.asarray(a), np.asarray(b))
 
     # Primitive types
     if isinstance(a, (int, float, str, bool)) or a is None:

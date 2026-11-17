@@ -1261,6 +1261,15 @@ class ModelGraph(Configurable, Stateful, Summarizable):
                 "contributing_nodes": used_node_ids,
             }
 
+        if backend == Backend.JAX:
+            return {
+                "backend": Backend.JAX,
+                "parameters": {
+                    node.node_id: node.model.params for node in selected_nodes
+                },
+                "contributing_nodes": used_node_ids,
+            }
+
         if backend == Backend.SCIKIT:
             raise NotImplementedError("Scikit optimizers are not supported.")
 
@@ -1315,6 +1324,12 @@ class ModelGraph(Configurable, Stateful, Summarizable):
             self._optimizer.build(
                 parameters=info["parameters"],
                 backend=Backend.TORCH,
+                force_rebuild=True,
+            )
+        elif info["backend"] == Backend.JAX:
+            self._optimizer.build(
+                parameters=info["parameters"],
+                backend=Backend.JAX,
                 force_rebuild=True,
             )
         elif info["backend"] == Backend.TENSORFLOW:
@@ -1994,6 +2009,23 @@ class ModelGraph(Configurable, Stateful, Summarizable):
                 losses=losses,
                 active_nodes=active_node_ids,
                 accelerator=accelerator,
+            )
+
+        if backend == Backend.JAX:
+            from modularml.utils.nn.jax_training import train_jax
+
+            info = self.get_optimizer_parameters()
+            nodes = {nid: self.nodes[nid] for nid in info["contributing_nodes"]}
+            return train_jax(
+                nodes,
+                self._optimizer,
+                ctx,
+                [loss for loss in (losses or []) if loss.node_id in active_node_ids],
+                lambda: self.forward(
+                    inputs=ctx.inputs,
+                    active_nodes=active_node_ids,
+                    accelerator=accelerator,
+                ),
             )
 
         if backend == Backend.SCIKIT:

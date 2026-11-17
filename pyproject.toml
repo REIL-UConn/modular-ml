@@ -65,6 +65,7 @@ tensorflow = [
     "tensorflow; platform_system == 'Darwin'",
     "numpy<2; sys_platform == 'darwin' and platform_machine == 'x86_64'",
 ]
+jax = ["jax>=0.4.26", "optax>=0.2.2"]
 optimize = ["optuna"]
 
 docs = [
@@ -106,7 +107,7 @@ dev = [
     "importlib.metadata",
 ]
 all = [
-    "modularml[torch,tensorflow,optimize,examples]"
+    "modularml[torch,tensorflow,jax,optimize,examples]"
 ]
 all-torch = [
     "modularml[torch,optimize,examples]"

@@ -3,7 +3,11 @@
 from enum import Enum
 from typing import Any
 
-from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
+from modularml.utils.environment.optional_imports import (
+    check_jax,
+    check_tensorflow,
+    check_torch,
+)
 
 
 class Backend(str, Enum):
@@ -13,11 +17,13 @@ class Backend(str, Enum):
     Attributes:
         TORCH (str): PyTorch backend (torch.nn.Module, torch.Tensor).
         TENSORFLOW (str): TensorFlow backend (tf.keras.Model, tf.Tensor).
+        JAX (str): JAX arrays, functional models, and Optax optimizers.
         SCIKIT (str): scikit-learn backend (BaseEstimator).
         NONE (str): No backend detected or unsupported object type.
 
     """
 
+    JAX = "jax"
     TORCH = "torch"
     TENSORFLOW = "tensorflow"
     NUMPY = "numpy"
@@ -76,7 +82,7 @@ def normalize_backend(value: str | Backend):
 
     msg = (
         f"Unsupported Backend value: {value}. "
-        f"Expected one of: ['torch', 'tensorflow', 'scikit', 'numpy']."
+        f"Expected one of: ['torch', 'tensorflow', 'scikit', 'numpy', 'jax']."
     )
     raise ValueError(msg)
 
@@ -93,7 +99,7 @@ def backend_requires_optimizer(backend: Backend) -> bool:
               False otherwise (e.g., scikit-learn).
 
     """
-    return backend in [Backend.TORCH, Backend.TENSORFLOW]
+    return backend in [Backend.TORCH, Backend.TENSORFLOW, Backend.JAX]
 
 
 def infer_backend(obj_or_cls: Any) -> Backend:
@@ -160,6 +166,17 @@ def infer_backend(obj_or_cls: Any) -> Backend:
         return Backend.TENSORFLOW
 
     # ================================================
+    # JAX arrays, tracers, Flax modules, and Optax functions.
+    jax = check_jax()
+    if jax is not None and isinstance(obj_or_cls, (jax.Array, jax.core.Tracer)):
+        return Backend.JAX
+    cls = obj_or_cls if isinstance(obj_or_cls, type) else type(obj_or_cls)
+    if any(base.__module__.startswith("flax.linen.") for base in cls.__mro__):
+        return Backend.JAX
+    module = getattr(obj_or_cls, "__module__", type(obj_or_cls).__module__)
+    if module.startswith(("jax.", "jaxlib.", "flax.", "optax.")):
+        return Backend.JAX
+
     # NumPy
     # ================================================
     try:

@@ -52,6 +52,8 @@ from modularml.core.training.applied_loss import AppliedLoss
 from modularml.core.training.loss import Loss
 
 from modularml.core.models.base_model import BaseModel
+from modularml.core.models.jax_base_model import JaxBaseModel
+from modularml.core.models.jax_wrapper import JaxModelWrapper
 from modularml.core.models.torch_base_model import TorchBaseModel
 from modularml.core.models.tensorflow_base_model import TensorflowBaseModel
 

@@ -6,7 +6,11 @@ import re
 from contextlib import contextmanager
 from typing import Any
 
-from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
+from modularml.utils.environment.optional_imports import (
+    check_tensorflow,
+    check_torch,
+    ensure_jax,
+)
 from modularml.utils.logging.warnings import warn
 
 
@@ -142,6 +146,24 @@ class Accelerator:
     # ================================================
     # PyTorch Helpers
     # ================================================
+    def jax_device(self):
+        """Resolve a JAX CPU/GPU device, raising if the requested device is absent."""
+        if self.device == "mps":
+            raise ValueError("JAX Accelerator does not support the mps device alias.")
+        platform = "cpu" if self.device == "cpu" else "gpu"
+        devices = ensure_jax().devices(platform)
+        index = _parse_device_index(self.device) or 0
+        if index >= len(devices):
+            msg = f"JAX device index {index} is unavailable for {platform}."
+            raise ValueError(msg)
+        return devices[index]
+
+    @contextmanager
+    def jax_device_scope(self):
+        """Use the requested device for JAX allocations and computations."""
+        with ensure_jax().default_device(self.jax_device()):
+            yield
+
     def setup_torch_model(self, torch_module: Any) -> None:
         """
         Move a :class:`torch.nn.Module` to this device in-place.
