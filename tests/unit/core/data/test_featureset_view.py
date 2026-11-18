@@ -140,6 +140,21 @@ def test_featureset_view_n_samples(basic_view, subset_view):
 
 
 @pytest.mark.unit
+def test_featureset_view_n_samples_does_not_materialize(
+    subset_view, padded_view, monkeypatch,
+):
+    """Counting rows must not take (copy) the underlying table."""
+
+    def _fail(self):
+        raise AssertionError("n_samples materialized the collection")
+
+    expected = (subset_view.n_samples, padded_view.n_samples)
+    monkeypatch.setattr(FeatureSetView, "_resolve_collection", _fail)
+    assert (subset_view.n_samples, padded_view.n_samples) == expected
+    assert expected[1] == 3  # padded rows (-1) are not counted
+
+
+@pytest.mark.unit
 def test_featureset_view_valid_indices(subset_view, padded_view):
     """Test valid_indices property."""
     valid = subset_view.valid_indices

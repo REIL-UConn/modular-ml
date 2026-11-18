@@ -133,15 +133,16 @@ class SampleCollectionMixin:
             raise TypeError(msg)
 
         mask = np.asarray(mask, dtype=bool)
-        if len(mask) != self.n_samples:
-            msg = f"Mask must have length equal to number of samples. {len(mask)} != {self.n_samples}"
+        n_samples = self.n_samples
+        if len(mask) != n_samples:
+            msg = f"Mask must have length equal to number of samples. {len(mask)} != {n_samples}"
             raise ValueError(msg)
 
         def _pad_array(arr: np.ndarray) -> np.ndarray:
             if arr is None:
                 return None
-            if arr.shape[0] != self.n_samples:
-                msg = f"Data must have leading dimension equal to number of samples. {arr.shape[0]} != {self.n_samples}"
+            if arr.shape[0] != n_samples:
+                msg = f"Data must have leading dimension equal to number of samples. {arr.shape[0]} != {n_samples}"
                 raise ValueError(msg)
 
             # Get shape of samples
@@ -174,8 +175,12 @@ class SampleCollectionMixin:
     @property
     def n_samples(self) -> int:
         """Total number of samples (rows)."""
-        collection, _, _ = self._resolve_collection()
-        return collection.n_samples
+        # Count rows without materializing them: the resolved collection holds
+        # exactly the non-negative (valid) indices of the caller.
+        collection, _, indices, _ = self._resolve_caller_attributes()
+        if indices is None:
+            return collection.n_samples
+        return int(np.count_nonzero(np.asarray(indices) >= 0))
 
     def __len__(self) -> int:
         """Return the number of samples."""
