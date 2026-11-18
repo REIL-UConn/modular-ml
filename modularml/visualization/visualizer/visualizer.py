@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from IPython.display import Markdown, display
-
 from modularml.visualization.visualizer.internal_representation import GraphIR
 
 if TYPE_CHECKING:
@@ -127,6 +125,14 @@ class Visualizer:
 
         Requires Mermaid support in the notebook viewer.
         """
+        try:
+            from IPython.display import Markdown, display
+        except ImportError as exc:
+            msg = (
+                "Displaying a diagram inline needs IPython (a Jupyter environment). "
+                "Use get_mermaid_str() or the Mermaid export methods instead."
+            )
+            raise ImportError(msg) from exc
         mermaid_str = self.get_mermaid_str()
         disp_str = f"```{{mermaid}}\n{mermaid_str}\n```"
         display(Markdown(disp_str))
