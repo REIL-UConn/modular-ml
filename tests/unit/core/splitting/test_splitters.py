@@ -137,3 +137,44 @@ def test_index_splitter_config_roundtrip_and_record():
     rec = fs._split_recs[-1]
     assert rec.produced_splits == ["a"]
     assert rec.get_config()["splitter_config"]["subsets"] == {"a": [4, 1]}
+
+
+# ================================================
+# remove_splits
+# ================================================
+@pytest.mark.unit
+def test_remove_splits_drops_record():
+    fs = _featureset()
+    fs.split_by_condition({"g0": {"tags.group.raw": EQ("g0")}})
+    fs.split_by_indices({"tr": [0, 1], "va": [2]})
+    n_recs = len(fs._split_recs)
+    fs.remove_splits(["tr", "va"])
+    assert set(fs.available_splits) == {"g0"}
+    assert len(fs._split_recs) == n_recs - 1
+    # the names can be reused afterwards
+    fs.split_by_indices({"tr": [3], "va": [4]})
+    np.testing.assert_array_equal(_row_ids(fs, "tr"), [3])
+
+
+@pytest.mark.unit
+def test_remove_splits_refuses_partial_record_and_dependents():
+    fs = _featureset()
+    fs.split_by_indices({"tr": [0, 1, 2, 3], "va": [4]})
+    with pytest.raises(ValueError, match="together"):
+        fs.remove_splits("tr")
+    fs.get_split("tr").split_by_indices({"tr_sub": [0]})
+    with pytest.raises(ValueError, match="derived"):
+        fs.remove_splits(["tr", "va"])
+    with pytest.raises(KeyError):
+        fs.remove_splits("nope")
+
+
+@pytest.mark.unit
+def test_remove_splits_refuses_scaler_fit_split():
+    from sklearn.preprocessing import StandardScaler
+
+    fs = _featureset()
+    fs.split_by_indices({"tr": list(range(100))})
+    fs.fit_transform(StandardScaler(), domain="features", fit_to_split="tr")
+    with pytest.raises(ValueError, match="scaler"):
+        fs.remove_splits("tr")

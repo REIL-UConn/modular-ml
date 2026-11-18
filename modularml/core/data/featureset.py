@@ -594,6 +594,67 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
         self._splits.clear()
         self._split_recs.clear()
 
+    def remove_splits(self, split_names: str | list[str]) -> None:
+        """
+        Remove registered splits and the splitter records that produced them.
+
+        Description:
+            Removal keeps the split history replayable, so it is refused when
+            it would leave a dangling record:
+            - every split produced by the same splitter call must be removed
+              together (replaying that record would otherwise recreate them);
+            - a split that a scaler was fit to, or that another split was
+              derived from, cannot be removed.
+
+            Typical use is a temporary split, e.g. one inner cross-validation
+            fold of a hyperparameter search, removed once its phase has run.
+
+        Args:
+            split_names (str | list[str]):
+                Name(s) of the split(s) to remove.
+
+        Raises:
+            KeyError: If a split does not exist.
+            ValueError: If removal would break a splitter or scaler record.
+
+        """
+        names = [split_names] if isinstance(split_names, str) else list(split_names)
+        missing = [n for n in names if n not in self._splits]
+        if missing:
+            msg = f"Split(s) {missing} do not exist. Available: {self.available_splits}"
+            raise KeyError(msg)
+        remove = set(names)
+
+        # Scalers fit to a removed split
+        for rec in self._scaler_recs:
+            if rec.fit_split in remove:
+                msg = f"Cannot remove split '{rec.fit_split}': a scaler was fit to it."
+                raise ValueError(msg)
+
+        # Records producing or derived from the removed splits
+        drop_recs = []
+        for rec in self._split_recs:
+            produced = set(rec.produced_splits)
+            if produced & remove:
+                if not produced <= remove:
+                    msg = (
+                        f"Splits {sorted(produced)} were produced together and must "
+                        f"be removed together. Missing: {sorted(produced - remove)}."
+                    )
+                    raise ValueError(msg)
+                drop_recs.append(rec)
+            elif rec.applied_to.split_name in remove:
+                msg = (
+                    f"Cannot remove split '{rec.applied_to.split_name}': splits "
+                    f"{rec.produced_splits} were derived from it."
+                )
+                raise ValueError(msg)
+
+        for n in names:
+            del self._splits[n]
+        drop_ids = {id(r) for r in drop_recs}
+        self._split_recs = [r for r in self._split_recs if id(r) not in drop_ids]
+
     # ================================================
     # Transform/Scaling
     # ================================================
