@@ -921,3 +921,56 @@ class SplitMixin:
             return_views=return_views,
             register=register,
         )
+
+    def split_by_indices(
+        self,
+        subsets: Mapping[str, Sequence[int] | Sequence[str]],
+        *,
+        by: str = "position",
+        return_views: bool = False,
+        register: bool = True,
+    ) -> list[FeatureSetView] | None:
+        """
+        Split this object into subsets listed explicitly by sample.
+
+        Description:
+            A convenience wrapper around
+            :class:`~modularml.splitters.index_splitter.IndexSplitter`. Use it
+            for partitions computed outside ModularML: pre-registered folds,
+            folds from a scikit-learn splitter, bootstrap or bagging subsets.
+            The listed order is kept and repeated samples are allowed. The
+            lists are recorded with the split, so it is serialized and
+            replayed like a condition or random split.
+
+        Args:
+            subsets (Mapping[str, Sequence[int] | Sequence[str]]):
+                Subset labels mapped to the samples in that subset.
+            by (str, optional):
+                ``"position"``: row positions relative to this object.
+                ``"sample_uuid"``: sample UUIDs. Defaults to ``"position"``.
+            return_views (bool):
+                Whether to return :class:`FeatureSetView` outputs.
+            register (bool):
+                Whether to register splits and configuration in the parent
+                :class:`FeatureSet`.
+
+        Returns:
+            list[FeatureSetView] | None:
+                Resulting views if `return_views=True`; else `None`.
+
+        Example:
+            Registering the folds of a scikit-learn splitter `cv`
+            (e.g. ``StratifiedGroupKFold``):
+
+            >>> for k, (tr, va) in enumerate(cv.split(X, y, groups)):  # doctest: +SKIP
+            ...     fs.split_by_indices({f"fold{k}_train": tr, f"fold{k}_val": va})
+
+        """
+        from modularml.splitters.index_splitter import IndexSplitter
+
+        splitter = IndexSplitter(subsets=subsets, by=by)
+        return self.split(
+            splitter,
+            return_views=return_views,
+            register=register,
+        )

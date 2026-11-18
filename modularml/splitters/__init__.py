@@ -5,9 +5,10 @@ from modularml.utils.registries import CaseInsensitiveRegistry
 # Import all splitter
 from .random_splitter import RandomSplitter
 from .condition_splitter import ConditionSplitter
+from .index_splitter import IndexSplitter
 
 
-__all__ = ["ConditionSplitter", "RandomSplitter"]
+__all__ = ["ConditionSplitter", "IndexSplitter", "RandomSplitter"]
 
 # Create registry
 splitter_registry = CaseInsensitiveRegistry()
@@ -28,6 +29,6 @@ def splitter_naming_fn(x):
 
 
 # Register modularml splitters
-mml_scalers: list[type] = [RandomSplitter, ConditionSplitter]
+mml_scalers: list[type] = [RandomSplitter, ConditionSplitter, IndexSplitter]
 for t in mml_scalers:
     splitter_registry.register(splitter_naming_fn(t), t)
