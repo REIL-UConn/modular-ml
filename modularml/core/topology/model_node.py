@@ -17,7 +17,7 @@ from modularml.core.topology.compute_node import ComputeNode, TForward
 from modularml.core.training.loss_record import LossCollection, LossRecord
 from modularml.core.training.optimizer import Optimizer
 from modularml.utils.data.data_format import DataFormat, get_data_format_for_backend
-from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
+from modularml.utils.environment.optional_imports import check_torch, ensure_tensorflow
 from modularml.utils.errors.exceptions import (
     BackendMismatchError,
     BackendNotSupportedError,
@@ -33,7 +33,6 @@ if TYPE_CHECKING:
     from modularml.core.data.execution_context import ExecutionContext
     from modularml.core.training.applied_loss import AppliedLoss
 
-tf = check_tensorflow()
 torch = check_torch()
 
 
@@ -880,6 +879,7 @@ class ModelNode(ComputeNode):
         loss_records: list[LossRecord] = []
 
         # Track gradients over forward passes & loss computation
+        tf = ensure_tensorflow()
         with tf.GradientTape() as tape:
             # Forward pass (ctx.execution modified inplace)
             input_batch = self._get_input_batch(ctx=ctx, accelerator=accelerator)

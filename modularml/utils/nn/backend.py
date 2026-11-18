@@ -5,8 +5,8 @@ from typing import Any
 
 from modularml.utils.environment.optional_imports import (
     check_jax,
-    check_tensorflow,
     check_torch,
+    loaded_tensorflow,
 )
 
 
@@ -144,7 +144,7 @@ def infer_backend(obj_or_cls: Any) -> Backend:
     # ================================================
     # Tensorflow
     # ================================================
-    tf = check_tensorflow()
+    tf = loaded_tensorflow()
     if tf is not None and (
         isinstance(
             obj_or_cls,

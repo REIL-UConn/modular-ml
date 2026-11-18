@@ -10,10 +10,9 @@ from typing import Any, ClassVar, Generic, TypeVar
 import numpy as np
 
 from modularml.utils.data.formatting import ensure_tuple
-from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
+from modularml.utils.environment.optional_imports import check_torch, loaded_tensorflow
 
 torch = check_torch()
-tf = check_tensorflow()
 
 # Data keys -> eg, (epoch, batch, edge)
 AxisKey = tuple[Hashable, ...]
@@ -401,6 +400,7 @@ class AxisSeries(Generic[T]):
             # Use backend specific concat method
             if (torch is not None) and issubclass(data_type, torch.Tensor):
                 return lambda xs: torch.cat(xs, dim=0)
+            tf = loaded_tensorflow()
             if (tf is not None) and issubclass(data_type, tf.Tensor):
                 return lambda xs: tf.concat(xs, axis=0)
             if issubclass(data_type, np.ndarray):

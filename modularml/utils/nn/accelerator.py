@@ -10,6 +10,7 @@ from modularml.utils.environment.optional_imports import (
     check_tensorflow,
     check_torch,
     ensure_jax,
+    loaded_tensorflow,
 )
 from modularml.utils.logging.warnings import warn
 
@@ -208,8 +209,8 @@ class Accelerator:
             ImportError: If TensorFlow is not installed.
 
         """
-        tf = check_tensorflow()
-        if tf is None:
+        tf = loaded_tensorflow()
+        if tf is None:  # no TensorFlow object can exist yet
             yield
             return
         with tf.device(self.tf_device_str()):

@@ -4,13 +4,12 @@ import numpy as np
 
 from modularml.utils.environment.optional_imports import (
     check_jax,
-    check_tensorflow,
     check_torch,
+    loaded_tensorflow,
 )
 from modularml.utils.nn.backend import Backend
 
 torch = check_torch()
-tf = check_tensorflow()
 
 
 def arrays_equal(a, b, *, rtol=1e-6, atol=1e-8):
@@ -63,6 +62,7 @@ def deep_equal(a, b):
             rtol=1e-6,
             atol=1e-8,
         )
+    tf = loaded_tensorflow()
     if tf is not None and isinstance(a, tf.Tensor) and isinstance(b, tf.Tensor):
         return arrays_equal(a.numpy(), b.numpy(), rtol=1e-6, atol=1e-8)
 
@@ -149,7 +149,7 @@ def tensors_are_equal(a, b, *, tol: float = 1e-9, strict_backend_match: bool = T
         if torch is not None and isinstance(x, torch.Tensor):
             return Backend.TORCH
 
-        tf = check_tensorflow()
+        tf = loaded_tensorflow()
         if tf is not None and isinstance(x, (tf.Tensor, tf.Variable)):
             return Backend.TENSORFLOW
 

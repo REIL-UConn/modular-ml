@@ -67,6 +67,20 @@ def ensure_tensorflow():
     return tf
 
 
+def loaded_tensorflow():
+    """
+    Return tensorflow only if it has already been imported, else None.
+
+    Use this for type checks ("is this a TensorFlow object?"): an object can
+    only be a TensorFlow tensor, model or optimizer if tensorflow is loaded,
+    so the check never has to import it. Importing tensorflow costs seconds
+    and hundreds of MB, and most ModularML programs never use it.
+    """
+    import sys
+
+    return sys.modules.get("tensorflow")
+
+
 @cache
 def check_tensorflow():
     """Attempt to import tensorflow, returning None if missing (result is cached)."""

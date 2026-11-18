@@ -9,8 +9,8 @@ import numpy as np
 
 from modularml.utils.environment.optional_imports import (
     check_jax,
-    check_tensorflow,
     check_torch,
+    loaded_tensorflow,
 )
 
 if TYPE_CHECKING:
@@ -52,7 +52,7 @@ def detach_tensor(t: TensorLike):
 
     """
     torch = check_torch()
-    tf = check_tensorflow()
+    tf = loaded_tensorflow()
 
     # PyTorch
     if (torch is not None) and isinstance(t, torch.Tensor):

@@ -8,8 +8,8 @@ import pandas as pd
 
 from modularml.utils.environment.optional_imports import (
     check_jax,
-    check_tensorflow,
     check_torch,
+    loaded_tensorflow,
 )
 
 ShapeLike = tuple[int, ...] | dict[str, Any]
@@ -101,7 +101,7 @@ def get_shape(x) -> ShapeLike:
 
     """
     torch = check_torch()
-    tf = check_tensorflow()
+    tf = loaded_tensorflow()
 
     # --- None or scalars ---
     if x is None or isinstance(x, (int, float, complex, bool, str, bytes)):

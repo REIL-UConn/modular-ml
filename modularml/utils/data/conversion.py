@@ -12,11 +12,11 @@ from modularml.utils.data.data_format import (
 )
 from modularml.utils.environment.optional_imports import (
     check_jax,
-    check_tensorflow,
     check_torch,
     ensure_jax,
     ensure_tensorflow,
     ensure_torch,
+    loaded_tensorflow,
 )
 from modularml.utils.errors.error_handling import ErrorMode
 from modularml.utils.logging.warnings import warn
@@ -187,7 +187,7 @@ def align_ranks(arr1: Any, arr2: Any, backend: Backend | None = None) -> tuple:
     from math import prod
 
     torch = check_torch()
-    tf = check_tensorflow()
+    tf = loaded_tensorflow()
 
     def _modify_arr(arr, singleton_idxs: list[int], arr_backend: Backend | None = None):
         """
@@ -559,7 +559,7 @@ def convert_dict_to_format(
 
     """
     torch = check_torch()
-    tf = check_tensorflow()
+    tf = loaded_tensorflow()
 
     fmt = normalize_format(fmt)
 
@@ -599,8 +599,7 @@ def convert_dict_to_format(
                 raise ImportError("PyTorch is not installed.")
             return torch.tensor(np_merged, dtype=torch.float32)
         if fmt == DataFormat.TENSORFLOW:
-            if tf is None:
-                raise ImportError("TensorFlow is not installed.")
+            tf = ensure_tensorflow()
             return tf.convert_to_tensor(np_merged, dtype=tf.float32)
 
     # List
@@ -636,7 +635,7 @@ def to_python(obj):
 
     """
     torch = check_torch()
-    tf = check_tensorflow()
+    tf = loaded_tensorflow()
 
     # NumPy
     if isinstance(obj, np.generic):  # np.int64, np.float64, etc.
@@ -761,7 +760,7 @@ def to_numpy(
     torch = check_torch()
     if torch is not None and isinstance(obj, torch.Tensor):
         return obj.detach().cpu().numpy()
-    tf = check_tensorflow()
+    tf = loaded_tensorflow()
     if tf is not None and isinstance(obj, tf.Tensor):
         return obj.numpy()
 
@@ -897,7 +896,6 @@ def convert_to_format(
 
     """
     torch = check_torch()
-    tf = check_tensorflow()
 
     fmt = normalize_format(fmt)
     if isinstance(data, dict):
@@ -920,8 +918,6 @@ def convert_to_format(
         return to_torch(data, errors=errors)
 
     if fmt == DataFormat.TENSORFLOW:
-        if tf is None:
-            raise ImportError("TensorFlow is not installed.")
         return to_tensorflow(data, errors=errors)
 
     msg = f"Unsupported data format: {fmt}"

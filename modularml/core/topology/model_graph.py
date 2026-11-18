@@ -26,7 +26,7 @@ from modularml.core.training.optimizer import Optimizer
 from modularml.utils.data.comparators import deep_equal
 from modularml.utils.data.data_format import DataFormat, get_data_format_for_backend
 from modularml.utils.data.dummy_data import make_dummy_sample_data
-from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
+from modularml.utils.environment.optional_imports import check_torch, ensure_tensorflow
 from modularml.utils.errors.error_handling import ErrorMode
 from modularml.utils.errors.exceptions import (
     BackendNotSupportedError,
@@ -58,7 +58,6 @@ if TYPE_CHECKING:
     )
     from modularml.core.training.applied_loss import AppliedLoss
 
-tf = check_tensorflow()
 torch = check_torch()
 
 logger = get_logger("ModelGraph")
@@ -1784,6 +1783,7 @@ class ModelGraph(Configurable, Stateful, Summarizable):
         opt_info = self.get_optimizer_parameters()
 
         # Forward pass & update ctx records
+        tf = ensure_tensorflow()
         with tf.GradientTape() as tape:
             outputs = self.forward(
                 inputs=ctx.inputs,

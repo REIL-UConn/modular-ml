@@ -6,8 +6,8 @@ import numpy as np
 
 from modularml.utils.environment.optional_imports import (
     check_jax,
-    check_tensorflow,
     check_torch,
+    loaded_tensorflow,
 )
 from modularml.utils.nn.backend import Backend
 
@@ -121,7 +121,7 @@ def infer_data_type(obj) -> str:
 
     """
     torch = check_torch()
-    tf = check_tensorflow()
+    tf = loaded_tensorflow()
 
     # Torch tensor
     if torch is not None and isinstance(obj, torch.Tensor):
