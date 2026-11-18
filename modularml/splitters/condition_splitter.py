@@ -94,24 +94,18 @@ class ConditionSplitter(BaseSplitter):
 
         """
         split_indices: dict[str, np.ndarray] = {}
-        sample_to_subsets: dict[int, list[str]] = {}
+        view_indices = np.asarray(view.indices)
         for sub_label, sub_conds in self.conditions.items():
             # Filter the source FeatureSet directly
             filt_view = view.filter(label=sub_label, conditions=sub_conds)
 
             # Map absolute indices of filtered view to relative indices of given view
-            abs_selected = set(filt_view.indices.tolist())
-            rel_selected = np.array(
-                [i for i, abs_i in enumerate(view.indices) if abs_i in abs_selected],
-                dtype=int,
-            )
+            rel_selected = np.flatnonzero(
+                np.isin(view_indices, np.asarray(filt_view.indices)),
+            ).astype(int)
 
             # Record split indices for this subset
             split_indices[sub_label] = rel_selected
-
-            # Record which subset each sample index appears in (to check overlap)
-            for idx in rel_selected:
-                sample_to_subsets.setdefault(idx, []).append(sub_label)
 
         return self._return_splits(
             view=view,

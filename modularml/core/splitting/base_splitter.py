@@ -6,6 +6,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
+
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
@@ -106,7 +108,8 @@ class BaseSplitter(ABC):
         # Validate indices are within the current view
         n = len(view)
         for lbl, idx in split_indices.items():
-            if any(i < 0 or i >= n for i in idx):
+            arr = np.asarray(idx, dtype=np.int64)
+            if arr.size and (arr.min() < 0 or arr.max() >= n):
                 msg = (
                     f"Splitter `{type(self).__name__}` produced out-of-range indices "
                     f"for subset '{lbl}'. Expected values in [0, {n - 1}]."

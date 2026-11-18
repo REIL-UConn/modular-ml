@@ -250,7 +250,15 @@ class SplitMixin:
                     Boolean mask indicating rows satisfying the condition.
 
             """
-            col_data = np.asarray(col_data, dtype=object)
+            # Keep the native dtype of 1-D numeric, boolean, string and datetime
+            # columns so membership and comparison tests stay vectorized
+            # (`np.isin` on an object array falls back to an O(n * m) loop).
+            # Anything else (array-valued rows, mixed types) is handled as objects.
+            arr = np.asarray(col_data)
+            if arr.ndim == 1 and arr.dtype.kind in "biufUSMm":
+                col_data = arr
+            else:
+                col_data = np.asarray(col_data, dtype=object)
 
             # 1. Callable condition
             if callable(cond):
