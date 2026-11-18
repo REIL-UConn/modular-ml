@@ -704,6 +704,14 @@ def hash_pyarrow_table(table: pa.Table) -> str:
     """
     Compute a deterministic SHA-256 digest for a PyArrow table's contents.
 
+    Description:
+        Hashes the Arrow IPC serialization of the table (column names, types
+        and values), after combining chunks and dropping schema and field
+        metadata, so the digest does not depend on chunking or on metadata
+        that round trips (e.g. through pandas) add or drop. Each column is
+        written as its own stream. This is orders of magnitude faster than
+        hashing Python representations of the values.
+
     Args:
         table (pa.Table): Table to hash.
 
@@ -713,9 +721,11 @@ def hash_pyarrow_table(table: pa.Table) -> str:
     """
     t = table.combine_chunks()
     h = hashlib.sha256()
-
-    for b in t.to_batches():
-        for c in b.columns:
-            h.update(c.to_pylist().__repr__().encode())
-
+    for name, col in zip(t.column_names, t.columns, strict=True):
+        field = pa.field(name, col.type)
+        sink = pa.BufferOutputStream()
+        with pa.ipc.new_stream(sink, pa.schema([field])) as writer:
+            for chunk in col.chunks:
+                writer.write_batch(pa.record_batch([chunk], schema=pa.schema([field])))
+        h.update(sink.getvalue())
     return h.hexdigest()
