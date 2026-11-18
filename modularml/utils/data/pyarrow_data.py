@@ -390,6 +390,29 @@ def make_nested_list_type(base_type: pa.DataType, depth: int) -> pa.DataType:
     return typ
 
 
+def _coerce_object_array(name: str, data: np.ndarray) -> np.ndarray:
+    """
+    Give an object-dtype array the concrete dtype Arrow needs.
+
+    Object arrays are what pandas returns for string columns
+    (``df[col].to_numpy()``, ``Series.astype(str)``). All-string arrays become
+    unicode, all-numeric or all-boolean arrays take the dtype NumPy infers;
+    anything else is rejected with a message naming the column.
+    """
+    flat = data.ravel()
+    if all(isinstance(v, str) for v in flat):
+        return data.astype(str)
+    if all(isinstance(v, (bool, int, float, np.number, np.bool_)) for v in flat):
+        out = np.asarray(flat.tolist()).reshape(data.shape)
+        if out.dtype != object:
+            return out
+    msg = (
+        f"Column '{name}' has dtype object with mixed or non-scalar values; "
+        "convert it to a numeric or string dtype first."
+    )
+    raise TypeError(msg)
+
+
 def numpy_to_sample_schema_column(
     name: str,
     data: np.ndarray,
@@ -434,6 +457,9 @@ def numpy_to_sample_schema_column(
             "Cannot store scalar arrays as tensor columns (need at least 1 dimension)."
         )
         raise ValueError(msg)
+
+    if data.dtype == object:
+        data = _coerce_object_array(name, data)
 
     if dtype is None:
         dtype = pa.from_numpy_dtype(data.dtype)
