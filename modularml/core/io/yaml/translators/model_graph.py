@@ -20,6 +20,15 @@ if TYPE_CHECKING:
 # ================================================
 # Export
 # ================================================
+def _wrapped_estimator(model: Any) -> Any | None:
+    """The user-supplied estimator a wrapper holds, if it has one."""
+    from modularml.core.models.scikit_wrapper import ScikitModelWrapper
+
+    if isinstance(model, ScikitModelWrapper) and hasattr(model.model, "get_params"):
+        return model.model
+    return None
+
+
 def model_graph_to_yaml_dict(graph: ModelGraph) -> dict[str, Any]:
     """
     Export a :class:`ModelGraph` to a YAML-friendly dictionary.
@@ -71,7 +80,18 @@ def _node_to_yaml_dict(node: GraphNode) -> dict[str, Any]:
             else:
                 node_dict["model_class"] = str(model_cls)
 
-        node_dict["model_kwargs"] = yaml_safe_cfg(dict(model_cfg.get("init_args", {})))
+        init_args = dict(model_cfg.get("init_args", {}))
+        estimator = _wrapped_estimator(node._model)
+        if estimator is not None:
+            # Wrappers around a user-supplied estimator (e.g. scikit-learn) are
+            # rebuilt from the estimator's class and hyperparameters; the
+            # wrapper's own init args only describe how it is called.
+            init_args.pop("model_class", None)
+            node_dict["estimator"] = {
+                "class": class_to_path(type(estimator)),
+                "params": yaml_safe_cfg(estimator.get_params(deep=False)),
+            }
+        node_dict["model_kwargs"] = yaml_safe_cfg(init_args)
 
         # Include node-level optimizer if present
         if node._optimizer is not None:
@@ -227,7 +247,15 @@ def _node_from_yaml_dict(
         upstream_ref = ref_from_yaml_dict(cfg.get("upstream"), built_nodes=built_nodes)
 
         model_cls = resolve_class(cfg["model_class"])
-        model = model_cls(**dict(cfg.get("model_kwargs") or {}))
+        model_kwargs = dict(cfg.get("model_kwargs") or {})
+        if cfg.get("estimator"):
+            est_cfg = cfg["estimator"]
+            estimator = resolve_class(est_cfg["class"])(
+                **dict(est_cfg.get("params") or {}),
+            )
+            model = model_cls(estimator, **model_kwargs)
+        else:
+            model = model_cls(**model_kwargs)
 
         node_optimizer = None
         if cfg.get("optimizer"):
