@@ -41,9 +41,16 @@ class ProgressTask:
         self._task_id = None
         self._progress_key: int | None = None
 
+    @property
+    def active(self) -> bool:
+        """Whether this task reports (its own flag and the package setting)."""
+        from modularml.core.settings import settings
+
+        return self.enabled and settings.show_progress
+
     def start(self):
         """Start this task in the Live display."""
-        if not self.enabled or self._started:
+        if not self.active or self._started:
             return
         mgr = ProgressManager.get_active()
         mgr._attach_task(self)
@@ -58,7 +65,7 @@ class ProgressTask:
             **fields: Additional Rich task fields to update.
 
         """
-        if not self.enabled:
+        if not self.active:
             return
         if not self._started:
             self.start()
