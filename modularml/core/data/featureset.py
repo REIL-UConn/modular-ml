@@ -601,6 +601,7 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
         Description:
             Removal keeps the split history replayable, so it is refused when
             it would leave a dangling record:
+
             - every split produced by the same splitter call must be removed
               together (replaying that record would otherwise recreate them);
             - a split that a scaler was fit to, or that another split was
