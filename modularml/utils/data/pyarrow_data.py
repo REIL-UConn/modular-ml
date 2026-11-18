@@ -700,6 +700,21 @@ def build_sample_schema_table(
     return table
 
 
+def _canonical_hash_type(dtype: pa.DataType) -> pa.DataType:
+    """Map large_* Arrow types (and list child names) to one canonical form."""
+    if pa.types.is_large_string(dtype):
+        return pa.string()
+    if pa.types.is_large_binary(dtype):
+        return pa.binary()
+    if pa.types.is_list(dtype) or pa.types.is_large_list(dtype):
+        return pa.list_(pa.field("item", _canonical_hash_type(dtype.value_type)))
+    if pa.types.is_struct(dtype):
+        return pa.struct(
+            [pa.field(f.name, _canonical_hash_type(f.type)) for f in dtype],
+        )
+    return dtype
+
+
 def hash_pyarrow_table(table: pa.Table) -> str:
     """
     Compute a deterministic SHA-256 digest for a PyArrow table's contents.
@@ -708,7 +723,9 @@ def hash_pyarrow_table(table: pa.Table) -> str:
         Hashes the Arrow IPC serialization of the table (column names, types
         and values), after combining chunks and dropping schema and field
         metadata, so the digest does not depend on chunking or on metadata
-        that round trips (e.g. through pandas) add or drop. Each column is
+        that round trips (e.g. through pandas) add or drop. Offset-width
+        variants of a type (``string`` vs ``large_string``, as pandas 3
+        produces) are cast to one canonical type first. Each column is
         written as its own stream. This is orders of magnitude faster than
         hashing Python representations of the values.
 
@@ -722,10 +739,11 @@ def hash_pyarrow_table(table: pa.Table) -> str:
     t = table.combine_chunks()
     h = hashlib.sha256()
     for name, col in zip(t.column_names, t.columns, strict=True):
-        field = pa.field(name, col.type)
+        canon = col.cast(_canonical_hash_type(col.type))
+        field = pa.field(name, canon.type)
         sink = pa.BufferOutputStream()
         with pa.ipc.new_stream(sink, pa.schema([field])) as writer:
-            for chunk in col.chunks:
+            for chunk in canon.chunks:
                 writer.write_batch(pa.record_batch([chunk], schema=pa.schema([field])))
         h.update(sink.getvalue())
     return h.hexdigest()
