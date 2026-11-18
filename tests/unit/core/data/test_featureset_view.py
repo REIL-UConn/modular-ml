@@ -141,7 +141,9 @@ def test_featureset_view_n_samples(basic_view, subset_view):
 
 @pytest.mark.unit
 def test_featureset_view_n_samples_does_not_materialize(
-    subset_view, padded_view, monkeypatch,
+    subset_view,
+    padded_view,
+    monkeypatch,
 ):
     """Counting rows must not take (copy) the underlying table."""
 
